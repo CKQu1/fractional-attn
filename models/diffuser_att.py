@@ -10,8 +10,8 @@ from models.diffuser_utils import *
 from models.utils import *
 from torch import nn
 
-def frac_C(n, k):
-    return reduce(op.mul, np.arange(n, n-k, -1), 1) / reduce(op.mul, range(1, k+1, 1), 1)
+#def frac_C(n, k):
+#    return reduce(op.mul, np.arange(n, n-k, -1), 1) / reduce(op.mul, range(1, k+1, 1), 1)
 
 class DiffuserSelfOutput(nn.Module):
     def __init__(self, config):
@@ -226,20 +226,25 @@ class DiffuserFracSelfAttention(nn.Module):
         g.edata['score']= nn.functional.dropout(g.edata['score'], p=self.dropout, training=self.training)
         # does the original attention need to be kept?
         e = g.edata.pop('score') 
-        # degree matrix (sum across columns)
-        D = torch.sum(e,1)
+        # degree matrix (sum across columns, i.e. row normalization)
+        D = torch.sum(e, 1)
         rho = max(D)
-        assert rho > 1, "rho is not greater than 1"
+        #assert rho > 1, "rho is not greater than 1"
         # matrix B in the manuscript
         B = rho*torch.eye(e.shape[0]) - e
-        # unnormalized fractional Laplacian approximation
-        error = 1e-7    # acceptable error bound
-        ii = 1
         e = torch.eye(B.shape[0])
-        while 1/rho**ii > error:
-            e += frac_C(self.gamma, ii) * (-1/rho)**ii * torch.linalg.matrix_power(B, ii)
-        e *= rho**self.gamma
-        g.edata['score'] = torch.diag(1/torch.diag(e)) @ B
+        # unnormalized fractional Laplacian approximation        
+        #error = 1e-7    # acceptable error bound
+        #while 1/rho**ii > error:
+        #    e += frac_C(self.gamma, ii) * (-1/rho)**ii * torch.linalg.matrix_power(B, ii)
+        N_approx = 10   # the summation for approximating the fractional Laplacian
+        numerator, denominator = 1, 1
+        for ii in range(1, N_approx):
+            numerator *= self.gamma - ii + 1
+            denominator *= ii
+            e += numerator/denominator * (-1/rho)**ii * torch.linalg.matrix_power(B, ii)
+        e *= rho**self.gamma    # unnormalized graph Laplacian
+        g.edata['score'] = torch.eye(B.shape[0]) - torch.diag(1/torch.diag(e)) @ B    # I - normalized graph Laplacian
         g.ndata["h"] = g.ndata["v"]
 
         # fractional attention     

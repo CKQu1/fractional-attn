@@ -1,10 +1,18 @@
-from torch import nn
 import torch
 import math
-from dgl.nn.functional import edge_softmax
 import dgl.function as fn
+import numpy as np
+import operator as operator
+from functools import reduce
+
+from dgl.nn.functional import edge_softmax
 from models.diffuser_utils import *
 from models.utils import *
+from torch import nn
+
+def frac_C(n, k):
+    return reduce(op.mul, np.arange(n, n-k, -1), 1) / reduce(op.mul, range(1, k+1, 1), 1)
+
 class DiffuserSelfOutput(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -214,16 +222,30 @@ class DiffuserFracSelfAttention(nn.Module):
         g.apply_edges(mask_attention_score)   #kq
         e = g.edata.pop('score') 
         g.edata['score'] = edge_softmax(g, e)
-        # should dropbox be applied here (1)?
+        # should dropout be applied here (1)?
         g.edata['score']= nn.functional.dropout(g.edata['score'], p=self.dropout, training=self.training)
-        # diagonalize and transform?      
-        #g.edata['transition_mat'] =  
+        # does the original attention need to be kept?
+        e = g.edata.pop('score') 
+        # degree matrix (sum across columns)
+        D = torch.sum(e,1)
+        rho = max(D)
+        assert rho > 1, "rho is not greater than 1"
+        # matrix B in the manuscript
+        B = rho*torch.eye(e.shape[0]) - e
+        # unnormalized fractional Laplacian approximation
+        error = 1e-7    # acceptable error bound
+        ii = 1
+        e = torch.eye(B.shape[0])
+        while 1/rho**ii > error:
+            e += frac_C(self.gamma, ii) * (-1/rho)**ii * torch.linalg.matrix_power(B, ii)
+        e *= rho**self.gamma
+        g.edata['score'] = torch.diag(1/torch.diag(e)) @ B
         g.ndata["h"] = g.ndata["v"]
 
         # fractional attention     
         # since the walker has scale free jumps, one step is sufficient?
-        total_step = 1
-        for _ in range(total_step):
+        total_steps = 5
+        for _ in range(total_steps):
             g.update_all(fn.u_mul_e('h', 'score', 'm'), fn.sum('m', 'h'))
             #g.apply_nodes(lambda nodes: {'h' : (1.0 - alpha) * nodes.data['h'] + alpha * nodes.data['v']})
             g.apply_nodes(lambda nodes: {'h' : nodes.data['h']})

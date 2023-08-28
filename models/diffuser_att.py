@@ -224,12 +224,15 @@ class DiffuserFracSelfAttention(nn.Module):
         # maximum out-degree (based on degree matrix sum across columns, i.e. row normalization)    
         rho = max(torch.sum(torch.exp(e), 1)).item()  # out degree from true weight/adjacency matrix 
         g.edata['score'] = edge_softmax(g, e)  # out-degree un-normalized Laplacian
-        g.edata['score'] = nn.functional.dropout(g.edata['score'], p=self.dropout, training=self.training)  # should dropout be applied here (1)?
+
+        # replace score with B
+        g.edata['score'] = -nn.functional.dropout(g.edata['score'], p=self.dropout, training=self.training)  # should dropout be applied here (1)?
+        for idx in range(e.shape[0]):
+            g.edata['score'][idx][idx] += rho
         # --- Does the original attention score need to be kept? ---
 
         #assert rho > 1, "rho is not greater than 1"
-        # L = \rho I - B
-        g.edata['score'] = rho*torch.eye(e.shape[0]) - e    # replace score with B        
+        # L = \rho I - B  
         e = torch.eye(e.shape[0])
         # unnormalized fractional Laplacian approximation        
         #error = 1e-7    # pre-defined acceptable error bound
@@ -237,7 +240,7 @@ class DiffuserFracSelfAttention(nn.Module):
         #    e += frac_C(self.gamma, ii) * (-1/rho)**ii * torch.linalg.matrix_power(B, ii)
         N_approx = 10   # the summation for approximating the fractional Laplacian
         numerator, denominator = 1, 1
-        B_power = torch.eye(e.shape[0])
+        B_power = torch.diag(torch.ones(e.shape[0]))
         for ii in range(1, N_approx):
             numerator *= self.gamma - ii + 1
             denominator *= ii

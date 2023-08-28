@@ -218,45 +218,43 @@ class DiffuserFracSelfAttention(nn.Module):
         g.ndata['k'] =  key_vectors.reshape(-1, self.num_heads, self.head_dim) #BN,H,D
         g.ndata['v'] =  value_vectors.reshape(-1, self.num_heads, self.head_dim) #BN,H,D
         
+        # ----- Issue 1: order of dropout -----
+        # option 1: apply nn.functional.dropout to QK
+        # option 2: apply nn.functional.dropout to W
+        # get Laplacian and B matrix
+        # weight matrix (this doesn't incorporate the weights generated from QK)
+        W = g.adj().to_dense().exp()   #BN,BN,H
+        node_num = W.shape[0]
+        # max out-degree from true weight matrix for each of H attn heads (row normalization)  
+        rho = max(torch.sum(torch.exp(W), 1)).item()   #scalar for some reason
+
         g.apply_edges(fn.u_dot_v('k', 'q', 'score'))   #score: [E,H,1]
         g.apply_edges(mask_attention_score)   #kq
-        e = g.edata.pop('score') 
-        # maximum out-degree (based on degree matrix sum across columns, i.e. row normalization)   
-        e = nn.functional.dropout(e, p=self.dropout, training=self.training)  # to guarantee the row-stochasticity and thus the convergence of L^gamma 
-        rho = max(torch.sum(torch.exp(e), 1)).item()  # out degree from true weight/adjacency matrix 
-        # replace attn score with B
-        e = -torch.softmax(e, 1)
-        for idx in range(e.shape[0]):
-            e[idx][idx] += rho
-        g.edata['score'] = e
-        #g.edata['score'] = edge_softmax(g, e)  # out-degree un-normalized Laplacian
-        # --- Does the original attention score need to be kept? ---
+        e = g.edata.pop('score')
+        g.edata['score'] = edge_softmax(g, e)  # out-degree un-normalized Laplacian
+        # L = \rho I - Bmat
+        Bmat = rho * torch.diag(torch.ones(node_num)) - W / W.sum(dim=1).unsqueeze(1)   # is there a better way to compute L?
 
-        #assert rho > 1, "rho is not greater than 1"
-        # L = \rho I - B  
-        e = torch.diag(rho*torch.ones(e.shape[0]))
+        L_gamma = torch.diag(rho*torch.ones(node_num))
         # unnormalized fractional Laplacian approximation        
-        #error = 1e-7    # pre-defined acceptable error bound
-        #while 1/rho**ii > error:
-        #    e += frac_C(self.gamma, ii) * (-1/rho)**ii * torch.linalg.matrix_power(B, ii)
         N_approx = 10   # the summation for approximating the fractional Laplacian
         numerator, denominator = 1, 1
-        B_power = torch.diag(torch.ones(e.shape[0]))
+        Bmat_power = torch.diag(torch.ones(node_num))
         for ii in range(1, N_approx):
             numerator *= self.gamma - ii + 1
             denominator *= ii
             coef = numerator/denominator * (-1/rho)**ii
-            B_power = B_power @ g.edata['score']           
-            e += coef*B_power            
-        e *= rho**self.gamma    # unnormalized graph Laplacian
-        g.edata['score'] = torch.eye(g.edata['B'].shape[0]) - torch.diag(1/torch.diag(e)) @ g.edata['score']    # I - normalized graph Laplacian
+            Bmat_power = Bmat_power @ Bmat        
+            L_gamma += coef*Bmat_power            
+        L_gamma *= rho**self.gamma    # unnormalized graph Laplacian
+        g.edata['L_gamma_normalized'] = torch.eye(node_num) - torch.diag(1/torch.diag(L_gamma)) @ L_gamma    # I - normalized graph Laplacian
         g.ndata["h"] = g.ndata["v"]
 
         # fractional attention     
         # since the walker has scale free jumps, how many steps are sufficient?
         total_steps = 5
         for _ in range(total_steps):
-            g.update_all(fn.u_mul_e('h', 'score', 'm'), fn.sum('m', 'h'))
+            g.update_all(fn.u_mul_e('h', 'L_gamma_normalized', 'm'), fn.sum('m', 'h'))
             #g.apply_nodes(lambda nodes: {'h' : (1.0 - alpha) * nodes.data['h'] + alpha * nodes.data['v']})
             g.apply_nodes(lambda nodes: {'h' : nodes.data['h']})
             # should dropbox be applied here (2)?

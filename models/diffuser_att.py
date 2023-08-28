@@ -226,11 +226,10 @@ class DiffuserFracSelfAttention(nn.Module):
         rho = max(torch.sum(torch.exp(e), 1)).item()  # out degree from true weight/adjacency matrix 
         # replace attn score with B
         e = -torch.softmax(e, 1)
-        for idx in e.shape[0]:
+        for idx in range(e.shape[0]):
             e[idx][idx] += rho
         g.edata['score'] = e
         #g.edata['score'] = edge_softmax(g, e)  # out-degree un-normalized Laplacian
-
         # --- Does the original attention score need to be kept? ---
 
         #assert rho > 1, "rho is not greater than 1"

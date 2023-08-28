@@ -223,16 +223,15 @@ class DiffuserFracSelfAttention(nn.Module):
         e = g.edata.pop('score') 
         g.edata['score'] = edge_softmax(g, e)
         # should dropout be applied here (1)?
-        g.edata['score']= nn.functional.dropout(g.edata['score'], p=self.dropout, training=self.training)
-        # does the original attention need to be kept?
-        e = g.edata.pop('score') 
-        # degree matrix (sum across columns, i.e. row normalization)
-        D = torch.sum(e, 1)
-        rho = max(D)
+        g.edata['score'] = nn.functional.dropout(g.edata['score'], p=self.dropout, training=self.training)
+        # Does the original attention score need to be kept?
+
+        # maximum out-degree (based on degree matrix sum across columns, i.e. row normalization)    
+        rho = max(torch.sum(g.edata['score'], 1)).item() 
         #assert rho > 1, "rho is not greater than 1"
-        # matrix B in the manuscript
-        B = rho*torch.eye(e.shape[0]) - e
-        e = torch.eye(B.shape[0])
+        # L - \rho I - B
+        g.edata['B'] = rho*torch.eye(e.shape[0]) - e        
+        e = torch.eye(e.shape[0])
         # unnormalized fractional Laplacian approximation        
         #error = 1e-7    # acceptable error bound
         #while 1/rho**ii > error:
@@ -242,13 +241,13 @@ class DiffuserFracSelfAttention(nn.Module):
         for ii in range(1, N_approx):
             numerator *= self.gamma - ii + 1
             denominator *= ii
-            e += numerator/denominator * (-1/rho)**ii * torch.linalg.matrix_power(B, ii)
+            e += numerator/denominator * (-1/rho)**ii * torch.linalg.matrix_power(g.edata['B'], ii)
         e *= rho**self.gamma    # unnormalized graph Laplacian
-        g.edata['score'] = torch.eye(B.shape[0]) - torch.diag(1/torch.diag(e)) @ B    # I - normalized graph Laplacian
+        g.edata['score'] = torch.eye(g.edata['B'].shape[0]) - torch.diag(1/torch.diag(e)) @ g.edata['B']    # I - normalized graph Laplacian
         g.ndata["h"] = g.ndata["v"]
 
         # fractional attention     
-        # since the walker has scale free jumps, one step is sufficient?
+        # since the walker has scale free jumps, how many steps are sufficient?
         total_steps = 5
         for _ in range(total_steps):
             g.update_all(fn.u_mul_e('h', 'score', 'm'), fn.sum('m', 'h'))

@@ -221,29 +221,31 @@ class DiffuserFracSelfAttention(nn.Module):
         g.apply_edges(fn.u_dot_v('k', 'q', 'score'))   #score: [E,H,1]
         g.apply_edges(mask_attention_score)   #kq
         e = g.edata.pop('score') 
-        g.edata['score'] = edge_softmax(g, e)
-        # should dropout be applied here (1)?
-        g.edata['score'] = nn.functional.dropout(g.edata['score'], p=self.dropout, training=self.training)
-        # Does the original attention score need to be kept?
-
         # maximum out-degree (based on degree matrix sum across columns, i.e. row normalization)    
-        rho = max(torch.sum(g.edata['score'], 1)).item() 
+        rho = max(torch.sum(torch.exp(e), 1)).item()  # out degree from true weight/adjacency matrix 
+        g.edata['score'] = edge_softmax(g, e)  # out-degree un-normalized Laplacian
+        g.edata['score'] = nn.functional.dropout(g.edata['score'], p=self.dropout, training=self.training)  # should dropout be applied here (1)?
+        # --- Does the original attention score need to be kept? ---
+
         #assert rho > 1, "rho is not greater than 1"
-        # L - \rho I - B
-        g.edata['B'] = rho*torch.eye(e.shape[0]) - e        
+        # L = \rho I - B
+        g.edata['score'] = rho*torch.eye(e.shape[0]) - e    # replace score with B        
         e = torch.eye(e.shape[0])
         # unnormalized fractional Laplacian approximation        
-        #error = 1e-7    # acceptable error bound
+        #error = 1e-7    # pre-defined acceptable error bound
         #while 1/rho**ii > error:
         #    e += frac_C(self.gamma, ii) * (-1/rho)**ii * torch.linalg.matrix_power(B, ii)
         N_approx = 10   # the summation for approximating the fractional Laplacian
         numerator, denominator = 1, 1
+        B_power = torch.eye(e.shape[0])
         for ii in range(1, N_approx):
             numerator *= self.gamma - ii + 1
             denominator *= ii
-            e += numerator/denominator * (-1/rho)**ii * torch.linalg.matrix_power(g.edata['B'], ii)
+            coef = numerator/denominator * (-1/rho)**ii
+            B_power = B_power @ g.edata['score']           
+            e += coef * B_power            
         e *= rho**self.gamma    # unnormalized graph Laplacian
-        g.edata['score'] = torch.eye(g.edata['B'].shape[0]) - torch.diag(1/torch.diag(e)) @ g.edata['B']    # I - normalized graph Laplacian
+        g.edata['score'] = torch.eye(g.edata['B'].shape[0]) - torch.diag(1/torch.diag(e)) @ g.edata['score']    # I - normalized graph Laplacian
         g.ndata["h"] = g.ndata["v"]
 
         # fractional attention     

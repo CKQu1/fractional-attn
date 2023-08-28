@@ -7,6 +7,7 @@
 #PBS -e PBSout/
 #PBS -o PBSout/
 
+module load singularity
 PBS_O_WORKDIR="/project/frac_attn/fractional-attn"
 cd ${PBS_O_WORKDIR}
 singularity exec ../built_containers/FaContainer.sif python train_classification_imdb.py

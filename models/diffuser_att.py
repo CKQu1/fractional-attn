@@ -221,19 +221,21 @@ class DiffuserFracSelfAttention(nn.Module):
         g.apply_edges(fn.u_dot_v('k', 'q', 'score'))   #score: [E,H,1]
         g.apply_edges(mask_attention_score)   #kq
         e = g.edata.pop('score') 
-        # maximum out-degree (based on degree matrix sum across columns, i.e. row normalization)    
+        # maximum out-degree (based on degree matrix sum across columns, i.e. row normalization)   
+        e = nn.functional.dropout(e, p=self.dropout, training=self.training)  # to guarantee the row-stochasticity and thus the convergence of L^gamma 
         rho = max(torch.sum(torch.exp(e), 1)).item()  # out degree from true weight/adjacency matrix 
-        g.edata['score'] = edge_softmax(g, e)  # out-degree un-normalized Laplacian
+        # replace attn score with B
+        e = -torch.softmax(e, 1)
+        for idx in e.shape[0]:
+            e[idx][idx] += rho
+        g.edata['score'] = e
+        #g.edata['score'] = edge_softmax(g, e)  # out-degree un-normalized Laplacian
 
-        # replace score with B
-        g.edata['score'] = -nn.functional.dropout(g.edata['score'], p=self.dropout, training=self.training)  # should dropout be applied here (1)?
-        for idx in range(e.shape[0]):
-            g.edata['score'][idx][idx] += rho
         # --- Does the original attention score need to be kept? ---
 
         #assert rho > 1, "rho is not greater than 1"
         # L = \rho I - B  
-        e = torch.eye(e.shape[0])
+        e = torch.diag(rho*torch.ones(e.shape[0]))
         # unnormalized fractional Laplacian approximation        
         #error = 1e-7    # pre-defined acceptable error bound
         #while 1/rho**ii > error:
@@ -246,7 +248,7 @@ class DiffuserFracSelfAttention(nn.Module):
             denominator *= ii
             coef = numerator/denominator * (-1/rho)**ii
             B_power = B_power @ g.edata['score']           
-            e += coef * B_power            
+            e += coef*B_power            
         e *= rho**self.gamma    # unnormalized graph Laplacian
         g.edata['score'] = torch.eye(g.edata['B'].shape[0]) - torch.diag(1/torch.diag(e)) @ g.edata['score']    # I - normalized graph Laplacian
         g.ndata["h"] = g.ndata["v"]

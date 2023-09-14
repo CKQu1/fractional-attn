@@ -247,7 +247,7 @@ class DiffuserFracSelfAttention(nn.Module):
             Bmat_power = Bmat_power @ Bmat        
             L_gamma += coef*Bmat_power            
         L_gamma *= rho**self.gamma    # unnormalized graph Laplacian
-        g.edata['L_gamma_normalized'] = torch.eye(node_num) - torch.diag(1/torch.diag(L_gamma)) @ L_gamma    # I - normalized graph Laplacian
+        g.ndata['L_gamma_normalized'] = torch.eye(node_num) - torch.diag(1/torch.diag(L_gamma)) @ L_gamma    # I - normalized graph Laplacian
         g.ndata["h"] = g.ndata["v"]
 
         # fractional attention     

@@ -1,6 +1,9 @@
 import dgl
 import torch
 import numpy as np
+import os
+
+from os.path import join
 from sklearn.metrics import f1_score
 from transformers import TrainingArguments, DataCollatorWithPadding
 from transformers import RobertaTokenizer
@@ -29,16 +32,27 @@ def compute_metrics(eval_pred):
 metric_acc = load_metric('./metrics/accuracy')
 metric_f1 = load_metric('./metrics/f1')
 
-imdb = load_dataset("imdb")
+# create cache for dataset
+dataset_dir = join(os.getcwd(), "DATASETS")
+if not os.path.isdir(dataset_dir): os.makedirs(dataset_dir)
+
+imdb = load_dataset("imdb", cache_dir=dataset_dir)
 # tokenizer = RobertaTokenizer.from_pretrained("./roberta-tokenizer", max_length = 1024)
 tokenizer = RobertaTokenizer(tokenizer_file = "./roberta-tokenizer/tokenizer.json",
                              vocab_file     = "./roberta-tokenizer/vocab.json",
                              merges_file    = "./roberta-tokenizer/merges.txt",
                              max_length     = 1024)
 
-tokenized_imdb = imdb.map(preprocess_function, batched=True)
-tokenized_imdb = tokenized_imdb.map(remove_columns=["text"])
-# tokenized_imdb = load_from_disk("/home")
+# save tokenized dataset
+dataset_dir = join(os.getcwd(), "DATASETS", "tokenized_imdb")
+if not os.path.isdir(dataset_dir): 
+    tokenized_imdb = imdb.map(preprocess_function, batched=True)
+    tokenized_imdb = tokenized_imdb.map(remove_columns=["text"])
+
+    os.makedirs(dataset_dir)
+    tokenized_imdb.save_to_disk(dataset_dir)
+else:
+    tokenized_imdb = load_from_disk(dataset_dir)
 
 data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
 
@@ -74,14 +88,16 @@ training_args = TrainingArguments(
     learning_rate = 3e-5,
     per_device_train_batch_size = 2,
     per_device_eval_batch_size = 2,
-    num_train_epochs = 1,
+    #num_train_epochs = 1,
+    num_train_epochs = 0.01,
     weight_decay = 0.01,
     evaluation_strategy = "steps",
     eval_steps = 2,
     logging_steps = 500,
     save_steps = 500,
     seed = 42,
-    warmup_steps = 50,
+    #warmup_steps = 50,
+    warmup_steps = 2,
     gradient_accumulation_steps = 8,
     prediction_loss_only=True
 )

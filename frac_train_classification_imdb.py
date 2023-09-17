@@ -1,6 +1,11 @@
-import dgl
+import os
+import uuid
+import sys
 import torch
-import numpy as np
+sys.path.append(f'{os.getcwd()}')
+from path_setup import droot
+
+from os.path import join
 from sklearn.metrics import f1_score
 from transformers import TrainingArguments, DataCollatorWithPadding
 from transformers import RobertaTokenizer
@@ -29,16 +34,28 @@ def compute_metrics(eval_pred):
 metric_acc = load_metric('./metrics/accuracy')
 metric_f1 = load_metric('./metrics/f1')
 
-imdb = load_dataset("imdb")
+# create cache for dataset
+dataset_dir = join(os.getcwd(), droot, "DATASETS")
+if not os.path.isdir(dataset_dir): os.makedirs(dataset_dir)
+
+imdb = load_dataset("imdb", cache_dir=dataset_dir)
 # tokenizer = RobertaTokenizer.from_pretrained("./roberta-tokenizer", max_length = 1024)
 tokenizer = RobertaTokenizer(tokenizer_file = "./roberta-tokenizer/tokenizer.json",
                              vocab_file     = "./roberta-tokenizer/vocab.json",
                              merges_file    = "./roberta-tokenizer/merges.txt",
                              max_length     = 1024)
 
-tokenized_imdb = imdb.map(preprocess_function, batched=True)
-tokenized_imdb = tokenized_imdb.map(remove_columns=["text"])
-# tokenized_imdb = load_from_disk("/home")
+# save tokenized dataset
+dataset_dir = join(os.getcwd(), droot, "DATASETS", "tokenized_imdb")
+if not os.path.isdir(dataset_dir): 
+    print("Downloading data!")
+    tokenized_imdb = imdb.map(preprocess_function, batched=True)
+    tokenized_imdb = tokenized_imdb.map(remove_columns=["text"])
+    os.makedirs(dataset_dir)
+    tokenized_imdb.save_to_disk(dataset_dir)
+else:
+    print("Data downloaded, loading from local now!")
+    tokenized_imdb = load_from_disk(dataset_dir)
 
 data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
 
@@ -51,19 +68,24 @@ attn_setup = {"with_frac":True, "gamma":0.5}
 #model =  DiffuserForSequenceClassification(config = config).cuda()
 model =  DiffuserForSequenceClassification(config, **attn_setup)
 
+uuid_ = str(uuid.uuid4())[:8]
 training_args = TrainingArguments(
-    output_dir = "./save_imdb",
+    output_dir = join("save_imdb",uuid_),
     learning_rate = 3e-5,
     per_device_train_batch_size = 2,
     per_device_eval_batch_size = 2,
-    num_train_epochs = 1,
+    #num_train_epochs = 1,
+    num_train_epochs = 0.0025,
     weight_decay = 0.01,
     evaluation_strategy = "steps",
     eval_steps = 2,
-    logging_steps = 500,
-    save_steps = 500,
+    #logging_steps = 500,
+    #save_steps = 500,
+    logging_steps = 0.2,
+    save_steps = 0.2,    
     seed = 42,
-    warmup_steps = 50,
+    #warmup_steps = 50,
+    warmup_steps = 2,
     gradient_accumulation_steps = 8,
     prediction_loss_only=True
 )
@@ -88,3 +110,6 @@ trainer = graphTrainer(
 )
 
 trainer.train()
+
+# save final model
+trainer.save_model()

@@ -69,27 +69,8 @@ with_frac = False
 attn_setup = {"with_frac":with_frac}
 model =  DiffuserForSequenceClassification(config, **attn_setup).to(dev)
 
-"""
-training_args = TrainingArguments(
-    output_dir = "./save_imdb",
-    learning_rate = 3e-5,
-    per_device_train_batch_size = 2,
-    per_device_eval_batch_size = 2,
-    num_train_epochs = 20,
-    weight_decay = 0.01,
-    evaluation_strategy = "steps",
-    eval_steps = 2000,
-    logging_steps = 500,
-    save_steps = 500,
-    seed = 42,
-    warmup_steps = 200,
-    gradient_accumulation_steps = 8,
-    prediction_loss_only=True
-)
-"""
-
 uuid_ = str(uuid.uuid4())[:8]
-model_dir = join("save_imdb_test",uuid_)
+model_dir = join("save_imdb_diffuser", uuid_)
 training_args = TrainingArguments(
     output_dir = model_dir,
     learning_rate = 3e-5,
@@ -99,11 +80,11 @@ training_args = TrainingArguments(
     num_train_epochs = 0.0025,
     weight_decay = 0.01,
     evaluation_strategy = "steps",
-    eval_steps = 2,
+    eval_steps = 0.5,
     #logging_steps = 500,
     #save_steps = 500,
-    logging_steps = 0.2,
-    save_steps = 0.2,    
+    logging_steps = 1,
+    save_steps = 1,    
     seed = 42,
     #warmup_steps = 50,
     warmup_steps = 2,
@@ -141,7 +122,11 @@ model_settings['train_secs'] = train_secs
 for key_name in model_settings.keys():
     model_settings[key_name] = [model_settings[key_name]]
 df = pd.DataFrame(model_settings)
-df.to_csv(model_dir)
+df.to_csv(join(model_dir, "model_settings.csv"))
+
+# get performance history
+df_model = pd.DataFrame(trainer.state.log_history)
+df_model.to_csv(join(model_dir, "model_performance.csv"))
 
 # save final model
 trainer.save_model()

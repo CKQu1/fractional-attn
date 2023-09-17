@@ -194,6 +194,9 @@ class DiffuserFracSelfAttention(nn.Module):
         is_global_attn=None,
         output_attentions=False,
     ):
+
+
+
         hidden_states = hidden_states.transpose(0, 1) #(N,B,HD)
         # attention_mask (B,N)
         # project hidden states
@@ -241,7 +244,7 @@ class DiffuserFracSelfAttention(nn.Module):
         # somehow all nodes are self-connected, this needs to be double-checked
         edge_shape = list(g.edata['score'].shape)
         num_nodes, num_edges = g.num_nodes(), g.num_edges()
-        Bmat = torch.zeros([num_nodes, num_nodes] + edge_shape[1:])
+        Bmat = torch.zeros([num_nodes, num_nodes] + edge_shape[1:]) # requires_grad=True
         
         """
         # get weight adjacency matrix
@@ -252,38 +255,42 @@ class DiffuserFracSelfAttention(nn.Module):
         quit()    
         """
         
-        diag_count = 0
-        src, dst = g.edges()    
-        for eidx in range(num_edges):
-            src_node, dst_node = src[eidx], dst[eidx]
-            if src_node == dst_node:
-                Bmat[src_node, dst_node,:] = g.edata['score'][eidx] - rhos - out_degree[diag_count]
-                diag_count += 1
-            else:
-                Bmat[src_node, dst_node,:] = g.edata['score'][eidx]
+        with torch.no_grad():
+            diag_count = 0
+            src, dst = g.edges()    
+            for eidx in range(num_edges):
+                src_node, dst_node = src[eidx], dst[eidx]
+                if src_node == dst_node:
+                    Bmat[src_node, dst_node,:] = g.edata['score'][eidx].clone() - rhos.clone() - out_degree[diag_count].clone()
+                    diag_count += 1
+                else:
+                    Bmat[src_node, dst_node,:] = g.edata['score'][eidx].clone()
             
         #N_approx = 10   # probably as large as it can be, any larger will result in numerical degeneration
         N_approx = 6
         L_gamma = torch.eye(num_nodes).reshape([num_nodes,num_nodes] + [1]*(len(edge_shape) - 1))
         L_gamma = L_gamma.repeat([1,1] +  edge_shape[1:])
+        L_gamma.requires_grad = True
 
-        Bmat_power = Bmat
-        numerator, denominator = 1, 1
-        for ii in range(1, N_approx+1):
-            numerator *= (self.gamma - ii + 1) * (-1)
-            denominator *= ii * rhos
-            coef = numerator/denominator        
-            for head_idx in range(edge_shape[1]):
-                L_gamma = L_gamma.clone() + coef * Bmat_power
-                Bmat_power[:,:,head_idx] = (Bmat_power[:,:,head_idx].clone().squeeze() @ Bmat[:,:,head_idx].squeeze()).unsqueeze(Bmat.ndim - 2)       
+        Bmat_power = Bmat.clone()
+        with torch.no_grad():
+            numerator, denominator = 1, 1
+            for ii in range(1, N_approx+1):
+                numerator *= (self.gamma - ii + 1) * (-1)
+                denominator *= ii * rhos
+                coef = numerator/denominator        
+                for head_idx in range(edge_shape[1]):
+                    L_gamma = L_gamma.clone() + coef * Bmat_power
+                    Bmat_power[:,:,head_idx] = (Bmat_power[:,:,head_idx].clone().squeeze() @ Bmat[:,:,head_idx].squeeze()).unsqueeze(Bmat.ndim - 2)       
 
-        L_gamma *= rhos**self.gamma           
+            L_gamma *= rhos**self.gamma           
         # normalized version
-        L_gamma_normalized = L_gamma
-        for head_idx in range(edge_shape[1]):
-            L_gamma_normalized[:,:,head_idx] = (torch.diag( 1/torch.diag(L_gamma_normalized[:,:,head_idx].clone().squeeze()) ) @ L_gamma_normalized[:,:,head_idx].clone().squeeze()).unsqueeze(Bmat.ndim - 2)
-        
-        # applying dropout in a similar fashion as 
+        L_gamma_normalized = L_gamma.clone()
+        with torch.no_grad():
+            for head_idx in range(edge_shape[1]):
+                L_gamma_normalized[:,:,head_idx] = (torch.diag( 1/torch.diag(L_gamma_normalized[:,:,head_idx].clone().squeeze()) ) @ L_gamma_normalized[:,:,head_idx].clone().squeeze()).unsqueeze(Bmat.ndim - 2)
+            
+        # applying dropout in a similar fashion as DiffuserSelfAttention()
         L_gamma_normalized = nn.functional.dropout(L_gamma_normalized, p=self.dropout, training=self.training)
 
         # for checking whether the normalized version hsa rows summed up to zero

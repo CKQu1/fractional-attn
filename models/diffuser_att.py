@@ -5,7 +5,9 @@ import numpy as np
 import operator as operator
 from functools import reduce
 
+from dgl import reverse
 from dgl.nn.functional import edge_softmax
+from dgl.ops import copy_e_sum
 from models.diffuser_utils import *
 from models.utils import *
 from torch import nn
@@ -224,15 +226,16 @@ class DiffuserFracSelfAttention(nn.Module):
         # get Laplacian and B matrix
         # weight matrix (this doesn't incorporate the weights generated from QK)
 
+        g.apply_edges(fn.u_dot_v('k', 'q', 'score'))
         g.edata['score'] = g.edata['score'].exp()   # exponential taken here, representing the true edge weight which are positive
         g.apply_edges(mask_attention_score)   #kq
         
         #g.edata['out_deg'] = g.edata['weight']
         #g.update_all(fn.copy_e('out_deg', 'm'), fn.sum('m', 'out_deg'))
 
-        #in_degree = ops.copy_e_sum(g, g.edata['score'])    # in deg
-        rev = dgl.reverse(g)
-        out_degree = ops.copy_e_sum(rev, g.edata['score'])  # out deg (verified!)
+        #in_degree = copy_e_sum(g, g.edata['score'])    # in deg
+        rev = reverse(g)
+        out_degree = copy_e_sum(rev, g.edata['score'])  # out deg (verified!)
         rhos = torch.max(out_degree, axis=0).values
 
         # somehow all nodes are self-connected, this needs to be double-checked
@@ -258,9 +261,6 @@ class DiffuserFracSelfAttention(nn.Module):
                 diag_count += 1
             else:
                 Bmat[src_node, dst_node,:] = g.edata['score'][eidx]             
-
-        t1 = time()
-        print(f"Bmat computed in {t1 - t0}s!")
             
         #N_approx = 10   # probably as large as it can be, any larger will result in numerical degeneration
         N_approx = 8
@@ -280,11 +280,8 @@ class DiffuserFracSelfAttention(nn.Module):
         L_gamma *= rhos**self.gamma           
         # normalized version
         L_gamma_normalized = L_gamma
-        for head_idx in tqdm(range(edge_shape[1])):
+        for head_idx in range(edge_shape[1]):
             L_gamma_normalized[:,:,head_idx] = (torch.diag( 1/torch.diag(L_gamma_normalized[:,:,head_idx].squeeze()) ) @ L_gamma_normalized[:,:,head_idx].squeeze()).unsqueeze(Bmat.ndim - 2)
-
-        t2 = time()
-        print(f"L_gamma_normalized computed in {t2 - t1}s!")
         
         # for checking whether the normalized version hsa rows summed up to zero
         """
@@ -295,8 +292,8 @@ class DiffuserFracSelfAttention(nn.Module):
         # realization of discrete time fractional RW
         RW_steps = 5
         attn_output = g.ndata.pop("v") #BN,H,D
-        for _ in tqdm(range(RW_steps)):
-            for head_idx in tqdm(range(edge_shape[1])):        
+        for _ in range(RW_steps):
+            for head_idx in range(edge_shape[1]):        
                 attn_output[:,head_idx] = L_gamma_normalized[:,:,head_idx].squeeze() @ attn_output[:,head_idx]
 
         attn_output = attn_output.reshape(batch_size, seq_len,  self.num_heads, self.head_dim) # B,N,H,D        

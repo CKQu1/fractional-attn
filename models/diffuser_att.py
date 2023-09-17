@@ -257,13 +257,13 @@ class DiffuserFracSelfAttention(nn.Module):
         for eidx in range(num_edges):
             src_node, dst_node = src[eidx], dst[eidx]
             if src_node == dst_node:
-                Bmat[src_node, dst_node,:] = g.edata['score'][eidx] - rhos - out_degree[diag_count]
+                Bmat[src_node, dst_node,:] = g.edata['score'][eidx].clone() - rhos.clone() - out_degree[diag_count].clone()
                 diag_count += 1
             else:
-                Bmat[src_node, dst_node,:] = g.edata['score'][eidx]             
+                Bmat[src_node, dst_node,:] = g.edata['score'][eidx].clone()
             
         #N_approx = 10   # probably as large as it can be, any larger will result in numerical degeneration
-        N_approx = 8
+        N_approx = 6
         Bmat_power = torch.eye(num_nodes).reshape([num_nodes,num_nodes] + [1]*(len(edge_shape) - 1))
         Bmat_power = Bmat_power.repeat([1,1] +  edge_shape[1:])
 
@@ -274,15 +274,18 @@ class DiffuserFracSelfAttention(nn.Module):
             denominator *= ii * rhos
             coef = numerator/denominator        
             for head_idx in range(edge_shape[1]):
-                Bmat_power[:,:,head_idx] = (Bmat_power[:,:,head_idx].squeeze() @ Bmat[:,:,head_idx].squeeze()).unsqueeze(Bmat.ndim - 2)
-                L_gamma += coef * Bmat_power      
+                Bmat_power[:,:,head_idx] = (Bmat_power[:,:,head_idx].squeeze().clone() @ Bmat[:,:,head_idx].squeeze().clone()).unsqueeze(Bmat.ndim - 2)
+                L_gamma += coef * Bmat_power.clone()      
 
         L_gamma *= rhos**self.gamma           
         # normalized version
         L_gamma_normalized = L_gamma
         for head_idx in range(edge_shape[1]):
-            L_gamma_normalized[:,:,head_idx] = (torch.diag( 1/torch.diag(L_gamma_normalized[:,:,head_idx].squeeze()) ) @ L_gamma_normalized[:,:,head_idx].squeeze()).unsqueeze(Bmat.ndim - 2)
+            L_gamma_normalized[:,:,head_idx] = (torch.diag( 1/torch.diag(L_gamma_normalized[:,:,head_idx].squeeze().clone()) ) @ L_gamma_normalized[:,:,head_idx].squeeze().clone()).unsqueeze(Bmat.ndim - 2)
         
+        # applying dropout in a similar fashion as 
+        L_gamma_normalized = nn.functional.dropout(L_gamma_normalized, p=self.dropout, training=self.training)
+
         # for checking whether the normalized version hsa rows summed up to zero
         """
         for head_idx in range(edge_shape[1]):
@@ -291,10 +294,12 @@ class DiffuserFracSelfAttention(nn.Module):
 
         # realization of discrete time fractional RW
         RW_steps = 5
-        attn_output = g.ndata.pop("v") #BN,H,D
+        attn_output = g.ndata['v'] #BN,H,D
         for _ in range(RW_steps):
             for head_idx in range(edge_shape[1]):        
-                attn_output[:,head_idx] = L_gamma_normalized[:,:,head_idx].squeeze() @ attn_output[:,head_idx]
+                attn_output[:,head_idx] = L_gamma_normalized[:,:,head_idx].squeeze().clone() @ attn_output[:,head_idx].clone()
+                # add dropout for training
+                attn_output = nn.functional.dropout(attn_output, p=self.dropout, training=self.training)
 
         attn_output = attn_output.reshape(batch_size, seq_len,  self.num_heads, self.head_dim) # B,N,H,D        
         assert attn_output.size() == (batch_size, seq_len, self.num_heads, self.head_dim), "Unexpected size"

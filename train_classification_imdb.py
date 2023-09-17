@@ -1,7 +1,9 @@
 import os
+import pandas as pd
 import uuid
 import sys
 import torch
+from time import time
 sys.path.append(f'{os.getcwd()}')
 from path_setup import droot
 
@@ -64,8 +66,8 @@ config = DiffuserConfig.from_json_file("./models/config_simple.json")
 config.num_labels = 2
 with_frac = False
 
-#model =  DiffuserForSequenceClassification(config = config).cuda()
-model =  DiffuserForSequenceClassification(config=config, with_frac=with_frac).to(dev)
+attn_setup = {"with_frac":with_frac}
+model =  DiffuserForSequenceClassification(config, **attn_setup).to(dev)
 
 """
 training_args = TrainingArguments(
@@ -87,8 +89,9 @@ training_args = TrainingArguments(
 """
 
 uuid_ = str(uuid.uuid4())[:8]
+model_dir = join("save_imdb_test",uuid_)
 training_args = TrainingArguments(
-    output_dir = join("save_imdb",uuid_),
+    output_dir = model_dir,
     learning_rate = 3e-5,
     per_device_train_batch_size = 2,
     per_device_eval_batch_size = 2,
@@ -127,7 +130,18 @@ trainer = graphTrainer(
     compute_metrics = compute_metrics
 )
 
+
+t0_train = time()
 trainer.train()
+
+train_secs = time() - t0_train
+
+model_settings = attn_setup
+model_settings['train_secs'] = train_secs
+for key_name in model_settings.keys():
+    model_settings[key_name] = [model_settings[key_name]]
+df = pd.DataFrame(model_settings)
+df.to_csv(model_dir)
 
 # save final model
 trainer.save_model()

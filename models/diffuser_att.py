@@ -223,44 +223,82 @@ class DiffuserFracSelfAttention(nn.Module):
         # option 2: apply nn.functional.dropout to W
         # get Laplacian and B matrix
         # weight matrix (this doesn't incorporate the weights generated from QK)
-        W = g.adj().to_dense().exp()   #BN,BN,H
-        node_num = W.shape[0]
-        # max out-degree from true weight matrix for each of H attn heads (row normalization)  
-        rho = max(torch.sum(torch.exp(W), 1)).item()   #scalar for some reason
 
-        g.apply_edges(fn.u_dot_v('k', 'q', 'score'))   #score: [E,H,1]
+        g.edata['score'] = g.edata['score'].exp()   # exponential taken here, representing the true edge weight which are positive
         g.apply_edges(mask_attention_score)   #kq
-        e = g.edata.pop('score')
-        g.edata['score'] = edge_softmax(g, e)  # out-degree un-normalized Laplacian
-        # L = \rho I - Bmat
-        Bmat = rho * torch.diag(torch.ones(node_num)) - W / W.sum(dim=1).unsqueeze(1)   # is there a better way to compute L?
+        
+        #g.edata['out_deg'] = g.edata['weight']
+        #g.update_all(fn.copy_e('out_deg', 'm'), fn.sum('m', 'out_deg'))
 
-        L_gamma = torch.diag(rho*torch.ones(node_num))
-        # unnormalized fractional Laplacian approximation        
-        N_approx = 10   # the summation for approximating the fractional Laplacian
+        #in_degree = ops.copy_e_sum(g, g.edata['score'])    # in deg
+        rev = dgl.reverse(g)
+        out_degree = ops.copy_e_sum(rev, g.edata['score'])  # out deg (verified!)
+        rhos = torch.max(out_degree, axis=0).values
+
+        # somehow all nodes are self-connected, this needs to be double-checked
+        edge_shape = list(g.edata['score'].shape)
+        num_nodes, num_edges = g.num_nodes(), g.num_edges()
+        Bmat = torch.zeros([num_nodes, num_nodes] + edge_shape[1:])
+        
+        """
+        # get weight adjacency matrix
+        src, dst = g.edges()    
+        for eidx in range(num_edges):
+            src_node, dst_node = src[eidx], dst[eidx]
+            Bmat[src_node, dst_node,:] = g.edata['score'][eidx]          
+        quit()    
+        """
+        
+        diag_count = 0
+        src, dst = g.edges()    
+        for eidx in range(num_edges):
+            src_node, dst_node = src[eidx], dst[eidx]
+            if src_node == dst_node:
+                Bmat[src_node, dst_node,:] = g.edata['score'][eidx] - rhos - out_degree[diag_count]
+                diag_count += 1
+            else:
+                Bmat[src_node, dst_node,:] = g.edata['score'][eidx]             
+
+        t1 = time()
+        print(f"Bmat computed in {t1 - t0}s!")
+            
+        #N_approx = 10   # probably as large as it can be, any larger will result in numerical degeneration
+        N_approx = 8
+        Bmat_power = torch.eye(num_nodes).reshape([num_nodes,num_nodes] + [1]*(len(edge_shape) - 1))
+        Bmat_power = Bmat_power.repeat([1,1] +  edge_shape[1:])
+
+        L_gamma = Bmat_power
         numerator, denominator = 1, 1
-        Bmat_power = torch.diag(torch.ones(node_num))
-        for ii in range(1, N_approx):
-            numerator *= self.gamma - ii + 1
-            denominator *= ii
-            coef = numerator/denominator * (-1/rho)**ii
-            Bmat_power = Bmat_power @ Bmat        
-            L_gamma += coef*Bmat_power            
-        L_gamma *= rho**self.gamma    # unnormalized graph Laplacian
-        g.ndata['L_gamma_normalized'] = torch.eye(node_num) - torch.diag(1/torch.diag(L_gamma)) @ L_gamma    # I - normalized graph Laplacian
-        g.ndata["h"] = g.ndata["v"]
+        for ii in range(1, N_approx+1):
+            numerator *= (self.gamma - ii + 1) * (-1)
+            denominator *= ii * rhos
+            coef = numerator/denominator        
+            for head_idx in range(edge_shape[1]):
+                Bmat_power[:,:,head_idx] = (Bmat_power[:,:,head_idx].squeeze() @ Bmat[:,:,head_idx].squeeze()).unsqueeze(Bmat.ndim - 2)
+                L_gamma += coef * Bmat_power      
 
-        # fractional attention     
-        # since the walker has scale free jumps, how many steps are sufficient?
-        total_steps = 5
-        for _ in range(total_steps):
-            g.update_all(fn.u_mul_e('h', 'L_gamma_normalized', 'm'), fn.sum('m', 'h'))
-            #g.apply_nodes(lambda nodes: {'h' : (1.0 - alpha) * nodes.data['h'] + alpha * nodes.data['v']})
-            g.apply_nodes(lambda nodes: {'h' : nodes.data['h']})
-            # should dropbox be applied here (2)?
-            g.ndata['h'] = nn.functional.dropout(g.ndata['h'], p=self.dropout, training=self.training)
+        L_gamma *= rhos**self.gamma           
+        # normalized version
+        L_gamma_normalized = L_gamma
+        for head_idx in tqdm(range(edge_shape[1])):
+            L_gamma_normalized[:,:,head_idx] = (torch.diag( 1/torch.diag(L_gamma_normalized[:,:,head_idx].squeeze()) ) @ L_gamma_normalized[:,:,head_idx].squeeze()).unsqueeze(Bmat.ndim - 2)
 
-        attn_output = g.ndata['h'] #BN,H,D
+        t2 = time()
+        print(f"L_gamma_normalized computed in {t2 - t1}s!")
+        
+        # for checking whether the normalized version hsa rows summed up to zero
+        """
+        for head_idx in range(edge_shape[1]):
+            print(L_gamma_normalized[:,:,head_idx].sum(1))
+        """
+
+        # realization of discrete time fractional RW
+        RW_steps = 5
+        attn_output = g.ndata.pop("v") #BN,H,D
+        for _ in tqdm(range(RW_steps)):
+            for head_idx in tqdm(range(edge_shape[1])):        
+                attn_output[:,head_idx] = L_gamma_normalized[:,:,head_idx].squeeze() @ attn_output[:,head_idx]
+
         attn_output = attn_output.reshape(batch_size, seq_len,  self.num_heads, self.head_dim) # B,N,H,D        
         assert attn_output.size() == (batch_size, seq_len, self.num_heads, self.head_dim), "Unexpected size"
         attn_output = attn_output.transpose(0, 1).reshape(seq_len, batch_size, embed_dim).contiguous()

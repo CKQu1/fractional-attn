@@ -1,7 +1,9 @@
-import dgl
-import torch
-import numpy as np
 import os
+import uuid
+import sys
+import torch
+sys.path.append(f'{os.getcwd()}')
+from path_setup import droot
 
 from os.path import join
 from sklearn.metrics import f1_score
@@ -33,7 +35,7 @@ metric_acc = load_metric('./metrics/accuracy')
 metric_f1 = load_metric('./metrics/f1')
 
 # create cache for dataset
-dataset_dir = join(os.getcwd(), "DATASETS")
+dataset_dir = join(os.getcwd(), droot, "DATASETS")
 if not os.path.isdir(dataset_dir): os.makedirs(dataset_dir)
 
 imdb = load_dataset("imdb", cache_dir=dataset_dir)
@@ -44,14 +46,15 @@ tokenizer = RobertaTokenizer(tokenizer_file = "./roberta-tokenizer/tokenizer.jso
                              max_length     = 1024)
 
 # save tokenized dataset
-dataset_dir = join(os.getcwd(), "DATASETS", "tokenized_imdb")
+dataset_dir = join(os.getcwd(), droot, "DATASETS", "tokenized_imdb")
 if not os.path.isdir(dataset_dir): 
+    print("Downloading data!")
     tokenized_imdb = imdb.map(preprocess_function, batched=True)
     tokenized_imdb = tokenized_imdb.map(remove_columns=["text"])
-
     os.makedirs(dataset_dir)
     tokenized_imdb.save_to_disk(dataset_dir)
 else:
+    print("Data downloaded, loading from local now!")
     tokenized_imdb = load_from_disk(dataset_dir)
 
 data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
@@ -83,18 +86,21 @@ training_args = TrainingArguments(
 )
 """
 
+uuid_ = str(uuid.uuid4())[:8]
 training_args = TrainingArguments(
-    output_dir = "./save_imdb",
+    output_dir = join("save_imdb",uuid_),
     learning_rate = 3e-5,
     per_device_train_batch_size = 2,
     per_device_eval_batch_size = 2,
     #num_train_epochs = 1,
-    num_train_epochs = 0.01,
+    num_train_epochs = 0.0025,
     weight_decay = 0.01,
     evaluation_strategy = "steps",
     eval_steps = 2,
-    logging_steps = 500,
-    save_steps = 500,
+    #logging_steps = 500,
+    #save_steps = 500,
+    logging_steps = 0.2,
+    save_steps = 0.2,    
     seed = 42,
     #warmup_steps = 50,
     warmup_steps = 2,
@@ -122,3 +128,6 @@ trainer = graphTrainer(
 )
 
 trainer.train()
+
+# save final model
+trainer.save_model()

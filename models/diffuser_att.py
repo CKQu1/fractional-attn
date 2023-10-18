@@ -36,9 +36,9 @@ class DiffuserAttention(nn.Module):
         if not self.with_frac:
             self.self = DiffuserSelfAttention(config, layer_id)
         else:
-            assert 0 < kwargs.get('gamma') < 1, "gamma for DiffuserFracSelfAttention is ill-defined!"         
+            assert 0 < kwargs.get('gamma') < 1, "gamma for FracSelfAttention is ill-defined!"         
             gamma = kwargs.get('gamma')
-            self.self = DiffuserFracSelfAttention(config, layer_id, gamma)
+            self.self = LimitFracSelfAttention(config, layer_id, gamma)
         self.output = DiffuserSelfOutput(config)
 
     def forward(
@@ -312,7 +312,110 @@ class DiffuserFracSelfAttention(nn.Module):
 """
 
 # Fractional diffusion (unnormalized fractional Laplacian)
-class DiffuserFracSelfAttention(nn.Module):
+class LimitFracSelfAttention(nn.Module):
+    def __init__(self, config, layer_id, gamma):
+        super().__init__()
+        if config.hidden_size % config.num_attention_heads != 0:
+            raise ValueError(
+                f"The hidden size ({config.hidden_size}) is not a multiple of the number of attention "
+                f"heads ({config.num_attention_heads})"
+            )
+        self.num_heads = config.num_attention_heads
+        self.head_dim = int(config.hidden_size / config.num_attention_heads)
+        self.embed_dim = config.hidden_size
+
+        self.query = nn.Linear(config.hidden_size, self.embed_dim)
+        self.key = nn.Linear(config.hidden_size, self.embed_dim)
+        self.value = nn.Linear(config.hidden_size, self.embed_dim)
+
+        self.dropout = config.attention_probs_dropout_prob
+
+        self.gamma = gamma
+
+        self.layer_id = layer_id
+        attention_window = config.attention_window[self.layer_id]
+        assert (
+            attention_window % 2 == 0
+        ), f"`attention_window` for layer {self.layer_id} has to be an even value. Given {attention_window}"
+        assert (
+            attention_window > 0
+        ), f"`attention_window` for layer {self.layer_id} has to be positive. Given {attention_window}"
+
+    def forward(
+        self,
+        hidden_states,
+        g=None,
+        attention_mask=None,
+        layer_head_mask=None,
+        is_index_masked=None,
+        is_index_global_attn=None,
+        is_global_attn=None,
+        output_attentions=False,
+    ):
+
+        hidden_states = hidden_states.transpose(0, 1) #(N,B,HD)
+        # attention_mask (B,N)
+        # project hidden states
+        query_vectors = self.query(hidden_states)
+        key_vectors = self.key(hidden_states)
+        value_vectors = self.value(hidden_states)   # (N,B,HD)
+
+        seq_len, batch_size, embed_dim = hidden_states.size()
+        assert (
+            embed_dim == self.embed_dim
+        ), f"hidden_states should have embed_dim = {self.embed_dim}, but has {embed_dim}"
+
+        # normalize query
+        query_vectors /= math.sqrt(self.head_dim)
+
+        query_vectors = query_vectors.view(seq_len, batch_size, self.num_heads, self.head_dim).transpose(0, 1) # (B,N,H,D)
+        key_vectors = key_vectors.view(seq_len, batch_size, self.num_heads, self.head_dim).transpose(0, 1) # (B,N,H,D)
+        value_vectors = value_vectors.view(seq_len, batch_size, self.num_heads, self.head_dim).transpose(0, 1) #B,N,H,D
+        
+        query_vectors =  query_vectors.reshape(-1, self.num_heads, self.head_dim)  #BN,H,D
+        key_vectors =  key_vectors.reshape(-1, self.num_heads, self.head_dim)  #BN,H,D
+        value_vectors =  value_vectors.reshape(-1, self.num_heads, self.head_dim)  #BN,H,D        
+        
+        Bmat = torch.bmm( key_vectors.transpose(0,1), query_vectors.transpose(0,1).transpose(1,2) )  # KQ product: H,BN,BN
+        Bmat = Bmat.exp()  # no softmax applied, consistent with Diffuser
+        bool_mask = (attention_mask>0).reshape(-1).unsqueeze(-1)
+        Bmat.masked_fill_(bool_mask==False, 0)  # attention mask
+        BN = seq_len * batch_size    
+        out_degree = Bmat.sum(axis=2)
+        rhos = out_degree.max(axis=1).values 
+        with torch.no_grad():   
+            Bmat -= torch.diag_embed(out_degree)
+            Bmat += torch.diag_embed(rhos.unsqueeze(-1).repeat(1, BN))
+        B_power = torch.eye(BN, requires_grad=True).reshape(1, BN, BN).repeat(self.num_heads, 1, 1)
+        L_gamma = torch.eye(BN, requires_grad=True).reshape(1, BN, BN).repeat(self.num_heads, 1, 1)        
+
+        N_approx = 2    
+        numerator, denominator = 1, 1
+        for ii in range(1, N_approx+1):
+            numerator *= (self.gamma - ii + 1) * (-1)
+            denominator *= ii * rhos
+            coef = numerator/denominator            
+            B_power = torch.bmm(B_power, Bmat)
+            with torch.no_grad():
+                L_gamma += coef.unsqueeze(-1).unsqueeze(-1) * B_power
+        with torch.no_grad():
+            L_gamma *= rhos.unsqueeze(-1).unsqueeze(-1)**self.gamma
+
+        L_gamma_diags = torch.diagonal( L_gamma, dim1=-2, dim2=-1 )
+        L_gamma_diags = L_gamma_diags / L_gamma_diags.sum(axis=1).unsqueeze(dim=-1)  # apply dropout after this?
+        s_dist = L_gamma_diags.unsqueeze(dim=-1).repeat(1,1,BN)    
+        attn_output = torch.bmm(s_dist, value_vectors.transpose(0,1))
+
+        attn_output = attn_output.reshape(batch_size, seq_len,  self.num_heads, self.head_dim) # B,N,H,D        
+        assert attn_output.size() == (batch_size, seq_len, self.num_heads, self.head_dim), "Unexpected size"
+        attn_output = attn_output.transpose(0, 1).reshape(seq_len, batch_size, embed_dim).contiguous()
+        outputs = (attn_output.transpose(0, 1),) # Seq,B,D
+
+        return outputs + (global_attn_probs,) if (is_global_attn and output_attentions) else outputs
+
+
+# Fractional diffusion using dgl api
+class DiffuserFracSelfAttention_dgl(nn.Module):
     def __init__(self, config, layer_id, gamma):
         super().__init__()
         if config.hidden_size % config.num_attention_heads != 0:

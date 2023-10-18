@@ -18,6 +18,7 @@ from models.diffuser_utils import DiffuserConfig
 class graphTrainer(Trainer):
     def __init__(
         self,
+        use_dgl: bool = True,
         model: Union[PreTrainedModel, nn.Module] = None,
         config: DiffuserConfig = None,
         args: TrainingArguments = None,
@@ -43,6 +44,7 @@ class graphTrainer(Trainer):
                 optimizers,
                 preprocess_logits_for_metrics,
             )
+        self.use_dgl = use_dgl
         self.config = config
         self._create_adj_mat()
 
@@ -118,12 +120,16 @@ class graphTrainer(Trainer):
     def compute_loss(self, model, inputs, return_outputs=False):
         inputs = self._pad_to_window_size(inputs) 
         device =inputs["input_ids"].device
-        batched_g = self._from_adj_to_batched_graphs(inputs["input_ids"]).to(device)
-        inputs["g"] = batched_g
+        if self.use_dgl:
+            batched_g = self._from_adj_to_batched_graphs(inputs["input_ids"]).to(device)
+            inputs["g"] = batched_g
+        else:            
+            inputs["g"] = None
         if self.label_smoother is not None and "labels" in inputs:
             labels = inputs.pop("labels")
         else:
             labels = None
+
         outputs = model(**inputs)
         # Save past state if it exists
         # TODO: this needs to be fixed and made cleaner later.

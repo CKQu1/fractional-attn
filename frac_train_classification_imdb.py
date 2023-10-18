@@ -37,7 +37,7 @@ metric_acc = load_metric('./metrics/accuracy')
 metric_f1 = load_metric('./metrics/f1')
 
 # create cache for dataset
-dataset_dir = join(os.getcwd(), droot, "DATASETS")
+dataset_dir = join(droot, "DATASETS")
 if not os.path.isdir(dataset_dir): os.makedirs(dataset_dir)
 
 imdb = load_dataset("imdb", cache_dir=dataset_dir)
@@ -48,7 +48,7 @@ tokenizer = RobertaTokenizer(tokenizer_file = "./roberta-tokenizer/tokenizer.jso
                              max_length     = 1024)
 
 # save tokenized dataset
-dataset_dir = join(os.getcwd(), droot, "DATASETS", "tokenized_imdb")
+dataset_dir = join(droot, "DATASETS", "tokenized_imdb")
 if not os.path.isdir(dataset_dir): 
     print("Downloading data!")
     tokenized_imdb = imdb.map(preprocess_function, batched=True)
@@ -71,7 +71,7 @@ attn_setup = {"with_frac":True, "gamma":0.5}
 model =  DiffuserForSequenceClassification(config, **attn_setup).to(dev)
 
 uuid_ = str(uuid.uuid4())[:8]
-model_dir = join("save_imdb_frac", uuid_)
+model_dir = join(droot, "save_imdb_frac", uuid_)
 training_args = TrainingArguments(
     output_dir = model_dir,
     learning_rate = 3e-5,
@@ -103,6 +103,7 @@ training_args.logging_steps = int(steps_per_train_epoch/5)
 training_args.save_steps    = int(steps_per_train_epoch)
 
 trainer = graphTrainer(
+    use_dgl = False,
     model = model,
     config = config,
     args = training_args,

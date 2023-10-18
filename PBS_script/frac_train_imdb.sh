@@ -14,6 +14,6 @@ PBS_O_WORKDIR="/project/frac_attn/fractional-attn"
 cd ${PBS_O_WORKDIR}
 
 # check if relevant modules exist
-#singularity exec --home ${PBS_O_WORKDIR}  ../built_containers/FaContainer.sif python -c "import torch, transformers, dgl; print([dgl.__version__, transformers.__version__, torch.__version__,torch.cuda.is_available()])"
+#singularity exec --home ${PBS_O_WORKDIR}  ../built_containers/FaContainer_v2.sif python -c "import torch, transformers, dgl; print([dgl.__version__, transformers.__version__, torch.__version__,torch.cuda.is_available()])"
 
-singularity exec --home ${PBS_O_WORKDIR} ../built_containers/FaContainer.sif python frac_train_classification_imdb.py
+singularity exec --home ${PBS_O_WORKDIR} ../built_containers/FaContainer_v2.sif python frac_train_classification_imdb.py

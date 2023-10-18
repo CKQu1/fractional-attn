@@ -391,14 +391,13 @@ class LimitFracSelfAttention(nn.Module):
 
         N_approx = 2    
         numerator, denominator = 1, 1
-        for ii in range(1, N_approx+1):
-            numerator *= (self.gamma - ii + 1) * (-1)
-            denominator *= ii * rhos
-            coef = numerator/denominator            
-            B_power = torch.bmm(B_power, Bmat)
-            with torch.no_grad():
-                L_gamma += coef.unsqueeze(-1).unsqueeze(-1) * B_power
         with torch.no_grad():
+            for ii in range(1, N_approx+1):
+                numerator *= (self.gamma - ii + 1) * (-1)
+                denominator *= ii * rhos
+                coef = numerator/denominator            
+                B_power = torch.bmm(B_power, Bmat)            
+                L_gamma += coef.unsqueeze(-1).unsqueeze(-1) * B_power
             L_gamma *= rhos.unsqueeze(-1).unsqueeze(-1)**self.gamma
 
         L_gamma_diags = torch.diagonal( L_gamma, dim1=-2, dim2=-1 )

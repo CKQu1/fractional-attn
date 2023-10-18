@@ -1,7 +1,9 @@
 import os
+import pandas as pd
 import uuid
 import sys
 import torch
+from time import time
 sys.path.append(f'{os.getcwd()}')
 from path_setup import droot
 
@@ -66,19 +68,21 @@ with_frac = False
 
 attn_setup = {"with_frac":True, "gamma":0.5}
 #model =  DiffuserForSequenceClassification(config = config).cuda()
-model =  DiffuserForSequenceClassification(config, **attn_setup)
+model =  DiffuserForSequenceClassification(config, **attn_setup).to(dev)
 
 uuid_ = str(uuid.uuid4())[:8]
+model_dir = join("save_imdb_frac", uuid_)
 training_args = TrainingArguments(
-    output_dir = join("save_imdb",uuid_),
+    output_dir = model_dir,
     learning_rate = 3e-5,
     per_device_train_batch_size = 2,
     per_device_eval_batch_size = 2,
     #num_train_epochs = 1,
-    num_train_epochs = 0.0025,
+    #num_train_epochs = 0.0025,
+    num_train_epochs = 0.00125,
     weight_decay = 0.01,
     evaluation_strategy = "steps",
-    eval_steps = 2,
+    eval_steps = 0.25,
     #logging_steps = 500,
     #save_steps = 500,
     logging_steps = 0.2,
@@ -109,7 +113,21 @@ trainer = graphTrainer(
     compute_metrics = compute_metrics
 )
 
+t0_train = time()
 trainer.train()
+
+train_secs = time() - t0_train
+
+model_settings = attn_setup
+model_settings['train_secs'] = train_secs
+for key_name in model_settings.keys():
+    model_settings[key_name] = [model_settings[key_name]]
+df = pd.DataFrame(model_settings)
+df.to_csv(join(model_dir, "model_settings.csv"))
+
+# get performance history
+df_model = pd.DataFrame(trainer.state.log_history)
+df_model.to_csv(join(model_dir, "model_performance.csv"))
 
 # save final model
 trainer.save_model()

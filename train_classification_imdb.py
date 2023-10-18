@@ -93,9 +93,15 @@ training_args = TrainingArguments(
 )
 
 if dev.type != "cpu":
-    steps_per_train_epoch       = int(len(tokenized_imdb['train'])/(training_args.per_device_train_batch_size*torch.cuda.device_count()*training_args.gradient_accumulation_steps ))
+    device_name, device_total = "GPU", torch.cuda.device_count()
 else:
-    steps_per_train_epoch       = int(len(tokenized_imdb['train'])/(training_args.per_device_train_batch_size*torch.get_num_threads()*training_args.gradient_accumulation_steps ))
+    device_name, device_total = "CPU", torch.get_num_threads()
+
+steps_per_train_epoch = int(len(tokenized_imdb['train'])/(training_args.per_device_train_batch_size*device_total*training_args.gradient_accumulation_steps ))
+print(f"per_device_train_batch_size: {training_args.per_device_train_batch_size}")
+print(f"{device_name} count: {device_total}")
+print(f"gradient_accumulation_steps: {training_args.gradient_accumulation_steps} \n")    
+
 training_args.eval_steps    = int(steps_per_train_epoch)
 training_args.logging_steps = int(steps_per_train_epoch/5)
 training_args.save_steps    = int(steps_per_train_epoch)
@@ -110,7 +116,6 @@ trainer = graphTrainer(
     data_collator = data_collator,
     compute_metrics = compute_metrics
 )
-
 
 t0_train = time()
 trainer.train()

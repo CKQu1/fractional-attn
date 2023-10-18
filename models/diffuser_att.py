@@ -387,7 +387,7 @@ class DiffuserFracSelfAttention(nn.Module):
 
         g.apply_edges(fn.u_dot_v('k', 'q', 'score'))
         g.edata['score'] = g.edata['score'].exp()   # exponential taken here, representing the true edge weight which are positive
-        g.apply_edges(mask_attention_score)   #kq
+        g.apply_edges(frac_mask_attention_score)   #kq
         
         rev = reverse(g)
         out_degree = copy_e_sum(rev, g.edata['score'])  # out deg (verified!)

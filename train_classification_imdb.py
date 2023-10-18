@@ -48,7 +48,7 @@ tokenizer = RobertaTokenizer(tokenizer_file = "./roberta-tokenizer/tokenizer.jso
                              max_length     = 1024)
 
 # save tokenized dataset
-dataset_dir = join(os.getcwd(), droot, "DATASETS", "tokenized_imdb")
+dataset_dir = join(droot, "DATASETS", "tokenized_imdb")
 if not os.path.isdir(dataset_dir): 
     print("Downloading data!")
     tokenized_imdb = imdb.map(preprocess_function, batched=True)
@@ -70,14 +70,15 @@ attn_setup = {"with_frac":with_frac}
 model =  DiffuserForSequenceClassification(config, **attn_setup).to(dev)
 
 uuid_ = str(uuid.uuid4())[:8]
-model_dir = join("save_imdb_diffuser", uuid_)
+model_dir = join(droot, "save_imdb_diffuser", uuid_)
 training_args = TrainingArguments(
     output_dir = model_dir,
     learning_rate = 3e-5,
     per_device_train_batch_size = 2,
     per_device_eval_batch_size = 2,
     #num_train_epochs = 1,
-    num_train_epochs = 0.0025,
+    #num_train_epochs = 0.0025,
+    num_train_epochs = 0.00125,
     weight_decay = 0.01,
     evaluation_strategy = "steps",
     eval_steps = 0.5,

@@ -153,7 +153,8 @@ class DiffuserSelfAttention(nn.Module):
 
         return outputs + (global_attn_probs,) if (is_global_attn and output_attentions) else outputs
 
-# Fractional version
+# Fractional random walk (normalized fractional Laplacian applied)
+"""
 class DiffuserFracSelfAttention(nn.Module):
     def __init__(self, config, layer_id, gamma):
         super().__init__()
@@ -194,8 +195,6 @@ class DiffuserFracSelfAttention(nn.Module):
         is_global_attn=None,
         output_attentions=False,
     ):
-
-
 
         hidden_states = hidden_states.transpose(0, 1) #(N,B,HD)
         # attention_mask (B,N)
@@ -245,15 +244,13 @@ class DiffuserFracSelfAttention(nn.Module):
         edge_shape = list(g.edata['score'].shape)
         num_nodes, num_edges = g.num_nodes(), g.num_edges()
         Bmat = torch.zeros([num_nodes, num_nodes] + edge_shape[1:]) # requires_grad=True
-        
-        """
+                
         # get weight adjacency matrix
-        src, dst = g.edges()    
-        for eidx in range(num_edges):
-            src_node, dst_node = src[eidx], dst[eidx]
-            Bmat[src_node, dst_node,:] = g.edata['score'][eidx]          
-        quit()    
-        """
+        #src, dst = g.edges()    
+        #for eidx in range(num_edges):
+        #    src_node, dst_node = src[eidx], dst[eidx]
+        #    Bmat[src_node, dst_node,:] = g.edata['score'][eidx]          
+        #quit()            
         
         with torch.no_grad():
             diag_count = 0
@@ -293,18 +290,153 @@ class DiffuserFracSelfAttention(nn.Module):
         # applying dropout in a similar fashion as DiffuserSelfAttention()
         L_gamma_normalized = nn.functional.dropout(L_gamma_normalized, p=self.dropout, training=self.training)
 
-        # for checking whether the normalized version hsa rows summed up to zero
-        """
-        for head_idx in range(edge_shape[1]):
-            print(L_gamma_normalized[:,:,head_idx].sum(1))
-        """
-
+        # for checking whether the normalized version has rows summed up to zero        
+        #for head_idx in range(edge_shape[1]):
+        #    print(L_gamma_normalized[:,:,head_idx].sum(1))
+        
         # realization of discrete time fractional RW
         RW_steps = 5
         attn_output = g.ndata['v'] #BN,H,D
         for _ in range(RW_steps):
             for head_idx in range(edge_shape[1]):        
                 attn_output[:,head_idx] = L_gamma_normalized[:,:,head_idx].squeeze() @ attn_output[:,head_idx].clone()
+                # add dropout for training
+                attn_output = nn.functional.dropout(attn_output, p=self.dropout, training=self.training)
+
+        attn_output = attn_output.reshape(batch_size, seq_len,  self.num_heads, self.head_dim) # B,N,H,D        
+        assert attn_output.size() == (batch_size, seq_len, self.num_heads, self.head_dim), "Unexpected size"
+        attn_output = attn_output.transpose(0, 1).reshape(seq_len, batch_size, embed_dim).contiguous()
+        outputs = (attn_output.transpose(0, 1),) # Seq,B,D
+
+        return outputs + (global_attn_probs,) if (is_global_attn and output_attentions) else outputs
+"""
+
+# Fractional diffusion (unnormalized fractional Laplacian)
+class DiffuserFracSelfAttention(nn.Module):
+    def __init__(self, config, layer_id, gamma):
+        super().__init__()
+        if config.hidden_size % config.num_attention_heads != 0:
+            raise ValueError(
+                f"The hidden size ({config.hidden_size}) is not a multiple of the number of attention "
+                f"heads ({config.num_attention_heads})"
+            )
+        self.num_heads = config.num_attention_heads
+        self.head_dim = int(config.hidden_size / config.num_attention_heads)
+        self.embed_dim = config.hidden_size
+
+        self.query = nn.Linear(config.hidden_size, self.embed_dim)
+        self.key = nn.Linear(config.hidden_size, self.embed_dim)
+        self.value = nn.Linear(config.hidden_size, self.embed_dim)
+
+        self.dropout = config.attention_probs_dropout_prob
+
+        self.gamma = gamma
+
+        self.layer_id = layer_id
+        attention_window = config.attention_window[self.layer_id]
+        assert (
+            attention_window % 2 == 0
+        ), f"`attention_window` for layer {self.layer_id} has to be an even value. Given {attention_window}"
+        assert (
+            attention_window > 0
+        ), f"`attention_window` for layer {self.layer_id} has to be positive. Given {attention_window}"
+
+    def forward(
+        self,
+        hidden_states,
+        g=None,
+        attention_mask=None,
+        layer_head_mask=None,
+        is_index_masked=None,
+        is_index_global_attn=None,
+        is_global_attn=None,
+        output_attentions=False,
+    ):
+
+        hidden_states = hidden_states.transpose(0, 1) #(N,B,HD)
+        # attention_mask (B,N)
+        # project hidden states
+        query_vectors = self.query(hidden_states)
+        key_vectors = self.key(hidden_states)
+        value_vectors = self.value(hidden_states)   # (N,B,HD)
+
+        seq_len, batch_size, embed_dim = hidden_states.size()
+        assert (
+            embed_dim == self.embed_dim
+        ), f"hidden_states should have embed_dim = {self.embed_dim}, but has {embed_dim}"
+
+        # normalize query
+        query_vectors /= math.sqrt(self.head_dim)
+
+        query_vectors = query_vectors.view(seq_len, batch_size, self.num_heads, self.head_dim).transpose(0, 1) # (B,N,H,D)
+        key_vectors = key_vectors.view(seq_len, batch_size, self.num_heads, self.head_dim).transpose(0, 1) # (B,N,H,D)
+        value_vectors = value_vectors.view(seq_len, batch_size, self.num_heads, self.head_dim).transpose(0, 1) #B,N,H,D
+        
+        bool_mask = (attention_mask>=0 )
+        g = g.local_var()
+        g.ndata["mask"] = bool_mask.reshape(-1).unsqueeze(-1)        #BN,1
+        g.ndata['q'] =  query_vectors.reshape(-1, self.num_heads, self.head_dim) #BN,H,D
+        g.ndata['k'] =  key_vectors.reshape(-1, self.num_heads, self.head_dim) #BN,H,D
+        g.ndata['v'] =  value_vectors.reshape(-1, self.num_heads, self.head_dim) #BN,H,D
+        
+        # ----- Issue 1: order of dropout -----
+        # option 1: apply nn.functional.dropout to QK
+        # option 2: apply nn.functional.dropout to W
+        # get Laplacian and B matrix
+        # weight matrix (this doesn't incorporate the weights generated from QK)
+
+        g.apply_edges(fn.u_dot_v('k', 'q', 'score'))
+        g.edata['score'] = g.edata['score'].exp()   # exponential taken here, representing the true edge weight which are positive
+        g.apply_edges(mask_attention_score)   #kq
+        
+        rev = reverse(g)
+        out_degree = copy_e_sum(rev, g.edata['score'])  # out deg (verified!)
+        rhos = torch.max(out_degree, axis=0).values
+
+        # somehow all nodes are self-connected, this needs to be double-checked
+        edge_shape = list(g.edata['score'].shape)
+        num_nodes, num_edges = g.num_nodes(), g.num_edges()
+        Bmat = torch.zeros([num_nodes, num_nodes] + edge_shape[1:]) # requires_grad=True                        
+        
+        with torch.no_grad():
+            diag_count = 0
+            src, dst = g.edges()    
+            for eidx in range(num_edges):
+                src_node, dst_node = src[eidx], dst[eidx]
+                if src_node == dst_node:
+                    Bmat[src_node, dst_node,:] = g.edata['score'][eidx].clone() - rhos.clone() - out_degree[diag_count].clone()
+                    diag_count += 1
+                else:
+                    Bmat[src_node, dst_node,:] = g.edata['score'][eidx].clone()
+            
+        #N_approx = 10   # probably as large as it can be, any larger will result in numerical degeneration
+        N_approx = 6
+        L_gamma = torch.eye(num_nodes).reshape([num_nodes,num_nodes] + [1]*(len(edge_shape) - 1))
+        L_gamma = L_gamma.repeat([1,1] +  edge_shape[1:])
+        L_gamma.requires_grad = True
+
+        Bmat_power = Bmat.clone()
+        with torch.no_grad():
+            numerator, denominator = 1, 1
+            for ii in range(1, N_approx+1):
+                numerator *= (self.gamma - ii + 1) * (-1)
+                denominator *= ii * rhos
+                coef = numerator/denominator        
+                for head_idx in range(edge_shape[1]):
+                    L_gamma = L_gamma.clone() + coef * Bmat_power
+                    Bmat_power[:,:,head_idx] = (Bmat_power[:,:,head_idx].clone().squeeze() @ Bmat[:,:,head_idx].squeeze()).unsqueeze(Bmat.ndim - 2)       
+
+            L_gamma *= rhos**self.gamma           
+    
+        # applying dropout in a similar fashion as DiffuserSelfAttention()
+        L_gamma = nn.functional.dropout(L_gamma, p=self.dropout, training=self.training)
+        
+        # realization of discrete time fractional RW
+        RW_steps = 5
+        attn_output = g.ndata['v'] #BN,H,D
+        for _ in range(RW_steps):
+            for head_idx in range(edge_shape[1]):        
+                attn_output[:,head_idx] = L_gamma[:,:,head_idx].squeeze() @ attn_output[:,head_idx].clone()
                 # add dropout for training
                 attn_output = nn.functional.dropout(attn_output, p=self.dropout, training=self.training)
 

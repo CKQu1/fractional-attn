@@ -1,10 +1,9 @@
+import numpy as np
 import os
 import pandas as pd
 import uuid
-import sys
 import torch
 from time import time
-sys.path.append(f'{os.getcwd()}')
 from path_setup import droot
 
 from os.path import join
@@ -16,9 +15,6 @@ from datasets import load_dataset,load_metric,load_from_disk
 from models.diffuser_app import DiffuserForSequenceClassification
 from models.diffuser_utils import DiffuserConfig
 from graphtrainer import graphTrainer
-
-dev = torch.device(f"cuda:{torch.cuda.device_count()-1}"
-                   if torch.cuda.is_available() else "cpu")
 
 logging.set_verbosity_debug()
 logger = logging.get_logger()
@@ -65,23 +61,33 @@ data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
 config = DiffuserConfig.from_json_file("./models/config_simple.json")
 config.num_labels = 2
 with_frac = False
-
 attn_setup = {"with_frac":with_frac}
-model =  DiffuserForSequenceClassification(config, **attn_setup).to(dev)
+model =  DiffuserForSequenceClassification(config, **attn_setup)
+
+train_with_ddp = False
+train_with_ddp = torch.distributed.is_available() and train_with_ddp
+
+dev = torch.device(f"cuda:{torch.cuda.device_count()-1}"
+                    if torch.cuda.is_available() else "cpu")    
+model = model.to(dev)
 
 uuid_ = str(uuid.uuid4())[:8]
-model_dir = join(droot, "save_imdb_diffuser", uuid_)
+#model_dir = join(droot, "save_imdb_diffuser", uuid_)
+model_dir = join(droot, "save_imdb_diffuser_test", uuid_)
+if not os.path.isdir(model_dir): os.makedirs(model_dir)
 training_args = TrainingArguments(
     output_dir = model_dir,
     learning_rate = 3e-5,
     per_device_train_batch_size = 2,
     per_device_eval_batch_size = 2,
-    #num_train_epochs = 1,
+    num_train_epochs = 1,
     #num_train_epochs = 0.0025,
-    num_train_epochs = 0.00125,
+    #num_train_epochs = 0.00125,
+    max_steps = 5,
     weight_decay = 0.01,
     evaluation_strategy = "steps",
-    eval_steps = 0.5,
+    eval_steps = 1,
+    logging_strategy="steps",
     #logging_steps = 500,
     #save_steps = 500,
     logging_steps = 1,
@@ -89,8 +95,9 @@ training_args = TrainingArguments(
     seed = 42,
     #warmup_steps = 50,
     warmup_steps = 2,
-    gradient_accumulation_steps = 8,
-    prediction_loss_only=True
+    #gradient_accumulation_steps = 8
+    gradient_accumulation_steps = 1
+    #prediction_loss_only=False
 )
 
 if dev.type != "cpu":
@@ -98,6 +105,9 @@ if dev.type != "cpu":
 else:
     device_name, device_total = "CPU", torch.get_num_threads()
 
+if not train_with_ddp:
+    device_total = 1
+# this is assuming DDP is being deployed?
 steps_per_train_epoch = int(len(tokenized_imdb['train'])/(training_args.per_device_train_batch_size*device_total*training_args.gradient_accumulation_steps ))
 print(f"per_device_train_batch_size: {training_args.per_device_train_batch_size}")
 print(f"{device_name} count: {device_total}")

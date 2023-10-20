@@ -46,7 +46,8 @@ class graphTrainer(Trainer):
             )
         self.use_dgl = use_dgl
         self.config = config
-        self._create_adj_mat()
+        if self.use_dgl:
+            self._create_adj_mat()
 
     def _create_adj_mat(self):
         attention_window = (

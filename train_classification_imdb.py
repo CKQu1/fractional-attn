@@ -33,11 +33,11 @@ metric_acc = load_metric('./metrics/accuracy')
 metric_f1 = load_metric('./metrics/f1')
 
 # create cache for dataset
-dataset_dir = join(os.getcwd(), droot, "DATASETS")
+dataset_dir = join(droot, "DATASETS")
 if not os.path.isdir(dataset_dir): os.makedirs(dataset_dir)
 
 imdb = load_dataset("imdb", cache_dir=dataset_dir)
-# tokenizer = RobertaTokenizer.from_pretrained("./roberta-tokenizer", max_length = 1024)
+#tokenizer = RobertaTokenizer.from_pretrained("./roberta-tokenizer", max_length = 1024)
 tokenizer = RobertaTokenizer(tokenizer_file = "./roberta-tokenizer/tokenizer.json",
                              vocab_file     = "./roberta-tokenizer/vocab.json",
                              merges_file    = "./roberta-tokenizer/merges.txt",
@@ -56,7 +56,6 @@ else:
     tokenized_imdb = load_from_disk(dataset_dir)
 
 data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
-
 #config = DiffuserConfig.from_json_file("./models/config.json")
 config = DiffuserConfig.from_json_file("./models/config_simple.json")
 config.num_labels = 2
@@ -64,39 +63,39 @@ with_frac = False
 attn_setup = {"with_frac":with_frac}
 model =  DiffuserForSequenceClassification(config, **attn_setup)
 
-train_with_ddp = False
+train_with_ddp = True
 train_with_ddp = torch.distributed.is_available() and train_with_ddp
 
 dev = torch.device(f"cuda:{torch.cuda.device_count()-1}"
-                    if torch.cuda.is_available() else "cpu")    
+                   if torch.cuda.is_available() else "cpu")    
 model = model.to(dev)
 
 uuid_ = str(uuid.uuid4())[:8]
-#model_dir = join(droot, "save_imdb_diffuser", uuid_)
-model_dir = join(droot, "save_imdb_diffuser_test", uuid_)
+if with_frac:
+    model_dir = join(droot, "trained_models", f"save_imdb_diffuser_test", uuid_)
+else:
+    model_dir = join(droot, "trained_models", f"save_imdb_frac_diffuser_test", uuid_)
 if not os.path.isdir(model_dir): os.makedirs(model_dir)
 training_args = TrainingArguments(
     output_dir = model_dir,
     learning_rate = 3e-5,
     per_device_train_batch_size = 2,
     per_device_eval_batch_size = 2,
+    #num_train_epochs = 20,
     num_train_epochs = 1,
-    #num_train_epochs = 0.0025,
-    #num_train_epochs = 0.00125,
-    max_steps = 5,
+    max_steps = 10,
     weight_decay = 0.01,
     evaluation_strategy = "steps",
-    eval_steps = 1,
+    #eval_steps = 2000,
+    eval_steps = 5,
     logging_strategy="steps",
     #logging_steps = 500,
+    logging_steps = 5,
     #save_steps = 500,
-    logging_steps = 1,
-    save_steps = 1,    
+    save_steps = 5,  
     seed = 42,
-    #warmup_steps = 50,
     warmup_steps = 2,
-    #gradient_accumulation_steps = 8
-    gradient_accumulation_steps = 1
+    gradient_accumulation_steps = 8
     #prediction_loss_only=False
 )
 

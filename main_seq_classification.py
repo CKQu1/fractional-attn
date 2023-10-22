@@ -21,17 +21,17 @@ if __name__ == '__main__':
 
     # Training options
     parser = argparse.ArgumentParser(description='main_seq_classification.py training arguments')    
-    parser.add_argument('--train_with_ddp', default=False, type=str, help='to use DDP or not')
+    parser.add_argument('--train_with_ddp', default=False, type=bool, help='to use DDP or not')
     parser.add_argument('--lr', default=3e-5, type=float, help='learning rate')
     parser.add_argument('--batch_size', default=2, type=int)
-    parser.add_argument('--epochs', default=1)
+    parser.add_argument('--epochs', default=1, type=float)
     parser.add_argument('--max_steps', default=None, type=int)
     parser.add_argument('--weight_decay', default=0.01, type=float)
     parser.add_argument('--evaluation_strategy', default="steps", type=str)
-    parser.add_argument('--eval_steps', default=1, type=float)
+    parser.add_argument('--eval_steps', default=200, type=float)
     parser.add_argument('--logging_strategy', default="steps", type=str)
-    parser.add_argument('--logging_steps', default=1, type=float)
-    parser.add_argument('--save_steps', default=1, type=float)
+    parser.add_argument('--logging_steps', default=50, type=float)
+    parser.add_argument('--save_steps', default=50, type=float)
     parser.add_argument('--seed', default=42, type=int)
     parser.add_argument('--warmup_steps', default=2, type=int)
     parser.add_argument('--gradient_accumulation_steps', default=8, type=int)
@@ -103,29 +103,30 @@ if __name__ == '__main__':
 
     uuid_ = str(uuid.uuid4())[:8]    
     if with_frac:
-        model_dir = join(droot, "trained_seq_classification", f"save_{dataset_name}_diffuser_test", uuid_)
+        model_dir = join(droot, "trained_seq_classification", f"save_{args.dataset_name}_frac_diffuser_test", uuid_)
     else:
-        model_dir = join(droot, "trained_seq_classification", f"save_{dataset_name}_frac_diffuser_test", uuid_)    
+        model_dir = join(droot, "trained_seq_classification", f"save_{args.dataset_name}_diffuser_test", uuid_)    
     #model_dir = join(droot, "qsub_parser_test", uuid_)
     if not os.path.isdir(model_dir): os.makedirs(model_dir)
     
-    training_args = TrainingArguments(
-        output_dir = model_dir,
-        learning_rate = args.lr,
-        per_device_train_batch_size = args.batch_size,
-        per_device_eval_batch_size = args.batch_size,
-        num_train_epochs = args.epochs,
-        max_steps = args.max_steps,
-        weight_decay = args.weight_decay,
-        evaluation_strategy = args.evaluation_strategy,
-        eval_steps = args.eval_steps,
-        logging_strategy=args.logging_strategy,
-        logging_steps = args.logging_steps,
-        save_steps = args.save_steps,    
-        seed = args.seed,
-        warmup_steps = args.warmup_steps,
-        gradient_accumulation_steps = args.gradient_accumulation_steps
-    )
+    training_args_dict = {"output_dir": model_dir,
+                          "learning_rate": args.lr,
+                          "per_device_train_batch_size": args.batch_size,
+                          "per_device_eval_batch_size": args.batch_size,
+                          "num_train_epochs": args.epochs,                          
+                          "weight_decay": args.weight_decay,
+                          "evaluation_strategy": args.evaluation_strategy,
+                          "eval_steps": args.eval_steps,
+                          "logging_strategy": args.logging_strategy,
+                          "logging_steps": args.logging_steps,
+                          "save_steps": args.save_steps,    
+                          "seed": args.seed,
+                          "warmup_steps": args.warmup_steps,
+                          "gradient_accumulation_steps": args.gradient_accumulation_steps                          
+                          }
+    if args.max_steps != None:
+        training_args_dict["max_steps"] = args.max_steps
+    training_args = TrainingArguments(**training_args_dict)
 
     if dev.type != "cpu":
         device_name, device_total = "GPU", torch.cuda.device_count()
@@ -135,6 +136,7 @@ if __name__ == '__main__':
     if not train_with_ddp:
         device_total = 1
     steps_per_train_epoch = int(len(tokenized_dataset['train'])/(training_args.per_device_train_batch_size*device_total*training_args.gradient_accumulation_steps ))
+    print(f"steps_per_train_epoch {steps_per_train_epoch}")
     print(f"per_device_train_batch_size: {training_args.per_device_train_batch_size}")
     print(f"{device_name} count: {device_total}")
     print(f"gradient_accumulation_steps: {training_args.gradient_accumulation_steps} \n")    

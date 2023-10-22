@@ -46,8 +46,8 @@ class graphTrainer(Trainer):
             )
         self.use_dgl = use_dgl
         self.config = config
-        if self.use_dgl:
-            self._create_adj_mat()
+        #if self.use_dgl:
+        self._create_adj_mat()
 
     def _create_adj_mat(self):
         attention_window = (
@@ -112,20 +112,32 @@ class graphTrainer(Trainer):
         seq_len = input_ids.shape[1]
         g_list = []
         for i in range(B):
-            src,dst =self.src_dst[seq_len]
+            src,dst = self.src_dst[seq_len]
             g = dgl.graph((src, dst))
             g_list.append(g)
         batched_g = dgl.batch(g_list)
         return batched_g  
 
+    def _from_adj_to_batched_sparsify(self, input_ids):
+        B = input_ids.shape[0]
+        seq_len = input_ids.shape[1]
+        src,dst = self.src_dst[seq_len]
+        sparsify = torch.zeros([seq_len, seq_len])
+        sparsify[src, dst] = 1
+        batched_sparsify = sparsify.unsqueeze(0).repeat(B, 1, 1)
+        batched_sparsify = torch.block_diag(*batched_sparsify)
+        return batched_sparsify          
+
     def compute_loss(self, model, inputs, return_outputs=False):
         inputs = self._pad_to_window_size(inputs) 
-        device =inputs["input_ids"].device
+        device = inputs["input_ids"].device
+        # effectively passing in the sparsification scheme w/ or w/o using dgl graph
         if self.use_dgl:
-            batched_g = self._from_adj_to_batched_graphs(inputs["input_ids"]).to(device)
-            inputs["g"] = batched_g
-        else:            
-            inputs["g"] = None
+            # sparsification specified by graph through nodes
+            inputs["g"] = self._from_adj_to_batched_graphs(inputs["input_ids"]).to(device)
+        else:      
+            # sparsification specified through tensor      
+            inputs["g"] = self._from_adj_to_batched_sparsify(inputs["input_ids"]).to(device)
         if self.label_smoother is not None and "labels" in inputs:
             labels = inputs.pop("labels")
         else:

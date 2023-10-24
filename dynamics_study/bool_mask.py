@@ -89,8 +89,13 @@ fig, axs = plt.subplots(nrows, ncols)
 for hidx in range(wadj.shape[0]):
     # cmap=cmp
     axs[0,hidx].imshow(wadj[hidx].detach().numpy(), cmap="Greys", interpolation=None)
-axs[1,0].imshow(wadj2[0,:seq_len,:seq_len].detach().numpy(), cmap="Greys", interpolation=None)
-axs[1,1].imshow(wadj2[0,seq_len:2*seq_len,seq_len:2*seq_len].detach().numpy(), cmap="Greys", interpolation=None)
+    axs[1,hidx].imshow(wadj2[hidx].detach().numpy(), cmap="Greys", interpolation=None)
+#axs[1,0].imshow(wadj2[0,:seq_len,:seq_len].detach().numpy(), cmap="Greys", interpolation=None)
+#axs[1,1].imshow(wadj2[0,seq_len:2*seq_len,seq_len:2*seq_len].detach().numpy(), cmap="Greys", interpolation=None)
+
+# labels
+axs[0,0].ylabel("Method 1 using DGL")
+axs[1,0].ylabel("Method 2 using PyTorch")
 
 # masking across different heads are equal
 print(f"{(wadj[0]==wadj[1]).sum()}, {(batch_size*seq_len)**2}")

@@ -44,13 +44,12 @@ g.ndata["h"] = g.ndata["v"]
 
 # get weight matrix
 """
-num_nodes = g.num_nodes()
-num_heads = g.edata['score'].shape[1]
-wadj = torch.zeros([num_heads, num_nodes, num_nodes])
-num_edges = g.num_edges()
-for hidx in range(num_heads):
-    for eidx, ij in enumerate(g.edges()):
-        wadj[ij[0], ij[1]] = g.edata['score'][eidx][hidx]
+src, dst = g.edges()
+num_nodes, num_edges = g.num_nodes(), g.num_edges()   
+wadj = torch.zeros([num_heads, num_nodes, num_nodes]) 
+for eidx in tqdm(range(num_edges)):  # there should be a more efficient message passing method
+    src_node, dst_node = src[eidx], dst[eidx]
+    wadj[:, src_node, dst_node] = g.edata['score'][eidx].squeeze()
 
 #h_new = (g.ndata["h"].T @ wadj.T).T
 h_new = wadj.T @ g.ndata["h"]

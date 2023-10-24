@@ -1,13 +1,16 @@
+import os
+import sys
+from os.path import join, normpath
+sys.path.append(os.getcwd())
+from path_setup import droot    
+
+
 def get_dims():
     import dgl
     import torch
     import numpy as np
     import os
     import uuid
-    import sys
-
-    sys.path.append(os.getcwd())
-    from path_setup import droot
 
     from os.path import join
     from sklearn.metrics import f1_score
@@ -195,7 +198,6 @@ def save_sparse_pattern():
     adj = np.zeros([max_len, max_len])
 
     # add global att    
-    num_global = trainer.config.num_glob
     idx = np.random.choice(range(attention_window,max_len), num_global ,replace=False)
     adj[idx,:] = 1
     adj[:,idx] = 1
@@ -213,10 +215,6 @@ def plot_pattern():
     import matplotlib as mpl
     import matplotlib.pyplot as plt
     import numpy as np
-    import os
-    from os.path import join, normpath
-    sys.path.append(os.getcwd())
-    from path_setup import droot    
 
     global adj, data_dir, pattern_types, pattern_type
     global possible_seq_len, src_dst
@@ -225,6 +223,9 @@ def plot_pattern():
     possible_seq_len, src_dst = save_sparse_pattern()
 
     pattern_types = ["local_pattern", "random_pattern", "global_pattern"]
+
+    data_dir = join(droot, "sparse_pattern")
+    if not os.path.isdir(data_dir): os.makedirs(data_dir)
 
     alphas = [1, 0.65, 0.3]
     colors = ["red", "blue", "orange"]
@@ -246,8 +247,6 @@ def plot_pattern():
 
         #break
 
-    data_dir = join(droot, "sparse_pattern")
-    if not os.path.isdir(data_dir): os.makedirs(data_dir)
     plt.legend(bbox_to_anchor=(1, 1), loc="upper left")
     #plt.show()
     plt.savefig(join(droot, "sparse_pattern", "sparsify_cmap.pdf"))

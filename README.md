@@ -45,6 +45,14 @@ CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.launch --nproc_per_node=2 t
  ```
 Model configurations are listed in [config.json](./models/config.json) and training arguments can be changed in [train_classification_imdb.py](./train_classification_imdb.py)
 
+To run general sequence classification tasks
+    - `python main_seq_classification.py --train_with_ddp=True --lr=0.01` (as an example)
+To qsub jobs
+    - `python submit_main.py`
+
+To get sparsification pattern saved as figure:
+    - python dynamics_study/sparse_pattern_design.py plot_pattern
+
 
 ## References
 ****

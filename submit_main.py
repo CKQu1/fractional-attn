@@ -2,9 +2,7 @@ import os
 from os.path import isfile, join
 from path_setup import droot
 
-# main dir
-repo_dir = os.getcwd()
-
+repo_dir = os.getcwd()  # main dir
 def command_setup(ngpus, ncpus, singularity_path):
     assert isfile(singularity_path), "singularity_path does not exist!"
 
@@ -15,10 +13,12 @@ def command_setup(ngpus, ncpus, singularity_path):
 
     additional_command = ''
     train_with_ddp = False
-    if ngpus <= 1 and ncpus <= 1:
+    if max(ngpus, ncpus) <= 1:
         command += f" python"
     elif ngpus > 1:
-        command += f" CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.launch --nproc_per_node={ngpus}"
+        #command += f" CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.launch --nproc_per_node={ngpus}"
+        #additional_command = 'run --backend=nccl'
+        command += f" torchrun --nproc_per_node={ngpus}"        
         train_with_ddp = True
     elif ngpus == 0 and ncpus > 1:
         #python -m torch.distributed.launch --nproc_per_node=4 --use_env train_classification_imdb.py run --backend=gloo
@@ -46,7 +46,7 @@ def get_pbs_array_data(kwargss):
         pbs_array_data.append(tuple(args_ls))
     return pbs_array_data
 
-def train_submit(script_name, ngpus, ncpus, kwargss):
+def train_submit(script_name, ngpus, ncpus, kwargss, **kwargs):
     assert isfile(script_name), f"{script_name} does not exist!"
 
     # computing resource settings
@@ -57,22 +57,18 @@ def train_submit(script_name, ngpus, ncpus, kwargss):
     from qsub_parser import qsub, job_divider
     project_ls = ["ddl"]  # can add more projects here
     pbs_array_data = get_pbs_array_data(kwargss)
-    #print(pbs_array_data)
-    #print(len(pbs_array_data))        
+    #print(pbs_array_data)    
     
     perm, pbss = job_divider(pbs_array_data, len(project_ls))
     for idx, pidx in enumerate(perm):
         pbs_array_true = pbss[idx]
         print(project_ls[pidx])
-
-        kwargs_qsub = {#"path":join(droot, "trained_seq_classification"), 
-                       #"path":join(droot, "qsub_parser_test"),
-                       "path":join(droot, "main_seq_classification"),
+        kwargs_qsub = {"path":kwargs.get("job_path"),  # acts as PBSout
                        "P":project_ls[pidx],
                        "ngpus":ngpus, 
                        "ncpus":ncpus, 
                        "walltime":'23:59:59', 
-                       "mem":"20GB"}        
+                       "mem":"10GB"}        
         if len(additional_command) > 0:
             kwargs_qsub["additional_command"] = additional_command
 
@@ -81,17 +77,26 @@ def train_submit(script_name, ngpus, ncpus, kwargss):
 if __name__ == '__main__':
 
     # script for running
-    #script_name = join(repo_dir, "main_seq_classification.py")
     script_name = "main_seq_classification.py"
-    ngpus, ncpus = 0, 4
-    train_with_ddp = True
-    kwargss = [ {"with_frac":False}, {"with_frac":True, "gamma":0.5} ]
-    # "qsub_parser_test"
-    common_kwargs = {"gradient_accumulation_steps":1, "model_dir":join(droot, "main_seq_classification"),
-                     "epochs": 0.1,
-                     "warmup_steps":10, "eval_steps":50, "logging_steps":50, "save_steps":50,
-                     "per_device_eval_batch_size":2,
-                     "train_with_ddp":train_with_ddp}
-    kwargss = add_common_kwargs(kwargss, common_kwargs)
+    ngpus, ncpus = 0, 2
+    train_with_ddp = True if max(ngpus, ncpus) > 1 else False
+    kwargss = [ {}, {"with_frac":True, "gamma":0.5} ]  # empty dict is diffuser
+    
+    debug_mode = True
+    if not debug_mode:
+        model_dir = join(droot, "main_seq_classification")
+        common_kwargs = {"gradient_accumulation_steps":4, "model_dir":model_dir,
+                        "epochs": 0.1,
+                        "warmup_steps":10, "eval_steps":50, "logging_steps":50, "save_steps":50,
+                        "per_device_eval_batch_size":2}
+    else:
+        model_dir = join(droot, "debug_mode")
+        common_kwargs = {"gradient_accumulation_steps":1, "model_dir":model_dir,
+                        "max_steps": 2,
+                        "warmup_steps":0, "eval_steps":1, "logging_steps":1, "save_steps":1,
+                        "per_device_eval_batch_size":2}        
+    if train_with_ddp:
+        common_kwargs["common_kwargs"] = common_kwargs
 
-    train_submit(script_name, ngpus, ncpus, kwargss)
+    kwargss = add_common_kwargs(kwargss, common_kwargs)
+    train_submit(script_name, ngpus, ncpus, kwargss, job_path=model_dir)

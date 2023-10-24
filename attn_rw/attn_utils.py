@@ -38,7 +38,7 @@ from graphtrainer import graphTrainer
 #logging.set_verbosity_debug()
 #logger = logging.get_logger()
 
-def get_hidden_states(dataset_name, max_length=1024, config_path=f"{repo_dir}/models/config_simple.json"):
+def get_hidden_states(dataset_name, max_length=1024, use_dgl=True, config_path=f"{repo_dir}/models/config_simple.json"):
 
     def preprocess_function(examples):
         return tokenizer(examples['text'], padding = 'max_length', truncation=True, max_length = max_length)
@@ -65,9 +65,9 @@ def get_hidden_states(dataset_name, max_length=1024, config_path=f"{repo_dir}/mo
 
     #tokenizer = RobertaTokenizer.from_pretrained("./roberta-tokenizer", max_length = max_length)
     tokenizer = RobertaTokenizer(tokenizer_file = f"{repo_dir}/roberta-tokenizer/tokenizer.json",
-                                vocab_file     = f"{repo_dir}/roberta-tokenizer/vocab.json",
-                                merges_file    = f"{repo_dir}/roberta-tokenizer/merges.txt",
-                                max_length     = max_length)
+                                 vocab_file     = f"{repo_dir}/roberta-tokenizer/vocab.json",
+                                 merges_file    = f"{repo_dir}/roberta-tokenizer/merges.txt",
+                                 max_length     = max_length)
 
     # save tokenized dataset
     dataset_dir = join(droot, "DATASETS", f"tokenized_{dataset_name}")
@@ -117,6 +117,7 @@ def get_hidden_states(dataset_name, max_length=1024, config_path=f"{repo_dir}/mo
     training_args.save_steps    = int(steps_per_train_epoch)
 
     trainer = graphTrainer(
+        use_dgl = use_dgl,
         model = model,
         config = config,
         args = training_args,
@@ -180,6 +181,7 @@ def get_hidden_states(dataset_name, max_length=1024, config_path=f"{repo_dir}/mo
     trainset = _pad_to_window_size(trainset)
 
     # from graphtrainer.py
+    """
     def _from_adj_to_batched_graphs(input_ids):
         input_ids = torch.tensor(input_ids)     # added
 
@@ -195,10 +197,15 @@ def get_hidden_states(dataset_name, max_length=1024, config_path=f"{repo_dir}/mo
 
     #batched_g = _from_adj_to_batched_graphs(trainset['input_ids'])
     batched_g = _from_adj_to_batched_graphs(dset['input_ids'])
+    """
 
     #device = trainset["input_ids"].device
-    #trainset["g"] = batched_g
     device = dset["input_ids"].device
+    if use_dgl:
+        batched_g = trainer._from_adj_to_batched_graphs(dset['input_ids']).to(device)
+    else:
+        batched_g = trainer._from_adj_to_batched_sparsify(dset['input_ids']).to(device)
+    #trainset["g"] = batched_g    
     dset["g"] = batched_g
 
     ## 0.3 DiffuserEmbeddings ------------------------------------------------------------
@@ -355,7 +362,6 @@ def get_hidden_states(dataset_name, max_length=1024, config_path=f"{repo_dir}/mo
     output_attentions=False
     output_hidden_states=False
     return_dict=True
-
 
     is_index_masked = attention_mask < 0
     is_index_global_attn = attention_mask > 0

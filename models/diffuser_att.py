@@ -40,8 +40,8 @@ class DiffuserAttention(nn.Module):
             error_message = f"gamma = {kwargs.get('gamma')} with type {type(kwargs.get('gamma'))} for FracSelfAttention is ill-defined!"
             assert 0 < kwargs.get('gamma') < 1, error_message
             gamma = kwargs.get('gamma')
-            #self.self = LimitFracSelfAttention(config, layer_id, gamma)
-            self.self = LimitFracSelfAttention_dgl(config, layer_id, gamma)
+            self.self = LimitFracSelfAttention(config, layer_id, gamma)
+            #self.self = LimitFracSelfAttention_dgl(config, layer_id, gamma)
         self.output = DiffuserSelfOutput(config)
 
     def forward(
@@ -380,7 +380,7 @@ class LimitFracSelfAttention(nn.Module):
         value_vectors =  value_vectors.reshape(-1, self.num_heads, self.head_dim)  #BN,H,D        
         
         Bmat = torch.bmm( key_vectors.transpose(0,1), query_vectors.transpose(0,1).transpose(1,2) )  # KQ product: H,BN,BN
-        Bmat = Bmat.exp()  # no softmax applied, consistent with Diffuser
+        Bmat = Bmat.exp()  # no softmax applied, consistent with Diffuser RW model
         #Bmat = nn.functional.dropout(Bmat, p=self.dropout, training=self.training)
 
         # attn sparsification
@@ -389,8 +389,8 @@ class LimitFracSelfAttention(nn.Module):
         #with torch.no_grad():
         #   Bmat *= g
 
-        bool_mask = (attention_mask>=0).reshape(-1).unsqueeze(-1)
-        Bmat.masked_fill_(bool_mask==False, 0)  # attention mask
+        bool_mask = (attention_mask>=0).reshape(-1).unsqueeze(-1).int()
+        Bmat.masked_fill_((bool_mask @ bool_mask.T)==False, 0)  # attention mask
         BN = seq_len * batch_size    
         out_degree = Bmat.sum(axis=2)
         rhos = out_degree.max(axis=1).values 

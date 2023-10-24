@@ -142,8 +142,25 @@ class graphTrainer(Trainer):
             labels = inputs.pop("labels")
         else:
             labels = None
-
         outputs = model(**inputs)
+
+        # code for calculating accuracy
+        """
+        from sklearn.metrics import accuracy_score
+        if "labels" in inputs:
+            preds = outputs.logits.detach()
+            acc1 = accuracy_score(inputs.labels.reshape(1, len(inputs.labels))[0], preds.argmax(axis=1))
+            self.log({'accuracy_score': acc1})
+            acc = (
+                (preds.argmax(axis=-1) == inputs.labels.reshape(1, len(inputs.labels))[0])
+                .type(torch.float)
+                .mean()
+                .item()
+            )
+            self.log({"train_accuracy": acc})
+        """
+        # end code for calculating accuracy
+
         # Save past state if it exists
         # TODO: this needs to be fixed and made cleaner later.
         if self.args.past_index >= 0:
@@ -155,4 +172,4 @@ class graphTrainer(Trainer):
             # We don't use .loss here since the model may return tuples instead of ModelOutput.
             loss = outputs["loss"] if isinstance(outputs, dict) else outputs[0]
 
-        return (loss, outputs) if return_outputs else loss
+        return (loss, outputs) if return_outputs else loss      

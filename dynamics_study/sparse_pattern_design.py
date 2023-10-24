@@ -4,7 +4,6 @@ from os.path import join, normpath
 sys.path.append(os.getcwd())
 from path_setup import droot    
 
-
 def get_dims():
     import dgl
     import torch

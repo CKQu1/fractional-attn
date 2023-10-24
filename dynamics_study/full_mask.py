@@ -33,7 +33,7 @@ query_vectors = query_vectors.view(seq_len, batch_size, num_heads, head_dim).tra
 key_vectors = key_vectors.view(seq_len, batch_size, num_heads, head_dim).transpose(0, 1) # (B,N,H,D)
 value_vectors = value_vectors.view(seq_len, batch_size, num_heads, head_dim).transpose(0, 1) #B,N,H,D
 
-#bool_mask = (attention_mask>=0 )
+#bool_mask = (attention_mask>=0 )  # original bool_mask in diffuser
 bool_mask = (attention_mask>0 )
 g = g.local_var()
 g.ndata["mask"] = bool_mask.reshape(-1).unsqueeze(-1)        #BN,1
@@ -69,6 +69,7 @@ fig, axs = plt.subplots(nrows, ncols)
 #axs = axs.flat
 for hidx in range(wadj.shape[0]):
     # cmap=cmp
+    axs[0,hidx].imshow(wadj[hidx].detach().numpy(), cmap="Greys", interpolation=None)
     axs[0,hidx].imshow(wadj[hidx].detach().numpy(), cmap="Greys", interpolation=None)
 axs[1,0].imshow(wadj[0,:seq_len,:seq_len].detach().numpy(), cmap="Greys", interpolation=None)
 axs[1,1].imshow(wadj[0,seq_len:2*seq_len,seq_len:2*seq_len].detach().numpy(), cmap="Greys", interpolation=None)

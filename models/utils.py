@@ -38,7 +38,7 @@ def frac_mask_attention_score(edges):
     edge_mask = (edges.src['mask']*edges.dst['mask']).unsqueeze(-1) #E,1
                                                     #edges.data['score']: [E,H,1]
 
-    return {"score": edges.data['score'].masked_fill_(edge_mask==False,0)}    
+    return {"score": edges.data['score'].masked_fill_(edge_mask==False,0)}
 
 def convert_edge_feat_to_adj_form(edge_feat,n_nodes = 128):
     edge_feat=g.edata['score'] #[E,H]

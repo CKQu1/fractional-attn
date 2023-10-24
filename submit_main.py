@@ -66,12 +66,13 @@ def train_submit(script_name, ngpus, ncpus, kwargss):
         print(project_ls[pidx])
 
         kwargs_qsub = {#"path":join(droot, "trained_seq_classification"), 
-                       "path":join(droot, "qsub_parser_test"),
+                       #"path":join(droot, "qsub_parser_test"),
+                       "path":join(droot, "main_seq_classification"),
                        "P":project_ls[pidx],
                        "ngpus":ngpus, 
                        "ncpus":ncpus, 
                        "walltime":'23:59:59', 
-                       "mem":"8GB"}        
+                       "mem":"20GB"}        
         if len(additional_command) > 0:
             kwargs_qsub["additional_command"] = additional_command
 
@@ -82,9 +83,15 @@ if __name__ == '__main__':
     # script for running
     #script_name = join(repo_dir, "main_seq_classification.py")
     script_name = "main_seq_classification.py"
-    ngpus, ncpus = 0, 2
+    ngpus, ncpus = 0, 4
+    train_with_ddp = True
     kwargss = [ {"with_frac":False}, {"with_frac":True, "gamma":0.5} ]
-    common_kwargs = {"max_steps":5, "gradient_accumulation_steps":1}
+    # "qsub_parser_test"
+    common_kwargs = {"gradient_accumulation_steps":1, "model_dir":join(droot, "main_seq_classification"),
+                     "epochs": 0.1,
+                     "warmup_steps":10, "eval_steps":50, "logging_steps":50, "save_steps":50,
+                     "per_device_eval_batch_size":2,
+                     "train_with_ddp":train_with_ddp}
     kwargss = add_common_kwargs(kwargss, common_kwargs)
 
     train_submit(script_name, ngpus, ncpus, kwargss)

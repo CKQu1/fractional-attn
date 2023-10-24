@@ -34,14 +34,14 @@ class DiffuserAttention(nn.Module):
         super().__init__()
         assert isinstance(kwargs.get('with_frac'), bool), "with_frac must be boolean"
         self.with_frac = kwargs.get('with_frac')
-        if not self.with_frac:
-            self.self = DiffuserSelfAttention(config, layer_id)
-        else:
-            error_message = f"gamma = {kwargs.get('gamma')} with type {type(kwargs.get('gamma'))} for FracSelfAttention is ill-defined!"
+        if self.with_frac:
+            error_message = f"gamma = {kwargs.get('gamma')} with type {type(kwargs.get('gamma'))} is ill-defined!"
             assert 0 < kwargs.get('gamma') < 1, error_message
             gamma = kwargs.get('gamma')
             self.self = LimitFracSelfAttention(config, layer_id, gamma)
             #self.self = LimitFracSelfAttention_dgl(config, layer_id, gamma)
+        else:
+            self.self = DiffuserSelfAttention(config, layer_id)          
         self.output = DiffuserSelfOutput(config)
 
     def forward(

@@ -73,14 +73,14 @@ for ii in tqdm(range(1, N_approx+1)):
     coef = numerator/denominator            
     #print(coef)  # delete
     g.update_all(fn.u_mul_e('B_power', 'B', 'm'), fn.sum('m', 'B_power'))
-    g.apply_nodes(lambda nodes: {'L_gamma' : nodes.data['L_gamma'] +     nodes.data['B_power']})
+    g.apply_nodes(lambda nodes: {'L_gamma' : nodes.data['L_gamma'] + coef * nodes.data['B_power']})
     #g.ndata['L_gamma']= nn.functional.dropout(g.ndata['L_gamma'], p=p_dropout, training=training_dropout)    
 g.apply_nodes(lambda nodes: {'L_gamma' : rhos**gamma * nodes.data['L_gamma']})
 
 # extract diagonals of L_gamma for limiting/stationary distribution
 L_gamma_diags = torch.diagonal( g.ndata["L_gamma"].transpose(0,1), dim1=-1, dim2=-2 )
 L_gamma_diags = L_gamma_diags / L_gamma_diags.sum(axis=1).unsqueeze(dim=-1)
-s_dist = L_gamma_diags.unsqueeze(dim=-1).repeat(1,1,BN)
+s_dist = L_gamma_diags.unsqueeze(dim=-2).repeat(1,BN,1)
 value_vectors = value_vectors.reshape(-1, num_heads, head_dim)
 attn_output = torch.bmm(s_dist, value_vectors.transpose(0,1))
 

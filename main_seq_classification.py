@@ -155,7 +155,7 @@ if __name__ == '__main__':
         tokenized_dataset = load_from_disk(dataset_dir)
 
     # ---------- REMOVE LATER ----------  
-    divider = 250  
+    divider = 500  
     tokenized_dataset['test'] = tokenized_dataset['test'].filter(lambda example, idx: idx % divider == 0, with_indices=True)
 
     data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
@@ -163,23 +163,27 @@ if __name__ == '__main__':
     config = DiffuserConfig.from_json_file(f"{repo_dir}/models/config_simple.json")
     config.num_labels = 2
     with_frac = args.with_frac
+    attn_setup = {"with_frac":with_frac}
+    print(f"with_frac: type {type(with_frac)} value {with_frac}")
     if with_frac:
-        attn_setup = {"with_frac":with_frac, "gamma":args.gamma}
-    else:
-        attn_setup = {"with_frac":with_frac}
+        attn_setup["gamma"] = args.gamma     
     model =  DiffuserForSequenceClassification(config, **attn_setup).to(dev) 
-    
+
+    #if_create_model = not train_with_ddp
+    #if train_with_ddp:
+    #    if_create_model = if_create_model or (torch.distributed.get_rank() == 0)
+    #if (not train_with_ddp) or (train_with_ddp and torch.distributed.get_rank() == 0):        
     if args.model_dir == None:                
-        # "trained_seq_classification" or "debug_mode" 
-        model_root_dir = join(droot, "trained_seq_classification")
-        #uuid_ = str(uuid.uuid4())[:8]  # for labelling training instance
-        if with_frac:            
-            model_root_dir = join(model_root_dir, f"save_{args.dataset_name}_frac_diffuser_test")
-        else:            
-            model_root_dir = join(model_root_dir, f"save_{args.dataset_name}_diffuser_test")
+        model_root_dir = join(droot, "trained_models", "seq_classification")            
     else:
         model_root_dir = args.model_dir
+    if with_frac:            
+        model_root_dir = join(model_root_dir, f"save_{args.dataset_name}_frac_diffuser_test")
+    else:            
+        model_root_dir = join(model_root_dir, f"save_{args.dataset_name}_diffuser_test")
+    if not os.path.isdir(model_root_dir): os.makedirs(model_root_dir)    
     instance = get_instance(model_root_dir, "model_")
+    #uuid_ = str(uuid.uuid4())[:8]  # for labelling training instance
     model_dir = join(model_root_dir, f"model_{instance}")
     if not os.path.isdir(model_dir): os.makedirs(model_dir)
     
@@ -247,8 +251,8 @@ if __name__ == '__main__':
 
     # get performance history
     #df_model = pd.DataFrame(trainer.state.log_history)
-    #df_model.to_csv(join(model_dir, "model_performance.csv"))
     df_model = convert_train_history(trainer.state.log_history)
+    df_model.to_csv(join(model_dir, "model_performance.csv"))
 
     # save final model
     trainer.save_model()    

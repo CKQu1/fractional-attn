@@ -12,25 +12,30 @@ from sklearn.metrics import f1_score
 from transformers import TrainingArguments, DataCollatorWithPadding
 from transformers import RobertaTokenizer
 from transformers.utils import logging
-from datasets import load_dataset,load_metric,load_from_disk
+from datasets import load_dataset, load_metric, load_from_disk
 from models.diffuser_app import DiffuserForSequenceClassification
 from models.diffuser_utils import DiffuserConfig
 from graphtrainer import graphTrainer
 
-dev = torch.device(f"cuda:{torch.cuda.device_count()}"
-                   if torch.cuda.is_available() else "cpu")  
-print(f"Device in use: {dev}.")
+import warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning) 
+warnings.simplefilter(action='ignore', category=FutureWarning)
+#warnings.filterwarnings("ignore")
 
 # for enumerating each instance of training
 def get_instance(dir, s):
     instances = []
-    for dirname in next(os.walk(dir))[1]:        
-        if s in dirname and len(os.listdir(join(dir, dirname))) > 0:
-            try:                
-                instances.append(int(dirname.split(s)[-1]))
-            except:
-                pass        
-    return max(instances) + 1 if len(instances)>0 else 0
+    dirnames = next(os.walk(dir))[1]
+    if len(dirnames) > 0:
+        for dirname in dirnames:        
+            if s in dirname and len(os.listdir(join(dir, dirname))) > 0:
+                try:                
+                    instances.append(int(dirname.split(s)[-1]))
+                except:
+                    pass        
+        return max(instances) + 1 if len(instances)>0 else 0
+    else:
+        return 0
     
 # convert trainer.state.log_history to df
 def convert_train_history(ls):    
@@ -48,6 +53,8 @@ def convert_train_history(ls):
     df_model = df_model.append(cur_dict, ignore_index=True)
     return df_model
 
+# debug model
+#python -i main_seq_classification --max_steps=1 --logging_steps=1 --save_steps=1 --eval_steps=1 --warmup_steps=0 --gradient_accumulation_steps=1 
 if __name__ == '__main__':
 
     # Training options
@@ -76,7 +83,16 @@ if __name__ == '__main__':
     parser.add_argument('--dataset_name', default='imdb', type=str)    
 
     args = parser.parse_args()    
+
+    dev = torch.device(f"cuda:{torch.cuda.device_count()}"
+                    if torch.cuda.is_available() else "cpu")      
+
     train_with_ddp = torch.distributed.is_available() and args.train_with_ddp
+    local_rank = None
+    if train_with_ddp:
+        local_rank = int(os.environ["LOCAL_RANK"])
+        print(f"local_rank: {local_rank}")    
+        print(f"Device in use: {dev}.")
 
     repo_dir = os.getcwd()  # main dir    
 
@@ -87,52 +103,20 @@ if __name__ == '__main__':
     max_length = args.max_length
     def preprocess_function(examples):
         return tokenizer(examples['text'], padding='max_length', truncation=True, max_length=max_length)
-
-    def compute_metrics(eval_pred):
-        predictions, labels = eval_pred
-        #labels = eval_pred.label_ids
-        predictions = eval_pred.predictions.argmax(1)
-        #predictions = np.argmax(predictions, axis=1)
-        #predictions = predictions[:, 0]
-        #predictions = np.argmax(predictions, axis=-1)
-        # local scripts
-        metric_acc = load_metric(f'{repo_dir}/metrics/accuracy')
-        metric_f1 = load_metric(f'{repo_dir}/metrics/f1')        
-        #acc = metric_acc.compute(predictions=predictions, references=labels)["accuracy"]
-        #f1_score = metric_f1.compute(predictions=predictions, references=labels)["f1"]                   
-        acc = metric_acc.compute(predictions=predictions, references=labels)
-        f1_score = metric_f1.compute(predictions=predictions, references=labels)
-        return {"accuracy": acc, "f1_score": f1_score }
-
-    """
-    # from load_metric()
-    #metric_acc = load_metric("accuracy")
-    #metric_f1 = load_metric("f1")
-    # ----- additional metrics -----           
+    
+    metric_acc = load_metric("accuracy")
+    metric_f1 = load_metric("f1")
     #metric_prcn = load_metric("precision") 
-    #metric_recall = load_metric("recall")   
+    #metric_recall = load_metric("recall")       
     def compute_metrics(eval_pred):
-        preds = eval_pred.predictions[0] if isinstance(eval_pred.predictions, tuple) else eval_pred.predictions
-        #preds = np.squeeze(preds) if is_regression else np.argmax(preds, axis=1)
-        preds = np.argmax(preds, axis=1)
-        labels = eval_pred.label_ids
-        #acc = metric_acc.compute(predictions=preds, references=labels)
-        acc = (preds == p.labels).astype(np.float32).mean().item()
-        #f1_score = metric_f1.compute(predictions=preds, references=labels)
-
-        #return {"accuracy": acc, "f1_score": f1_score }
-        return {"accuracy": acc}
-    """
-
-    """
-    from sklearn.metrics import accuracy_score
-    def compute_metrics(eval_pred):
-        predictions = eval_pred.predictions.argmax(axis=1)
-        labels = eval_pred.label_ids
-        accuracy = accuracy_score(eval_pred.label_ids, eval_pred.predictions.argmax(axis=-1))
-        return {'accuracy': accuracy}    
-        #return accuracy
-    """
+        preds, labels = eval_pred
+        preds = np.argmax(preds, axis=-1)
+        acc = metric_acc.compute(predictions=preds, references=labels)        
+        f1_score = metric_f1.compute(predictions=preds, references=labels)  
+        #precision = metric_prcn.compute(predictions=preds, references=labels)        
+        #recall = metric_recall.compute(predictions=preds, references=labels)                
+        #return {"accuracy":acc,"f1_score":f1_score,"precision":precision,"recall":recall}
+        return {"accuracy":acc,"f1_score":f1_score}
 
     # create cache for dataset
     dataset_dir = join(droot, "DATASETS")
@@ -144,14 +128,14 @@ if __name__ == '__main__':
                                  max_length     = max_length)
     # save tokenized dataset
     dataset_dir = join(droot, "DATASETS", f"tokenized_{args.dataset_name}")
-    if not os.path.isdir(dataset_dir): 
-        print("Downloading data!")
+    if not os.path.isdir(dataset_dir):         
+        print("Downloading data!") if local_rank == 0 or not train_with_ddp else None
         tokenized_dataset = dataset.map(preprocess_function, batched=True)
         tokenized_dataset = tokenized_dataset.map(remove_columns=["text"])
         os.makedirs(dataset_dir)
         tokenized_dataset.save_to_disk(dataset_dir)
-    else:
-        print("Data downloaded, loading from local now!")
+    else:        
+        print("Data downloaded, loading from local now!") if local_rank == 0 or not train_with_ddp  else None
         tokenized_dataset = load_from_disk(dataset_dir)
 
     # ---------- REMOVE LATER ----------  
@@ -164,15 +148,14 @@ if __name__ == '__main__':
     config.num_labels = 2
     with_frac = args.with_frac
     attn_setup = {"with_frac":with_frac}
-    print(f"with_frac: type {type(with_frac)} value {with_frac}")
+    if local_rank == 0 or not train_with_ddp:
+        print("-"*25)
+        print(f"with_frac = {with_frac} and gamma = {args.gamma}")
+        print("-"*25 + "\n")
     if with_frac:
         attn_setup["gamma"] = args.gamma     
     model =  DiffuserForSequenceClassification(config, **attn_setup).to(dev) 
-
-    #if_create_model = not train_with_ddp
-    #if train_with_ddp:
-    #    if_create_model = if_create_model or (torch.distributed.get_rank() == 0)
-    #if (not train_with_ddp) or (train_with_ddp and torch.distributed.get_rank() == 0):        
+      
     if args.model_dir == None:                
         model_root_dir = join(droot, "trained_models", "seq_classification")            
     else:
@@ -181,11 +164,12 @@ if __name__ == '__main__':
         model_root_dir = join(model_root_dir, f"save_{args.dataset_name}_frac_diffuser_test")
     else:            
         model_root_dir = join(model_root_dir, f"save_{args.dataset_name}_diffuser_test")
-    if not os.path.isdir(model_root_dir): os.makedirs(model_root_dir)    
+    if not train_with_ddp or (train_with_ddp and (local_rank==0)): 
+        if not os.path.isdir(model_root_dir): os.makedirs(model_root_dir)    
     instance = get_instance(model_root_dir, "model_")
-    #uuid_ = str(uuid.uuid4())[:8]  # for labelling training instance
     model_dir = join(model_root_dir, f"model_{instance}")
-    if not os.path.isdir(model_dir): os.makedirs(model_dir)
+    if not train_with_ddp or (train_with_ddp and (local_rank==0)): 
+        if not os.path.isdir(model_dir): os.makedirs(model_dir)
     
     training_args_dict = {"output_dir": model_dir,
                           "learning_rate": args.lr,
@@ -210,16 +194,17 @@ if __name__ == '__main__':
         device_name, device_total = "GPU", torch.cuda.device_count()
     else:
         device_name, device_total = "CPU", torch.get_num_threads()
-
     if not train_with_ddp:
         device_total = 1
+        
     steps_per_train_epoch = int(len(tokenized_dataset['train'])/(training_args.per_device_train_batch_size*device_total*training_args.gradient_accumulation_steps ))
-    print("-"*25)
-    print(f"steps_per_train_epoch {steps_per_train_epoch}")
-    print(f"per_device_train_batch_size: {training_args.per_device_train_batch_size}")
-    print(f"{device_name} count: {device_total}")
-    print(f"gradient_accumulation_steps: {training_args.gradient_accumulation_steps}")
-    print("-"*25 + "\n")
+    if local_rank == 0 or not train_with_ddp:
+        print("-"*25)
+        print(f"steps_per_train_epoch {steps_per_train_epoch}")
+        print(f"per_device_train_batch_size: {training_args.per_device_train_batch_size}")
+        print(f"{device_name} count: {device_total}")
+        print(f"gradient_accumulation_steps: {training_args.gradient_accumulation_steps}")
+        print("-"*25 + "\n")
 
     if isinstance(training_args.num_train_epochs, int) and args.max_steps == None:
         training_args.eval_steps    = int(steps_per_train_epoch)
@@ -235,24 +220,27 @@ if __name__ == '__main__':
         eval_dataset = tokenized_dataset["test"],
         tokenizer = tokenizer,
         data_collator = data_collator,
-        #compute_metrics = compute_metrics
+        compute_metrics = compute_metrics
     )
 
     t0_train = time()  # record train time
-    trainer.train()
+    trainer.train(ignore_keys_for_eval=["loss", "hidden_states", "attentions", "global_attentions"])
     train_secs = time() - t0_train
 
-    model_settings = attn_setup
-    model_settings['train_secs'] = train_secs
-    for key_name in model_settings.keys():
-        model_settings[key_name] = [model_settings[key_name]]
-    df = pd.DataFrame(model_settings)
-    df.to_csv(join(model_dir, "model_settings.csv"))
-
     # get performance history
-    #df_model = pd.DataFrame(trainer.state.log_history)
-    df_model = convert_train_history(trainer.state.log_history)
-    df_model.to_csv(join(model_dir, "model_performance.csv"))
+    if len(trainer.state.log_history) > 1:
+        run_perf = convert_train_history(trainer.state.log_history[:-1])
+        col_names = list(run_perf.columns)
+        top_names = ['epoch', 'step', 'learning_rate']
+        top_names += [e for e in col_names if e not in top_names]
+        run_perf = run_perf[top_names]
+        run_perf.to_csv(join(model_dir, "run_performance.csv"))
+
+    model_settings = attn_setup; model_settings['train_secs'] = train_secs
+    model_settings.update(trainer.state.log_history[-1])
+    final_perf = pd.DataFrame()
+    final_perf = final_perf.append(model_settings, ignore_index=True)    
+    final_perf.to_csv(join(model_dir, "final_performance.csv"))
 
     # save final model
-    trainer.save_model()    
+    trainer.save_model(join(model_dir, "final_model"))

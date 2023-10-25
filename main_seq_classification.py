@@ -139,7 +139,7 @@ if __name__ == '__main__':
         tokenized_dataset = load_from_disk(dataset_dir)
 
     # ---------- REMOVE LATER ----------  
-    divider = 500  
+    divider = 25  
     tokenized_dataset['test'] = tokenized_dataset['test'].filter(lambda example, idx: idx % divider == 0, with_indices=True)
 
     data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
@@ -224,7 +224,7 @@ if __name__ == '__main__':
     )
 
     t0_train = time()  # record train time
-    trainer.train(ignore_keys_for_eval=["loss", "hidden_states", "attentions", "global_attentions"])
+    trainer.train()
     train_secs = time() - t0_train
 
     # get performance history

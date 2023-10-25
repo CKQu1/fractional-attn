@@ -77,7 +77,7 @@ Bmat += torch.diag_embed(rhos.unsqueeze(-1).repeat(1, BN))
 B_power = torch.eye(BN, requires_grad=True).reshape(1, BN, BN).repeat(num_heads, 1, 1)
 L_gamma = torch.eye(BN, requires_grad=True).reshape(1, BN, BN).repeat(num_heads, 1, 1)  # row sum zero in the limit
 
-N_approx = 8
+N_approx = 9
 diffs = []
 error_types = ["Diagonal", "Max", "Frobenius"]
 errors = torch.zeros([len(error_types), num_heads, N_approx])    
@@ -96,22 +96,26 @@ with torch.no_grad():
             # trace squared difference
             errors[0, hidx, ii-1] = (torch.diagonal(diff,dim1=-2,dim2=-1)[hidx]**2).sum()
             # difference in max difference
-            errors[1, hidx, ii-1] = diff[hidx].max()            
+            errors[1, hidx, ii-1] = diff[hidx].abs().max()            
             # difference in Frobenius norm
             errors[2, hidx, ii-1] = diff[hidx].sum()**2
-        L_gamma_cur = L_gamma
+        L_gamma_cur = L_gamma.clone()
     L_gamma *= rhos.unsqueeze(-1).unsqueeze(-1)**gamma
 
 nrows, ncols = 2, 2
-fig, axs = plt.subplots(nrows, ncols)
+fig, axs = plt.subplots(nrows, ncols, sharex=True, constrained_layout=True)
 axs = axs.flat
-alphas = np.linspace(0.3, 1, num_heads)[::-1]
+alphas = np.linspace(0.5, 1, num_heads)[::-1]
+linestyles = ["-", "--", ".", ".-"]
 
 for idx, error_type in enumerate(error_types):
     axis = axs[idx]
     for hidx in range(num_heads):
-        axis.plot( list(range(1, N_approx+1)), errors[idx,hidx,:], alpha=alphas[hidx], label=f"Head {hidx+1}" )
+        axis.plot(list(range(1, N_approx+1)), errors[idx,hidx,:], 
+                  alpha=alphas[hidx], linestyle=linestyles[hidx],
+                  label=f"Head {hidx+1}" )
     axis.set_title(f"{error_type}")
+    #axis.set_yscale('log')
 axs[0].legend()
 
 fig_path = join(droot, "laplacian_dynamics")

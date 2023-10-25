@@ -224,7 +224,7 @@ if __name__ == '__main__':
     )
 
     t0_train = time()  # record train time
-    trainer.train()
+    trainer.train(ignore_keys_for_eval=["loss", "hidden_states", "attentions", "global_attentions"])
     train_secs = time() - t0_train
 
     # get performance history

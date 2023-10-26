@@ -100,7 +100,7 @@ if __name__ == '__main__':
         common_kwargs = {"gradient_accumulation_steps":2, "model_dir":model_dir,
                          "max_steps": 2,
                          "warmup_steps":0, "eval_steps":1, "logging_steps":1, "save_steps":1,
-                         "per_device_eval_batch_size":2}        
+                         "per_device_eval_batch_size":2} 
     if train_with_ddp:
         common_kwargs["train_with_ddp"] = train_with_ddp
 

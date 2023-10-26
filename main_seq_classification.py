@@ -88,10 +88,11 @@ if __name__ == '__main__':
                     if torch.cuda.is_available() else "cpu")      
 
     train_with_ddp = torch.distributed.is_available() and args.train_with_ddp
-    local_rank = None
+    global_rank = None
     if train_with_ddp:
-        local_rank = int(os.environ["LOCAL_RANK"])
-        print(f"local_rank: {local_rank}")    
+        world_size =int(os.environ["WORLD_SIZE"])
+        global_rank = int(os.environ["RANK"])
+        print(f"global_rank: {global_rank}")    
         print(f"Device in use: {dev}.")
 
     repo_dir = os.getcwd()  # main dir    
@@ -129,13 +130,13 @@ if __name__ == '__main__':
     # save tokenized dataset
     dataset_dir = join(droot, "DATASETS", f"tokenized_{args.dataset_name}")
     if not os.path.isdir(dataset_dir):         
-        print("Downloading data!") if local_rank == 0 or not train_with_ddp else None
+        print("Downloading data!") if global_rank == 0 or not train_with_ddp else None
         tokenized_dataset = dataset.map(preprocess_function, batched=True)
         tokenized_dataset = tokenized_dataset.map(remove_columns=["text"])
         os.makedirs(dataset_dir)
         tokenized_dataset.save_to_disk(dataset_dir)
     else:        
-        print("Data downloaded, loading from local now!") if local_rank == 0 or not train_with_ddp  else None
+        print("Data downloaded, loading from local now!") if global_rank == 0 or not train_with_ddp  else None
         tokenized_dataset = load_from_disk(dataset_dir)
 
     # ---------- REMOVE LATER ----------  
@@ -148,7 +149,7 @@ if __name__ == '__main__':
     config.num_labels = 2
     with_frac = args.with_frac
     attn_setup = {"with_frac":with_frac}
-    if local_rank == 0 or not train_with_ddp:
+    if global_rank == 0 or not train_with_ddp:
         print("-"*25)
         print(f"with_frac = {with_frac} and gamma = {args.gamma}")
         print("-"*25 + "\n")
@@ -164,11 +165,11 @@ if __name__ == '__main__':
         model_root_dir = join(model_root_dir, f"save_{args.dataset_name}_frac_diffuser_test")
     else:            
         model_root_dir = join(model_root_dir, f"save_{args.dataset_name}_diffuser_test")
-    if not train_with_ddp or (train_with_ddp and (local_rank==0)): 
+    if not train_with_ddp or (train_with_ddp and (global_rank==0)): 
         if not os.path.isdir(model_root_dir): os.makedirs(model_root_dir)    
     instance = get_instance(model_root_dir, "model_")
     model_dir = join(model_root_dir, f"model_{instance}")
-    if not train_with_ddp or (train_with_ddp and (local_rank==0)): 
+    if not train_with_ddp or (train_with_ddp and (global_rank==0)): 
         if not os.path.isdir(model_dir): os.makedirs(model_dir)
     
     training_args_dict = {"output_dir": model_dir,
@@ -189,16 +190,18 @@ if __name__ == '__main__':
     if args.max_steps != None:
         training_args_dict["max_steps"] = args.max_steps
     training_args = TrainingArguments(**training_args_dict)
-
+    
     if dev.type != "cpu":
-        device_name, device_total = "GPU", torch.cuda.device_count()
+        device_name = "GPU"
     else:
-        device_name, device_total = "CPU", torch.get_num_threads()
+        device_name = "CPU"
     if not train_with_ddp:
         device_total = 1
-        
+    else:
+        device_total = world_size
+            
     steps_per_train_epoch = int(len(tokenized_dataset['train'])/(training_args.per_device_train_batch_size*device_total*training_args.gradient_accumulation_steps ))
-    if local_rank == 0 or not train_with_ddp:
+    if global_rank == 0 or not train_with_ddp:
         print("-"*25)
         print(f"steps_per_train_epoch {steps_per_train_epoch}")
         print(f"per_device_train_batch_size: {training_args.per_device_train_batch_size}")

@@ -2,7 +2,6 @@ import argparse
 import numpy as np
 import os
 import pandas as pd
-import uuid
 import torch
 from time import time
 from path_setup import droot
@@ -79,6 +78,7 @@ if __name__ == '__main__':
     parser.add_argument('--with_frac', default=False, type=bool)
     parser.add_argument('--gamma', default=None, type=float)
     parser.add_argument('--model_dir', default=None, type=str)
+    parser.add_argument('--uuid_', default="0", type=str)
     # Dataset settings
     parser.add_argument('--dataset_name', default='imdb', type=str)    
 
@@ -168,12 +168,13 @@ if __name__ == '__main__':
         model_root_dir = join(model_root_dir, f"save_{args.dataset_name}_frac_diffuser_test")
     else:            
         model_root_dir = join(model_root_dir, f"save_{args.dataset_name}_diffuser_test")
-    if not train_with_ddp or (train_with_ddp and (global_rank==0)): 
-        if not os.path.isdir(model_root_dir): os.makedirs(model_root_dir)    
-    instance = get_instance(model_root_dir, "model_")
-    model_dir = join(model_root_dir, f"model_{instance}")
-    if not train_with_ddp or (train_with_ddp and (global_rank==0)): 
-        if not os.path.isdir(model_dir): os.makedirs(model_dir)
+    #if not train_with_ddp or (train_with_ddp and (global_rank==0)): 
+    if not os.path.isdir(model_root_dir): os.makedirs(model_root_dir)    
+    #instance = get_instance(model_root_dir, "model_")
+    #model_dir = join(model_root_dir, f"model_{instance}")
+    model_dir = join(model_root_dir, f"model_{args.uuid_}")
+    #if not train_with_ddp or (train_with_ddp and (global_rank==0)): 
+    if not os.path.isdir(model_dir): os.makedirs(model_dir)
     
     training_args_dict = {"output_dir": model_dir,
                           "learning_rate": args.lr,

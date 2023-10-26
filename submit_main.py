@@ -55,7 +55,7 @@ def train_submit(script_name, ngpus, ncpus, kwargss, **kwargs):
     command, additional_command, train_with_ddp = command_setup(ngpus, ncpus, singularity_path)    
 
     from qsub_parser import qsub, job_divider
-    project_ls = ["ddl"]  # can add more projects here
+    project_ls = ["ddl"]  # can add more projects here    
     pbs_array_data = get_pbs_array_data(kwargss)
     #print(pbs_array_data)    
     
@@ -68,7 +68,8 @@ def train_submit(script_name, ngpus, ncpus, kwargss, **kwargs):
                        "ngpus":ngpus, 
                        "ncpus":ncpus, 
                        "walltime":'23:59:59', 
-                       "mem":"10GB"}        
+                      #"walltime":'0:29:59', 
+                       "mem":"20GB"}        
         if len(additional_command) > 0:
             kwargs_qsub["additional_command"] = additional_command
 
@@ -78,25 +79,31 @@ if __name__ == '__main__':
 
     # script for running
     script_name = "main_seq_classification.py"
-    ngpus, ncpus = 0, 2
-    train_with_ddp = True if max(ngpus, ncpus) > 1 else False
-    kwargss = [ {}, {"with_frac":True, "gamma":0.5} ]  # empty dict is diffuser
+    ngpus, ncpus = 0, 4
+    train_with_ddp = True if max(ngpus, ncpus) > 1 else False    
     
-    debug_mode = True
+    debug_mode = False
     if not debug_mode:
+        kwargss = [{}, {"with_frac":True, "gamma":0.25}, 
+                   {"with_frac":True, "gamma":0.5}, {"with_frac":True, "gamma":0.75}]  # empty dict is diffuser
+
         model_dir = join(droot, "main_seq_classification")
         common_kwargs = {"gradient_accumulation_steps":4, "model_dir":model_dir,
-                        "epochs": 0.1,
-                        "warmup_steps":10, "eval_steps":50, "logging_steps":50, "save_steps":50,
-                        "per_device_eval_batch_size":2}
+                         #"epochs": 0.1,
+                         "max_steps": 50,
+                         "warmup_steps":10, "eval_steps":5, "logging_steps":5, "save_steps":5,
+                         "per_device_eval_batch_size":2}
     else:
+        kwargss = [{}, {"with_frac":True, "gamma":0.5}, 
+                   {"with_frac":True, "gamma":0.75} ]  # empty dict is diffuser
         model_dir = join(droot, "debug_mode")
-        common_kwargs = {"gradient_accumulation_steps":1, "model_dir":model_dir,
-                        "max_steps": 2,
-                        "warmup_steps":0, "eval_steps":1, "logging_steps":1, "save_steps":1,
-                        "per_device_eval_batch_size":2}        
+        common_kwargs = {"gradient_accumulation_steps":2, "model_dir":model_dir,
+                         "max_steps": 2,
+                         "warmup_steps":0, "eval_steps":1, "logging_steps":1, "save_steps":1,
+                         "per_device_eval_batch_size":2}        
     if train_with_ddp:
-        common_kwargs["common_kwargs"] = common_kwargs
+        common_kwargs["train_with_ddp"] = train_with_ddp
 
     kwargss = add_common_kwargs(kwargss, common_kwargs)
+    #print(kwargss)
     train_submit(script_name, ngpus, ncpus, kwargss, job_path=model_dir)

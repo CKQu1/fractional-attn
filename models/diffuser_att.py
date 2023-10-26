@@ -400,6 +400,7 @@ class LimitFracSelfAttention(nn.Module):
         B_power = torch.eye(BN, requires_grad=True).reshape(1, BN, BN).repeat(self.num_heads, 1, 1)
         L_gamma = torch.eye(BN, requires_grad=True).reshape(1, BN, BN).repeat(self.num_heads, 1, 1)        
 
+        Bmat = Bmat.to_sparse()  # convert to sparse for speed-up
         N_approx = 6    
         numerator, denominator = 1, 1
         #error_tolerence = 1e-5  # should this be introduced?
@@ -408,7 +409,7 @@ class LimitFracSelfAttention(nn.Module):
                 numerator *= (self.gamma - ii + 1) * (-1)
                 denominator *= ii * rhos
                 coef = numerator/denominator            
-                B_power = torch.bmm(B_power, Bmat)  # apply dropout after this?          
+                B_power = torch.bmm(Bmat, B_power)  # bmm supports format sparse bmm dense only
                 L_gamma += coef.unsqueeze(-1).unsqueeze(-1) * B_power
             L_gamma *= rhos.unsqueeze(-1).unsqueeze(-1)**self.gamma
 

@@ -1,3 +1,4 @@
+import uuid
 import os
 from os.path import isfile, join
 from path_setup import droot
@@ -69,7 +70,7 @@ def train_submit(script_name, ngpus, ncpus, kwargss, **kwargs):
                        "ncpus":ncpus, 
                        "walltime":'23:59:59', 
                       #"walltime":'0:29:59', 
-                       "mem":"20GB"}        
+                       "mem":"8GB"}        
         if len(additional_command) > 0:
             kwargs_qsub["additional_command"] = additional_command
 
@@ -79,10 +80,10 @@ if __name__ == '__main__':
 
     # script for running
     script_name = "main_seq_classification.py"
-    ngpus, ncpus = 0, 4
+    ngpus, ncpus = 0, 1
     train_with_ddp = True if max(ngpus, ncpus) > 1 else False    
     
-    debug_mode = False
+    debug_mode = True
     if not debug_mode:
         kwargss = [{}, {"with_frac":True, "gamma":0.25}, 
                    {"with_frac":True, "gamma":0.5}, {"with_frac":True, "gamma":0.75}]  # empty dict is diffuser
@@ -99,11 +100,13 @@ if __name__ == '__main__':
         model_dir = join(droot, "debug_mode")
         common_kwargs = {"gradient_accumulation_steps":2, "model_dir":model_dir,
                          "max_steps": 2,
-                         "warmup_steps":0, "eval_steps":1, "logging_steps":1, "save_steps":1,
+                         "warmup_steps":0, "eval_steps":2, "logging_steps":2, "save_steps":2,
                          "per_device_eval_batch_size":2} 
     if train_with_ddp:
         common_kwargs["train_with_ddp"] = train_with_ddp
-
     kwargss = add_common_kwargs(kwargss, common_kwargs)
+    
+    for idx in range(len(kwargss)):
+        kwargss[idx]["uuid_"] = str(uuid.uuid4())[:8]
     #print(kwargss)
     train_submit(script_name, ngpus, ncpus, kwargss, job_path=model_dir)

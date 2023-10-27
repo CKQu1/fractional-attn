@@ -1,9 +1,42 @@
-import uuid
 import os
 from os.path import isfile, join
 from path_setup import droot
-
 repo_dir = os.getcwd()  # main dir
+
+# for enumerating each instance of training
+def get_instance(dir, s):
+    instances = []
+    dirnames = next(os.walk(dir))[1]
+    if len(dirnames) > 0:
+        for dirname in dirnames:        
+            if s in dirname and len(os.listdir(join(dir, dirname))) > 0:
+                try:                
+                    instances.append(int(dirname.split(s)[-1]))
+                except:
+                    pass        
+        return max(instances) + 1 if len(instances)>0 else 0
+    else:
+        return 0
+
+def create_model_dir(model_root_dir, **kwargs):
+    with_frac = kwargs.get("with_frac", False)
+    gamma = kwargs.get('gamma', None)
+    dataset_name = kwargs.get('dataset_name', 'imdb')
+    model_name = kwargs.get('model_name', 'diffuser')
+    if (model_name == 'diffuser') and with_frac:                   
+        model_root_dir = join(model_root_dir, f"save_{dataset_name}_frac_{model_name}")
+    else:            
+        model_root_dir = join(model_root_dir, f"save_{dataset_name}_{model_name}")
+    if not os.path.isdir(model_root_dir): os.makedirs(model_root_dir)    
+    if with_frac:    
+        instance = get_instance(model_root_dir, f"gamma={gamma}")
+        model_dir = join(model_root_dir, f"model={instance}_gamma={gamma}")
+    else:
+        instance = get_instance(model_root_dir, "model=")
+        model_dir = join(model_root_dir, f"model={instance}")     
+    if not os.path.isdir(model_dir): os.makedirs(model_dir)        
+    return model_dir    
+
 def command_setup(ngpus, ncpus, singularity_path):
     assert isfile(singularity_path), "singularity_path does not exist!"
 
@@ -56,7 +89,7 @@ def train_submit(script_name, ngpus, ncpus, kwargss, **kwargs):
     command, additional_command, train_with_ddp = command_setup(ngpus, ncpus, singularity_path)    
 
     from qsub_parser import qsub, job_divider
-    project_ls = ["ddl"]  # can add more projects here    
+    project_ls = ["ddl"]  # can add more projects here
     pbs_array_data = get_pbs_array_data(kwargss)
     #print(pbs_array_data)    
     
@@ -70,17 +103,18 @@ def train_submit(script_name, ngpus, ncpus, kwargss, **kwargs):
                        "ncpus":ncpus, 
                        "walltime":'23:59:59', 
                       #"walltime":'0:29:59', 
-                       "mem":"8GB"}        
+                       "mem":"16GB"}        
         if len(additional_command) > 0:
             kwargs_qsub["additional_command"] = additional_command
 
         qsub(f'{command} {script_name}', pbs_array_true, **kwargs_qsub)   
+        print("\n")
 
 if __name__ == '__main__':
 
     # script for running
     script_name = "main_seq_classification.py"
-    ngpus, ncpus = 0, 1
+    ngpus, ncpus = 0, 4
     train_with_ddp = True if max(ngpus, ncpus) > 1 else False    
     
     debug_mode = True
@@ -88,25 +122,27 @@ if __name__ == '__main__':
         kwargss = [{}, {"with_frac":True, "gamma":0.25}, 
                    {"with_frac":True, "gamma":0.5}, {"with_frac":True, "gamma":0.75}]  # empty dict is diffuser
 
-        model_dir = join(droot, "main_seq_classification")
-        common_kwargs = {"gradient_accumulation_steps":4, "model_dir":model_dir,
+        model_root_dir = join(droot, "main_seq_classification")
+        common_kwargs = {"gradient_accumulation_steps":4,
                          #"epochs": 0.1,
                          "max_steps": 50,
                          "warmup_steps":10, "eval_steps":5, "logging_steps":5, "save_steps":5,
                          "per_device_eval_batch_size":2}
     else:
-        kwargss = [{}, {"with_frac":True, "gamma":0.5}, 
+        kwargss = [{}, {"with_frac":True, "gamma":0.25}, {"with_frac":True, "gamma":0.5}, 
                    {"with_frac":True, "gamma":0.75} ]  # empty dict is diffuser
-        model_dir = join(droot, "debug_mode")
-        common_kwargs = {"gradient_accumulation_steps":2, "model_dir":model_dir,
+        model_root_dir = join(droot, "debug_mode6")
+        common_kwargs = {"gradient_accumulation_steps":2,
                          "max_steps": 2,
                          "warmup_steps":0, "eval_steps":2, "logging_steps":2, "save_steps":2,
+                         "per_device_train_batch_size":2,
                          "per_device_eval_batch_size":2} 
     if train_with_ddp:
         common_kwargs["train_with_ddp"] = train_with_ddp
     kwargss = add_common_kwargs(kwargss, common_kwargs)
     
     for idx in range(len(kwargss)):
-        kwargss[idx]["uuid_"] = str(uuid.uuid4())[:8]
+        # function automatically creates dir
+        kwargss[idx]["model_dir"] = create_model_dir(model_root_dir, **kwargss[idx])
     #print(kwargss)
-    train_submit(script_name, ngpus, ncpus, kwargss, job_path=model_dir)
+    train_submit(script_name, ngpus, ncpus, kwargss, job_path=model_root_dir)

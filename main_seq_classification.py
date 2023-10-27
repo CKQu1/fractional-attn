@@ -3,7 +3,7 @@ import numpy as np
 import os
 import pandas as pd
 import torch
-from time import time
+from time import time, sleep
 from path_setup import droot
 
 from os.path import join
@@ -20,21 +20,6 @@ import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning) 
 warnings.simplefilter(action='ignore', category=FutureWarning)
 #warnings.filterwarnings("ignore")
-
-# for enumerating each instance of training
-def get_instance(dir, s):
-    instances = []
-    dirnames = next(os.walk(dir))[1]
-    if len(dirnames) > 0:
-        for dirname in dirnames:        
-            if s in dirname and len(os.listdir(join(dir, dirname))) > 0:
-                try:                
-                    instances.append(int(dirname.split(s)[-1]))
-                except:
-                    pass        
-        return max(instances) + 1 if len(instances)>0 else 0
-    else:
-        return 0
     
 # convert trainer.state.log_history to df
 def convert_train_history(ls):    
@@ -73,12 +58,12 @@ if __name__ == '__main__':
     parser.add_argument('--seed', default=42, type=int)
     parser.add_argument('--warmup_steps', default=2, type=int)
     parser.add_argument('--gradient_accumulation_steps', default=8, type=int)
-    # Model settings
-    parser.add_argument('--max_length', default=1024, type=int)
+    # Model settings    
+    parser.add_argument('--model_name', default='diffuser', type=str)
     parser.add_argument('--with_frac', default=False, type=bool)
     parser.add_argument('--gamma', default=None, type=float)
+    parser.add_argument('--max_length', default=1024, type=int)
     parser.add_argument('--model_dir', default=None, type=str)
-    parser.add_argument('--uuid_', default="0", type=str)
     # Dataset settings
     parser.add_argument('--dataset_name', default='imdb', type=str)    
 
@@ -143,7 +128,7 @@ if __name__ == '__main__':
         tokenized_dataset = load_from_disk(dataset_dir)
 
     # ---------- REMOVE LATER ----------  
-    divider = 25  
+    divider = 250  
     tokenized_dataset['test'] = tokenized_dataset['test'].filter(lambda example, idx: idx % divider == 0, with_indices=True)
 
     data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
@@ -157,26 +142,18 @@ if __name__ == '__main__':
         print(f"with_frac = {with_frac} and gamma = {args.gamma}")
         print("-"*25 + "\n")
     if with_frac:
-        attn_setup["gamma"] = args.gamma     
-    model =  DiffuserForSequenceClassification(config, **attn_setup).to(dev) 
-      
-    if args.model_dir == None:                
-        model_root_dir = join(droot, "trained_models", "seq_classification")            
-    else:
-        model_root_dir = args.model_dir
-    if with_frac:            
-        model_root_dir = join(model_root_dir, f"save_{args.dataset_name}_frac_diffuser_test")
-    else:            
-        model_root_dir = join(model_root_dir, f"save_{args.dataset_name}_diffuser_test")
-    #if not train_with_ddp or (train_with_ddp and (global_rank==0)): 
-    if not os.path.isdir(model_root_dir): os.makedirs(model_root_dir)    
-    #instance = get_instance(model_root_dir, "model_")
-    #model_dir = join(model_root_dir, f"model_{instance}")
-    model_dir = join(model_root_dir, f"model_{args.uuid_}")
-    #if not train_with_ddp or (train_with_ddp and (global_rank==0)): 
-    if not os.path.isdir(model_dir): os.makedirs(model_dir)
-    
-    training_args_dict = {"output_dir": model_dir,
+        attn_setup["gamma"] = args.gamma  
+    if args.model_name == 'diffuser':
+        model =  DiffuserForSequenceClassification(config, **attn_setup).to(dev)
+        use_dgl = not with_frac    
+    # can add other options here
+
+    if args.model_dir == None:
+        if args.with_frac and args.model_name == 'diffuser':
+            args.model_dir = join(droot, "seq_classification", "save_{args.dataset_name}_frac_diffuser")
+        else:
+            args.model_dir = join(droot, "seq_classification", "save_{args.dataset_name}_{args.model_name}")
+    training_args_dict = {"output_dir": args.model_dir,
                           "learning_rate": args.lr,
                           "per_device_train_batch_size": args.per_device_train_batch_size,
                           "per_device_eval_batch_size": args.per_device_eval_batch_size,
@@ -219,7 +196,7 @@ if __name__ == '__main__':
         training_args.save_steps    = int(steps_per_train_epoch)
 
     trainer = graphTrainer(
-        use_dgl = not with_frac,
+        use_dgl = use_dgl,
         model = model,
         config = config,
         args = training_args,
@@ -235,6 +212,9 @@ if __name__ == '__main__':
     trainer.train(ignore_keys_for_eval=["loss", "hidden_states", "attentions", "global_attentions"])
     train_secs = time() - t0_train
 
+    sleep(5)
+    model_dir = args.model_dir
+    if not os.path.isdir(model_dir): os.makedirs(model_dir)
     # get performance history
     if len(trainer.state.log_history) > 1:
         run_perf = convert_train_history(trainer.state.log_history[:-1])

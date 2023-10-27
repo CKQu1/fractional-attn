@@ -116,33 +116,37 @@ if __name__ == '__main__':
     script_name = "main_seq_classification.py"
     ngpus, ncpus = 0, 4
     train_with_ddp = True if max(ngpus, ncpus) > 1 else False    
+    dataset_names = ['imdb']  # add or change datasets here
     
-    debug_mode = True
-    if not debug_mode:
-        kwargss = [{}, {"with_frac":True, "gamma":0.25}, 
-                   {"with_frac":True, "gamma":0.5}, {"with_frac":True, "gamma":0.75}]  # empty dict is diffuser
+    debug_mode = True    
+    for dataset_name in dataset_names:
+        if not debug_mode:
+            kwargss = [{}, {"with_frac":True, "gamma":0.25}, 
+                    {"with_frac":True, "gamma":0.5}, {"with_frac":True, "gamma":0.75}]  # empty dict is diffuser
 
-        model_root_dir = join(droot, "main_seq_classification")
-        common_kwargs = {"gradient_accumulation_steps":4,
-                         #"epochs": 0.1,
-                         "max_steps": 50,
-                         "warmup_steps":10, "eval_steps":5, "logging_steps":5, "save_steps":5,
-                         "per_device_eval_batch_size":2}
-    else:
-        kwargss = [{}, {"with_frac":True, "gamma":0.25}, {"with_frac":True, "gamma":0.5}, 
-                   {"with_frac":True, "gamma":0.75} ]  # empty dict is diffuser
-        model_root_dir = join(droot, "debug_mode6")
-        common_kwargs = {"gradient_accumulation_steps":2,
-                         "max_steps": 2,
-                         "warmup_steps":0, "eval_steps":2, "logging_steps":2, "save_steps":2,
-                         "per_device_train_batch_size":2,
-                         "per_device_eval_batch_size":2} 
-    if train_with_ddp:
-        common_kwargs["train_with_ddp"] = train_with_ddp
-    kwargss = add_common_kwargs(kwargss, common_kwargs)
-    
-    for idx in range(len(kwargss)):
-        # function automatically creates dir
-        kwargss[idx]["model_dir"] = create_model_dir(model_root_dir, **kwargss[idx])
-    #print(kwargss)
-    train_submit(script_name, ngpus, ncpus, kwargss, job_path=model_root_dir)
+            model_root_dir = join(droot, "main_seq_classification")
+            common_kwargs = {"gradient_accumulation_steps":4,
+                            #"epochs": 0.1,
+                            "max_steps": 50,
+                            "warmup_steps":10, "eval_steps":5, "logging_steps":5, "save_steps":5,
+                            "per_device_eval_batch_size":2}
+        else:
+            kwargss = [{}, {"with_frac":True, "gamma":0.25}, {"with_frac":True, "gamma":0.5}, 
+                    {"with_frac":True, "gamma":0.75} ]  # empty dict is diffuser
+            model_root_dir = join(droot, "debug_mode6")
+            common_kwargs = {"gradient_accumulation_steps":2,
+                            "max_steps": 2,
+                            "warmup_steps":0, "eval_steps":2, "logging_steps":2, "save_steps":2,
+                            "per_device_train_batch_size":2,
+                            "per_device_eval_batch_size":2} 
+        if train_with_ddp:
+            common_kwargs["train_with_ddp"] = train_with_ddp
+        kwargss = add_common_kwargs(kwargss, common_kwargs)
+        
+        for idx in range(len(kwargss)):
+            # function automatically creates dir
+            kwargss[idx]["model_dir"] = create_model_dir(model_root_dir, **kwargss[idx])
+            kwargss[idx]["dataset_name"] = dataset_name
+
+        #print(kwargss)
+        train_submit(script_name, ngpus, ncpus, kwargss, job_path=model_root_dir)

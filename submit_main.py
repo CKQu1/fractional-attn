@@ -37,9 +37,10 @@ def create_model_dir(model_root_dir, **kwargs):
     if not os.path.isdir(model_dir): os.makedirs(model_dir)        
     return model_dir    
 
-def command_setup(ngpus, ncpus, singularity_path):
+def command_setup(ngpus, ncpus, singularity_path, **kwargs):
     assert isfile(singularity_path), "singularity_path does not exist!"
 
+    select = kwargs.get('select', 1)
     if len(singularity_path) > 0:
         command = f"singularity exec --home {repo_dir} {singularity_path}"
     else:
@@ -52,12 +53,25 @@ def command_setup(ngpus, ncpus, singularity_path):
     elif ngpus > 1:
         #command += f" CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.launch --nproc_per_node={ngpus}"
         #additional_command = 'run --backend=nccl'
-        command += f" torchrun --nproc_per_node={ngpus}"        
+        if select == 1:
+            command += f" torchrun --rdzv-backend=c10d --rdzv-endpoint=localhost:0"
+            command += f" --nnodes=1 --nproc_per_node={ngpus} --max-restarts=3"
+        else:
+            # tolerates 3 failures
+            command += f" torchrun --nnodes={select} --nproc_per_node={ngpus}"
+            command += f" --max-restarts=3 --rdzv-id=$JOB_ID"
+            command += f" --rdzv-backend=c10d --rdzv-endpoint=$HOST_NODE_ADDR"
         train_with_ddp = True
     elif ngpus == 0 and ncpus > 1:
         #python -m torch.distributed.launch --nproc_per_node=4 --use_env train_classification_imdb.py run --backend=gloo
         #additional_command = 'run --backend=gloo'
-        command += f" torchrun --nproc_per_node={ncpus}"
+        if select == 1:
+            command += f" torchrun --rdzv-backend=c10d --rdzv-endpoint=localhost:0"
+            command += f" --nnodes=1 --nproc_per_node={ncpus} --max-restarts=3"
+        else:
+            command += f" torchrun --nnodes={select} --nproc_per_node={ncpus}"
+            command += f" --max-restarts=3 --rdzv-id=$JOB_ID"
+            command += f" --rdzv-backend=c10d --rdzv-endpoint=$HOST_NODE_ADDR"
         train_with_ddp = True        
 
     if len(singularity_path) == 0:
@@ -84,14 +98,15 @@ def train_submit(script_name, ngpus, ncpus, kwargss, **kwargs):
     assert isfile(script_name), f"{script_name} does not exist!"
 
     # computing resource settings
+    select = kwargs.get('select', 1)  # number of nodes
     ngpus, ncpus = int(ngpus), int(ncpus)
     singularity_path = "../built_containers/FaContainer_v2.sif"
-    command, additional_command, train_with_ddp = command_setup(ngpus, ncpus, singularity_path)    
+    command, additional_command, train_with_ddp = command_setup(ngpus, ncpus, singularity_path,
+                                                                select=select)    
 
     from qsub_parser import qsub, job_divider
     project_ls = ["ddl"]  # can add more projects here
-    pbs_array_data = get_pbs_array_data(kwargss)
-    #print(pbs_array_data)    
+    pbs_array_data = get_pbs_array_data(kwargss)    
     
     perm, pbss = job_divider(pbs_array_data, len(project_ls))
     for idx, pidx in enumerate(perm):
@@ -101,9 +116,11 @@ def train_submit(script_name, ngpus, ncpus, kwargss, **kwargs):
                        "P":project_ls[pidx],
                        "ngpus":ngpus, 
                        "ncpus":ncpus, 
-                       "walltime":'23:59:59', 
-                      #"walltime":'0:29:59', 
-                       "mem":"16GB"}        
+                       "select":select,
+                       #"walltime":'95:59:59', 
+                       #"walltime":'71:59:59',
+                       "walltime":'2:29:59', 
+                       "mem":"12GB"}      
         if len(additional_command) > 0:
             kwargs_qsub["additional_command"] = additional_command
 
@@ -114,31 +131,35 @@ if __name__ == '__main__':
 
     # script for running
     script_name = "main_seq_classification.py"
-    ngpus, ncpus = 0, 4
+    ngpus, ncpus = 0, 2
+    select = 1
     train_with_ddp = True if max(ngpus, ncpus) > 1 else False    
-    dataset_names = ['imdb']  # add or change datasets here
+    #dataset_names = ['imdb']  # add or change datasets here
+    dataset_names = ['rotten_tomatoes']
     
-    debug_mode = True    
+    debug_mode = True
     for dataset_name in dataset_names:
         if not debug_mode:
-            kwargss = [{}, {"with_frac":True, "gamma":0.25}, 
-                    {"with_frac":True, "gamma":0.5}, {"with_frac":True, "gamma":0.75}]  # empty dict is diffuser
-
-            model_root_dir = join(droot, "main_seq_classification")
-            common_kwargs = {"gradient_accumulation_steps":4,
-                            #"epochs": 0.1,
-                            "max_steps": 50,
-                            "warmup_steps":10, "eval_steps":5, "logging_steps":5, "save_steps":5,
-                            "per_device_eval_batch_size":2}
+            # empty dict is diffuser
+            kwargss = [{}, {"with_frac":True, "gamma":0.2}, {"with_frac":True, "gamma":0.4},
+                       {"with_frac":True, "gamma":0.6}, {"with_frac":True, "gamma":0.8}]  
+            #kwargss = [{}, {"with_frac":True, "gamma":0.4}]                         
+            model_root_dir = join(droot, "proper_seq_classification")
+            common_kwargs = {"gradient_accumulation_steps":6,
+                             "epochs":3,
+                             "warmup_steps":25,
+                             "per_device_train_batch_size":4,
+                             "per_device_eval_batch_size":4}
         else:
-            kwargss = [{}, {"with_frac":True, "gamma":0.25}, {"with_frac":True, "gamma":0.5}, 
-                    {"with_frac":True, "gamma":0.75} ]  # empty dict is diffuser
-            model_root_dir = join(droot, "debug_mode6")
+            kwargss = [{}, {"with_frac":True, "gamma":0.2}, {"with_frac":True, "gamma":0.4},
+                       {"with_frac":True, "gamma":0.6}, {"with_frac":True, "gamma":0.8}]  
+            model_root_dir = join(droot, "debug_mode9")
             common_kwargs = {"gradient_accumulation_steps":2,
-                            "max_steps": 2,
-                            "warmup_steps":0, "eval_steps":2, "logging_steps":2, "save_steps":2,
-                            "per_device_train_batch_size":2,
-                            "per_device_eval_batch_size":2} 
+                             "divider": 10,
+                             "max_steps": 20,
+                             "warmup_steps":0, "eval_steps":20, "logging_steps":20, "save_steps":20,
+                             "per_device_train_batch_size":2,
+                             "per_device_eval_batch_size":2} 
         if train_with_ddp:
             common_kwargs["train_with_ddp"] = train_with_ddp
         kwargss = add_common_kwargs(kwargss, common_kwargs)
@@ -148,5 +169,7 @@ if __name__ == '__main__':
             kwargss[idx]["model_dir"] = create_model_dir(model_root_dir, **kwargss[idx])
             kwargss[idx]["dataset_name"] = dataset_name
 
-        #print(kwargss)
-        train_submit(script_name, ngpus, ncpus, kwargss, job_path=model_root_dir)
+        #print(kwargss)        
+        train_submit(script_name, ngpus, ncpus, kwargss,
+                     select=select, 
+                     job_path=model_root_dir)

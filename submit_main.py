@@ -119,8 +119,8 @@ def train_submit(script_name, ngpus, ncpus, kwargss, **kwargs):
                        "select":select,
                        #"walltime":'95:59:59', 
                        #"walltime":'71:59:59',
-                       "walltime":'2:29:59', 
-                       "mem":"12GB"}      
+                       "walltime":'23:59:59',
+                       "mem":"28GB"}      
         if len(additional_command) > 0:
             kwargs_qsub["additional_command"] = additional_command
 
@@ -131,23 +131,24 @@ if __name__ == '__main__':
 
     # script for running
     script_name = "main_seq_classification.py"
-    ngpus, ncpus = 0, 2
+    ngpus, ncpus = 0, 4
     select = 1
     train_with_ddp = True if max(ngpus, ncpus) > 1 else False    
     #dataset_names = ['imdb']  # add or change datasets here
     dataset_names = ['rotten_tomatoes']
     
-    debug_mode = True
+    debug_mode = False
     for dataset_name in dataset_names:
         if not debug_mode:
             # empty dict is diffuser
             kwargss = [{}, {"with_frac":True, "gamma":0.2}, {"with_frac":True, "gamma":0.4},
                        {"with_frac":True, "gamma":0.6}, {"with_frac":True, "gamma":0.8}]  
             #kwargss = [{}, {"with_frac":True, "gamma":0.4}]                         
-            model_root_dir = join(droot, "proper_seq_classification")
-            common_kwargs = {"gradient_accumulation_steps":6,
-                             "epochs":3,
+            model_root_dir = join(droot, "tomato_seq_classification")
+            common_kwargs = {"gradient_accumulation_steps":2,
+                             "epochs":5,
                              "warmup_steps":25,
+                             "divider": 1,
                              "per_device_train_batch_size":4,
                              "per_device_eval_batch_size":4}
         else:
@@ -166,8 +167,8 @@ if __name__ == '__main__':
         
         for idx in range(len(kwargss)):
             # function automatically creates dir
-            kwargss[idx]["model_dir"] = create_model_dir(model_root_dir, **kwargss[idx])
             kwargss[idx]["dataset_name"] = dataset_name
+            kwargss[idx]["model_dir"] = create_model_dir(model_root_dir, **kwargss[idx])            
 
         #print(kwargss)        
         train_submit(script_name, ngpus, ncpus, kwargss,

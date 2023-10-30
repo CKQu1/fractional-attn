@@ -24,7 +24,7 @@ def create_model_dir(model_root_dir, **kwargs):
     dataset_name = kwargs.get('dataset_name', 'imdb')
     model_name = kwargs.get('model_name', 'diffuser')
     if (model_name == 'diffuser') and with_frac:                   
-        model_root_dir = join(model_root_dir, f"save_{dataset_name}_frac_{model_name}")
+        model_root_dir = join(model_root_dir, f"save_{dataset_name}_sym_frac_{model_name}")
     else:            
         model_root_dir = join(model_root_dir, f"save_{dataset_name}_{model_name}")
     if not os.path.isdir(model_root_dir): os.makedirs(model_root_dir)    
@@ -119,7 +119,7 @@ def train_submit(script_name, ngpus, ncpus, kwargss, **kwargs):
                        "select":select,
                        #"walltime":'95:59:59', 
                        #"walltime":'71:59:59',
-                       "walltime":'23:59:59',
+                       "walltime":'59:59:59',
                        "mem":"28GB"}      
         if len(additional_command) > 0:
             kwargs_qsub["additional_command"] = additional_command
@@ -141,11 +141,11 @@ if __name__ == '__main__':
     for dataset_name in dataset_names:
         if not debug_mode:
             # empty dict is diffuser
-            kwargss = [{}, {"with_frac":True, "gamma":0.2}, {"with_frac":True, "gamma":0.4},
+            kwargss = [{"with_frac":True, "gamma":0.2}, {"with_frac":True, "gamma":0.4},
                        {"with_frac":True, "gamma":0.6}, {"with_frac":True, "gamma":0.8}]  
             #kwargss = [{}, {"with_frac":True, "gamma":0.4}]                         
-            model_root_dir = join(droot, "tomato_seq_classification")
-            common_kwargs = {"gradient_accumulation_steps":2,
+            model_root_dir = join(droot, "rotomato_seq_classification")
+            common_kwargs = {"gradient_accumulation_steps":3,
                              "epochs":5,
                              "warmup_steps":25,
                              "divider": 1,

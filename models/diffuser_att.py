@@ -396,7 +396,7 @@ class SymLimitFracSelfAttention(nn.Module):
         Bmat.masked_fill_((bool_mask @ bool_mask.T)==False, 0)  # attention mask
         # ----- ADDED SYMMETRIZATION (after masking) ------
         with torch.no_grad():
-            Bmat += Bmat.transpose(1,2)
+            Bmat += Bmat.clone().transpose(1,2)
             Bmat *= 0.5
         # --------------------------------
         # Bmat --> Bmat

@@ -118,8 +118,8 @@ def train_submit(script_name, ngpus, ncpus, kwargss, **kwargs):
                        "ncpus":ncpus, 
                        "select":select,
                        #"walltime":'95:59:59', 
-                       #"walltime":'71:59:59',
-                       "walltime":'59:59:59',
+                       "walltime":'71:59:59',
+                       #"walltime":'59:59:59',
                        "mem":"40GB"}      
         if len(additional_command) > 0:
             kwargs_qsub["additional_command"] = additional_command

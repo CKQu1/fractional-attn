@@ -120,7 +120,7 @@ def train_submit(script_name, ngpus, ncpus, kwargss, **kwargs):
                        #"walltime":'95:59:59', 
                        #"walltime":'71:59:59',
                        "walltime":'59:59:59',
-                       "mem":"28GB"}      
+                       "mem":"40GB"}      
         if len(additional_command) > 0:
             kwargs_qsub["additional_command"] = additional_command
 
@@ -145,7 +145,7 @@ if __name__ == '__main__':
                        {"with_frac":True, "gamma":0.6}, {"with_frac":True, "gamma":0.8}]  
             #kwargss = [{}, {"with_frac":True, "gamma":0.4}]                         
             model_root_dir = join(droot, "rotomato_seq_classification")
-            common_kwargs = {"gradient_accumulation_steps":3,
+            common_kwargs = {"gradient_accumulation_steps":4,
                              "epochs":5,
                              "warmup_steps":25,
                              "divider": 1,

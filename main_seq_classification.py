@@ -51,6 +51,7 @@ def get_dataset(dataset_name, cache_dir):
         raise NameError(f"{dataset_name} not applicable!")
     return dataset
 
+# get dataset feature names
 def get_dataset_cols(dataset):
     return list(dataset.column_names.values())[0]
 
@@ -62,7 +63,7 @@ def process_dataset_cols(dataset):
     if 'sentence' in column_names:
         dataset = dataset.rename_column('sentence', 'text')
     
-    # for removing unused features
+    # for removing unused features i.e. text
     column_names = list(dataset.column_names.values())[0]
     remove_columns = list(set(column_names) - {'input_ids', 'attention_mask', 'label'})
     if len(remove_columns) > 0:
@@ -72,8 +73,8 @@ def process_dataset_cols(dataset):
 
 # quick run
 """
-python -i main_seq_classification.py --max_steps=1 --logging_steps=1 --save_steps=1 --eval_steps=1\
- --divider=500 --warmup_steps=0 --gradient_accumulation_steps=1 --dataset_name=cola\
+python -i main_seq_classification.py --max_steps=2 --logging_steps=2 --save_steps=2 --eval_steps=2\
+ --divider=50 --warmup_steps=0 --gradient_accumulation_steps=1 --dataset_name=rotten_tomatoes\
  --model_dir=droot/debug_mode8/model_0
 """
 if __name__ == '__main__':
@@ -221,7 +222,7 @@ if __name__ == '__main__':
 
     if args.model_dir == None:
         if args.with_frac and args.model_name == 'diffuser':
-            args.model_dir = join(droot, "seq_classification", "save_{args.dataset_name}_frac_diffuser")
+            args.model_dir = join(droot, "seq_classification", "save_{args.dataset_name}_sym_frac_diffuser")
         else:
             args.model_dir = join(droot, "seq_classification", "save_{args.dataset_name}_{args.model_name}")
     training_args_dict = {"output_dir": args.model_dir,

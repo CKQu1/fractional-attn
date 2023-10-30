@@ -38,7 +38,8 @@ class DiffuserAttention(nn.Module):
             error_message = f"gamma = {kwargs.get('gamma')} with type {type(kwargs.get('gamma'))} is ill-defined!"
             assert 0 < kwargs.get('gamma') < 1, error_message
             gamma = kwargs.get('gamma')
-            self.self = LimitFracSelfAttention(config, layer_id, gamma)
+            self.self = SymLimitFracSelfAttention(config, layer_id, gamma)
+            #self.self = LimitFracSelfAttention(config, layer_id, gamma)
             #self.self = LimitFracSelfAttention_dgl(config, layer_id, gamma)
         else:
             self.self = DiffuserSelfAttention(config, layer_id)          
@@ -314,8 +315,9 @@ class DiffuserFracSelfAttention(nn.Module):
         return outputs + (global_attn_probs,) if (is_global_attn and output_attentions) else outputs
 """
 
-# Limiting fractional diffusion (unnormalized fractional Laplacian)
-class LimitFracSelfAttention(nn.Module):
+
+# Limiting fractional diffusion (which only works for symmetrized weights)
+class SymLimitFracSelfAttention(nn.Module):
     def __init__(self, config, layer_id, gamma):
         super().__init__()
         if config.hidden_size % config.num_attention_heads != 0:
@@ -389,8 +391,15 @@ class LimitFracSelfAttention(nn.Module):
         #with torch.no_grad():
         #   Bmat *= g
 
+        # Bmat --> W
         bool_mask = (attention_mask>=0).reshape(-1).unsqueeze(-1).int()
         Bmat.masked_fill_((bool_mask @ bool_mask.T)==False, 0)  # attention mask
+        # ----- ADDED SYMMETRIZATION (after masking) ------
+        with torch.no_grad():
+            Bmat += Bmat.transpose(1,2)
+            Bmat *= 0.5
+        # --------------------------------
+        # Bmat --> Bmat
         BN = seq_len * batch_size    
         out_degree = Bmat.sum(axis=2)
         rhos = out_degree.max(axis=1).values 
@@ -401,7 +410,7 @@ class LimitFracSelfAttention(nn.Module):
         L_gamma = torch.eye(BN, requires_grad=True).reshape(1, BN, BN).repeat(self.num_heads, 1, 1)        
 
         Bmat = Bmat.to_sparse()  # convert to sparse for speed-up
-        N_approx = 6    
+        N_approx = 6
         numerator, denominator = 1, 1
         #error_tolerence = 1e-5  # should this be introduced?
         with torch.no_grad():
@@ -550,6 +559,7 @@ class LimitFracSelfAttention_dgl(nn.Module):
 
 
 # Fractional diffusion using dgl api
+"""
 class DiffuserFracSelfAttention_dgl(nn.Module):
     def __init__(self, config, layer_id, gamma):
         super().__init__()
@@ -684,5 +694,4 @@ class DiffuserFracSelfAttention_dgl(nn.Module):
         outputs = (attn_output.transpose(0, 1),) # Seq,B,D
 
         return outputs + (global_attn_probs,) if (is_global_attn and output_attentions) else outputs
-
-
+"""        

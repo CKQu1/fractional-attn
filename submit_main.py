@@ -24,9 +24,9 @@ def create_model_dir(model_root_dir, **kwargs):
     dataset_name = kwargs.get('dataset_name', 'imdb')
     model_name = kwargs.get('model_name', 'diffuser')
     if (model_name == 'diffuser') and with_frac:                   
-        model_root_dir = join(model_root_dir, f"save_{dataset_name}_sym_frac_{model_name}")
+        model_root_dir = join(model_root_dir, f"frac_{model_name}")
     else:            
-        model_root_dir = join(model_root_dir, f"save_{dataset_name}_{model_name}")
+        model_root_dir = join(model_root_dir, f"{model_name}")
     if not os.path.isdir(model_root_dir): os.makedirs(model_root_dir)    
     if with_frac:    
         instance = get_instance(model_root_dir, f"gamma={gamma}")
@@ -105,7 +105,8 @@ def train_submit(script_name, ngpus, ncpus, kwargss, **kwargs):
                                                                 select=select)    
 
     from qsub_parser import qsub, job_divider
-    project_ls = ["ddl"]  # can add more projects here
+    #project_ls = ["ddl"]  # can add more projects here
+    project_ls = ["dnn_maths", "frac_attn"]
     pbs_array_data = get_pbs_array_data(kwargss)    
     
     perm, pbss = job_divider(pbs_array_data, len(project_ls))
@@ -118,9 +119,11 @@ def train_submit(script_name, ngpus, ncpus, kwargss, **kwargs):
                        "ncpus":ncpus, 
                        "select":select,
                        #"walltime":'95:59:59', 
-                       "walltime":'71:59:59',
+                       #"walltime":'71:59:59',
                        #"walltime":'59:59:59',
-                       "mem":"40GB"}      
+                       "walltime":'39:59:59',
+                       #"walltime":'23:59:59',
+                       "mem":"64GB"} 
         if len(additional_command) > 0:
             kwargs_qsub["additional_command"] = additional_command
 
@@ -131,7 +134,7 @@ if __name__ == '__main__':
 
     # script for running
     script_name = "main_seq_classification.py"
-    ngpus, ncpus = 0, 4
+    ngpus, ncpus = 0, 8
     select = 1
     train_with_ddp = True if max(ngpus, ncpus) > 1 else False    
     #dataset_names = ['imdb']  # add or change datasets here
@@ -141,13 +144,15 @@ if __name__ == '__main__':
     for dataset_name in dataset_names:
         if not debug_mode:
             # empty dict is diffuser
-            kwargss = [{"with_frac":True, "gamma":0.2}, {"with_frac":True, "gamma":0.4},
-                       {"with_frac":True, "gamma":0.6}, {"with_frac":True, "gamma":0.8}]  
+            #kwargss = [{"with_frac":True, "gamma":0.2}, {"with_frac":True, "gamma":0.4},
+            #           {"with_frac":True, "gamma":0.6}, {"with_frac":True, "gamma":0.8}]  
+            kwargss = [{}, {"with_frac":True, "gamma":0.25}, 
+                       {"with_frac":True, "gamma":0.5}]                         
             #kwargss = [{}, {"with_frac":True, "gamma":0.4}]                         
-            model_root_dir = join(droot, "rotomato_seq_classification")
+            model_root_dir = join(droot, "new_unlapl_rot")
             common_kwargs = {"gradient_accumulation_steps":4,
                              "epochs":5,
-                             "warmup_steps":25,
+                             "warmup_steps":50,
                              "divider": 1,
                              "per_device_train_batch_size":4,
                              "per_device_eval_batch_size":4}
@@ -170,7 +175,7 @@ if __name__ == '__main__':
             kwargss[idx]["dataset_name"] = dataset_name
             kwargss[idx]["model_dir"] = create_model_dir(model_root_dir, **kwargss[idx])            
 
-        #print(kwargss)        
-        train_submit(script_name, ngpus, ncpus, kwargss,
-                     select=select, 
-                     job_path=model_root_dir)
+        print(kwargss)        
+        #train_submit(script_name, ngpus, ncpus, kwargss,
+        #             select=select, 
+        #             job_path=model_root_dir)

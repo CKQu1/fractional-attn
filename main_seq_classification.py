@@ -71,12 +71,24 @@ def process_dataset_cols(dataset):
     
     return dataset
 
-# quick run
+# quick run (single unit)
 """
-python -i main_seq_classification.py --max_steps=2 --logging_steps=2 --save_steps=2 --eval_steps=2\
+python -i main_seq_classification.py  --with_frac=True --gamma=0.5 --max_steps=2 --logging_steps=2 --save_steps=2 --eval_steps=2\
  --divider=50 --warmup_steps=0 --gradient_accumulation_steps=1 --dataset_name=rotten_tomatoes\
- --model_dir=droot/debug_mode8/model_0
+ --model_dir=droot/debug_mode10/model_0
 """
+
+# quick torchrun (multi-unit)
+"""
+singularity exec --home ${PBS_O_WORKDIR} ${cpath} torchrun --nproc_per_node=2\
+ main_seq_classification.py --with_frac=True --gamma=0.75\
+ --divider=1 --train_with_ddp=True\
+ --gradient_accumulation_steps=4 --epochs=5 --warmup_steps=50\
+ --per_device_train_batch_size=4 --per_device_eval_batch_size=4\
+ --model_dir=${PBS_O_WORKDIR}/droot/new_unlapl_rot/frac_diffuser/model=0_gamma=0.75\
+ --dataset_name=rotten_tomatoes
+"""
+
 if __name__ == '__main__':
 
     # Training options

@@ -1,4 +1,5 @@
 import matplotlib.pyplot as plt
+import numpy as np
 import os
 import pandas as pd
 import sys
@@ -6,7 +7,10 @@ from ast import literal_eval
 from os.path import isdir, isfile, join
 
 sys.path.append(os.getcwd())
-from path_setup import droot
+from path_setup import droot, njoin
+
+def str_to_bool(s):
+    return s if isinstance(s,bool) else literal_eval(s)
 
 def preprocess_df(df):
     col_names = ["eval_accuracy", "eval_f1_score"]  # can add more col_names
@@ -23,40 +27,48 @@ def preprocess_df(df):
     return df
 
 def extract_json(model_dir):
-    global data, df_perf, sub_dirs, counter, epoch
+    global data, df_perf, sub_dirs, i, epoch, metrics_dict
+    global counter1, counter2
 
     import json
-    sub_dirs = [join(model_dir, sub_dir) for sub_dir in sorted(next(os.walk(model_dir))[1]) \
+    sub_dirs = [njoin(model_dir, sub_dir) for sub_dir in sorted(next(os.walk(model_dir))[1]) \
                  if "checkpoint-" in sub_dir]
     assert len(sub_dirs) > 0, "There are no checkpoints, please wait till training is more complete!"
     
     metrics_dict = {}
     for metric in ["epoch", "loss", "eval_loss", "eval_accuracy", "eval_f1_score"]:
         metrics_dict[metric] = []
+    counter1 = 0
+    counter2 = 0
     for idx, sub_dir in enumerate(sub_dirs):
-        f = open(join(sub_dir, "trainer_state.json"))
+        f = open(njoin(sub_dir, "trainer_state.json"))
         data = json.load(f)
         epoch = data['log_history'][-1]['epoch']
         metrics_dict['epoch'].append(epoch)
-        counter = 0
         epoch_data = []
         for i in range(len(data['log_history'])):
             if data['log_history'][i]['epoch'] == epoch:
-                counter += 1
-            if counter == 1:
-                metrics_dict['loss'].append(data['log_history'][i]['loss'])
-            if counter == 2:
-                metrics_dict['eval_loss'].append(data['log_history'][i]['eval_loss'])
-                metrics_dict['eval_accuracy'].append(data['log_history'][i]['eval_accuracy']['accuracy'])
-                metrics_dict['eval_f1_score'].append(data['log_history'][i]['eval_f1_score']['f1'])
+                if 'loss' in data['log_history'][i].keys():
+                    metrics_dict['loss'].append(data['log_history'][i]['loss'])
+                    counter1 += 1
+                if 'eval_loss' in data['log_history'][i].keys():
+                    metrics_dict['eval_loss'].append(data['log_history'][i]['eval_loss'])
+                    metrics_dict['eval_accuracy'].append(data['log_history'][i]['eval_accuracy']['accuracy'])
+                    metrics_dict['eval_f1_score'].append(data['log_history'][i]['eval_f1_score']['f1'])
+                    counter2 += 1
 
-        df_perf = pd.DataFrame(metrics_dict)
+        if counter1 < counter2:
+            metrics_dict['loss'].append(0)
+            counter1 += 1
+
+    df_perf = pd.DataFrame(metrics_dict)
 
     return df_perf
 
 def plot_single(model_dir, display=False):
+    display = str_to_bool(display)
 
-    fpath = join(model_dir, "run_performance.csv")
+    fpath = njoin(model_dir, "run_performance.csv")
     if not isfile(fpath):
         df_perf = extract_json(model_dir)
     else:
@@ -79,7 +91,7 @@ def plot_single(model_dir, display=False):
 
     axs[-2].set_xlabel("Epoch"); axs[-1].set_xlabel("Epoch")
 
-    fig_dir = join(droot, "figures_ms", "model_performance")
+    fig_dir = njoin(droot, "figures_ms", "model_performance")
     if not isdir(fig_dir): os.makedirs(fig_dir)
 
     uuid_ = model_dir.split("/")[-1]
@@ -88,30 +100,33 @@ def plot_single(model_dir, display=False):
     if display:
         plt.show()
     else:
-        plt.savefig(join(fig_dir, f"{uuid_}.pdf"))
+        plt.savefig(njoin(fig_dir, f"{uuid_}.pdf"))
         print(f"Plot done for model {uuid_} from {model_dir}")
 
 def plot_multiple(model_root_dir, display=False):
-    global df_perf, model_dirs
+    display = str_to_bool(display)
+    global df_perf, model_dirs, model_dir
 
     metric_names = ["loss", "eval_loss", "eval_accuracy", "eval_f1_score"]
     titles = ["Loss", "Eval loss", "Eval acc", "Eval f1"]
+    #metric_names = ["eval_loss", "eval_accuracy", "eval_f1_score"]
+    #titles = ["Eval loss", "Eval acc", "Eval f1"]    
 
     nrows, ncols = 2, 2
     fig, axs = plt.subplots(nrows, ncols, constrained_layout=True)
     axs = axs.flat
 
-    model_root_dirs = [join(model_root_dir, sub_dir) for sub_dir in next(os.walk(model_root_dir))[1] \
+    model_root_dirs = [njoin(model_root_dir, sub_dir) for sub_dir in next(os.walk(model_root_dir))[1] \
                        if "job" not in sub_dir]
     for model_root_dir in model_root_dirs:
         # remove empty dirs
-        model_dirs = [join(model_root_dir, sub_dir) for sub_dir in next(os.walk(model_root_dir))[1] \
+        model_dirs = [njoin(model_root_dir, sub_dir) for sub_dir in next(os.walk(model_root_dir))[1] \
                        if "model=0" in sub_dir and \
-                       not not os.listdir(join(model_root_dir, sub_dir))]  # can adjust to include more trained models here
+                       not not os.listdir(njoin(model_root_dir, sub_dir))]  # can adjust to include more trained models here
         model_dirs = sorted(model_dirs)
 
         for model_dir in model_dirs:
-            fpath = join(model_dir, "run_performance.csv")
+            fpath = njoin(model_dir, "run_performance.csv")
             if not isfile(fpath):
                 df_perf = extract_json(model_dir)
             else:
@@ -139,12 +154,12 @@ def plot_multiple(model_root_dir, display=False):
     axs[-2].set_xlabel("Epoch"); axs[-1].set_xlabel("Epoch")            
 
     dataset_name = "rotten_tomato"
-    fig_dir = join(droot, "figures_ms", "model_performance")
+    fig_dir = njoin(droot, "figures_ms", "model_performance")
     if not isdir(fig_dir): os.makedirs(fig_dir)    
     if display:
         plt.show()
     else:
-        plt.savefig(join(fig_dir, f"dataset={dataset_name}.pdf"))
+        plt.savefig(njoin(fig_dir, f"dataset={dataset_name}.pdf"))
         print(f"Plot done for {model_root_dir}")
 
 if __name__ == '__main__':

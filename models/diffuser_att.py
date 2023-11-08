@@ -12,8 +12,9 @@ from dgl.ops import copy_e_sum
 from models.diffuser_utils import *
 from models.utils import *
 from torch import nn
+from torch.nn.functional import normalize
 
-torch.autograd.detect_anomaly(True)
+#torch.autograd.detect_anomaly(True)
 
 #def frac_C(n, k):
 #    return reduce(op.mul, np.arange(n, n-k, -1), 1) / reduce(op.mul, range(1, k+1, 1), 1)
@@ -262,10 +263,26 @@ class RenormFracSelfAttention(nn.Module):
                 L_gamma += coef.unsqueeze(-1).unsqueeze(-1) * B_power
             L_gamma *= rhos.unsqueeze(-1).unsqueeze(-1)**self.gamma  # unnormalized fractional Laplacian
 
+            #print(f"Marker 1 is nan -- {torch.isnan(L_gamma).all().item()}")
+            #print(f"Marker 1 is finite -- {torch.isfinite(L_gamma).all().item()} \n")
+
+        # Method 0
+        L_gamma_diags = torch.diagonal( L_gamma, dim1=-2, dim2=-1 )
+        # this can be done as the non-diagonal entries will always be non-negative
+        P_gamma = normalize(torch.diag_embed(L_gamma_diags) - L_gamma, p=1, dim=2)
+
         # L_gamma --> W_gamma
         # Method 1
+        """
         L_gamma_diags = torch.diagonal( L_gamma, dim1=-2, dim2=-1 )
+        print(f"Marker 2 is nan -- {torch.isnan(L_gamma).all().item()}")
+        print(f"Marker 2 is finite -- {torch.isfinite(L_gamma).all().item()} \n")
+
         L_gamma = torch.diag_embed(L_gamma_diags) - L_gamma  # need to hard set diagonals to zero?
+        print(f"Marker 3 is nan -- {torch.isnan(L_gamma).all().item()}")
+        print(f"Marker 3 is finite -- {torch.isfinite(L_gamma).all().item()} \n")
+        """
+
         # Method 2
         #mask_force = torch.eye(BN).repeat(self.num_heads, 1, 1).bool()
         #L_gamma.masked_fill_(mask_force==True, 0)
@@ -275,9 +292,20 @@ class RenormFracSelfAttention(nn.Module):
         #    L_gamma = L_gamma * mask_force
 
         # W_gamma --> P^(gamma)        
-        P_gamma = 1/L_gamma.sum(axis=2).unsqueeze(2) * L_gamma
+        #P_gamma = 1/L_gamma.sum(axis=2).unsqueeze(2) * L_gamma
+        #print(L_gamma.sum(axis=2))
+
+        #print(f"Marker 3.3 total zeros -- {(L_gamma.sum(axis=2)==0).sum()} \n")
+        #print(f"Marker 3.4 has zeros -- {torch.isfinite(L_gamma.sum(axis=2)).all().item()} \n")  # has zeros
+        #print(f"Marker 3.5 is finite -- {torch.isfinite(1/L_gamma.sum(axis=2)).all().item()} \n")  # not finite
+
+        #print(f"Marker 4 is nan -- {torch.isnan(P_gamma).all().item()}")
+        #print(f"Marker 4 is finite -- {torch.isfinite(P_gamma).all().item()} \n")  # not finite
 
         attn_output = torch.bmm(P_gamma, value_vectors.transpose(0,1))
+        #print(f"Marker 5 is nan -- {torch.isnan(attn_output).all().item()}")
+        #print(f"Marker 5 is finite -- {torch.isfinite(attn_output).all().item()} \n")
+
         attn_output = nn.functional.dropout(attn_output, p=self.dropout, training=self.training)
 
         attn_output = attn_output.reshape(batch_size, seq_len,  self.num_heads, self.head_dim) # B,N,H,D        

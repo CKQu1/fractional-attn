@@ -74,8 +74,8 @@ def process_dataset_cols(dataset):
 # quick run (single unit)
 """
 python -i main_seq_classification.py  --with_frac=True --gamma=0.5 --max_steps=2 --logging_steps=2 --save_steps=2 --eval_steps=2\
- --divider=50 --warmup_steps=0 --gradient_accumulation_steps=1 --dataset_name=rotten_tomatoes\
- --model_dir=droot/debug_mode10/model_0
+ --divider=100 --warmup_steps=0 --gradient_accumulation_steps=1 --dataset_name=rotten_tomatoes\
+ --model_dir=droot/debug_mode11/model_0_re
 """
 
 # quick torchrun (multi-unit)
@@ -250,7 +250,8 @@ if __name__ == '__main__':
                           "save_steps": args.save_steps,    
                           "seed": args.seed,
                           "warmup_steps": args.warmup_steps,
-                          "gradient_accumulation_steps": args.gradient_accumulation_steps                          
+                          "gradient_accumulation_steps": args.gradient_accumulation_steps,     
+                          "debug": "underflow_overflow"  # remove (only for debugging)
                           }
     if args.max_steps != None:
         training_args_dict["max_steps"] = args.max_steps
@@ -290,6 +291,7 @@ if __name__ == '__main__':
 
     t0_train = time()  # record train time    
     trainer.train(ignore_keys_for_eval=["loss", "hidden_states", "attentions", "global_attentions"])
+    #trainer.train()
     train_secs = time() - t0_train
 
     model_dir = args.model_dir

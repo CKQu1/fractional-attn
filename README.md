@@ -34,6 +34,11 @@ The other important dependencies requirements are listed in [requirements.txt](.
     !pip install  dglgo -f https://data.dgl.ai/wheels-test/repo.html
     ```
 
+### Singularity Container shell usage
+PBS_O_WORKDIR="/project/frac_attn/fractional-attn"
+cpath="../built_containers/FaContainer_v2.sif"
+singularity shell --home ${PBS_O_WORKDIR} ${cpath}
+
 ### Running Classification
 To run IMDB review classification task with one GPU
 ```bash

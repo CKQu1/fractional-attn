@@ -75,7 +75,7 @@ def process_dataset_cols(dataset):
 """
 python -i main_seq_classification.py  --with_frac=True --gamma=0.5 --max_steps=2 --logging_steps=2 --save_steps=2 --eval_steps=2\
  --divider=100 --warmup_steps=0 --gradient_accumulation_steps=1 --dataset_name=rotten_tomatoes\
- --model_dir=droot/debug_mode11/model_0_re
+ --model_dir=droot/debug_mode12/model_0_reg
 """
 
 # quick torchrun (multi-unit)
@@ -89,6 +89,7 @@ singularity exec --home ${PBS_O_WORKDIR} ${cpath} torchrun --nproc_per_node=2\
  --dataset_name=rotten_tomatoes
 """
 
+torch.autograd.set_detect_anomaly(True)  # delete
 if __name__ == '__main__':
 
     # Training options
@@ -108,6 +109,7 @@ if __name__ == '__main__':
     parser.add_argument('--seed', default=42, type=int)
     parser.add_argument('--warmup_steps', default=2, type=int)
     parser.add_argument('--gradient_accumulation_steps', default=8, type=int)
+    parser.add_argument('--debug', default=False, type=bool)  # for debuggin
     # Model settings    
     parser.add_argument('--model_name', default='diffuser', type=str)
     parser.add_argument('--with_frac', default=False, type=bool)
@@ -250,12 +252,13 @@ if __name__ == '__main__':
                           "save_steps": args.save_steps,    
                           "seed": args.seed,
                           "warmup_steps": args.warmup_steps,
-                          "gradient_accumulation_steps": args.gradient_accumulation_steps,     
-                          "debug": "underflow_overflow"  # remove (only for debugging)
+                          "gradient_accumulation_steps": args.gradient_accumulation_steps                          
                           }
     if args.max_steps != None:
         training_args_dict["max_steps"] = args.max_steps
-    training_args = TrainingArguments(**training_args_dict)    
+    if args.debug == True:
+        training_args_dict["debug"] = "underflow_overflow"
+    training_args = TrainingArguments(**training_args_dict)
             
     steps_per_train_epoch = int(len(train_dataset)/(training_args.per_device_train_batch_size*device_total*training_args.gradient_accumulation_steps ))
     if global_rank == 0 or not train_with_ddp:

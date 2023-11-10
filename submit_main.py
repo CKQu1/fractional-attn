@@ -105,8 +105,8 @@ def train_submit(script_name, ngpus, ncpus, kwargss, **kwargs):
                                                                 select=select)    
 
     from qsub_parser import qsub, job_divider
+    from path_setup import project_ls
     #project_ls = ["ddl"]  # can add more projects here
-    project_ls = ["dnn_maths", "frac_attn"]
     pbs_array_data = get_pbs_array_data(kwargss)    
     
     perm, pbss = job_divider(pbs_array_data, len(project_ls))
@@ -121,9 +121,12 @@ def train_submit(script_name, ngpus, ncpus, kwargss, **kwargs):
                        #"walltime":'95:59:59', 
                        #"walltime":'71:59:59',
                        #"walltime":'59:59:59',
-                       "walltime":'39:59:59',
+                       "walltime":'47:59:59',
+                       #"walltime":'39:59:59',
+                       #"walltime":'35:59:59',
+                       #"walltime":'29:59:59',
                        #"walltime":'23:59:59',
-                       "mem":"64GB"} 
+                       "mem":"48GB"} 
         if len(additional_command) > 0:
             kwargs_qsub["additional_command"] = additional_command
 
@@ -134,7 +137,7 @@ if __name__ == '__main__':
 
     # script for running
     script_name = "main_seq_classification.py"
-    ngpus, ncpus = 0, 8
+    ngpus, ncpus = 0, 12
     select = 1
     train_with_ddp = True if max(ngpus, ncpus) > 1 else False    
     #dataset_names = ['imdb']  # add or change datasets here
@@ -146,12 +149,14 @@ if __name__ == '__main__':
             # empty dict is diffuser
             #kwargss = [{"with_frac":True, "gamma":0.2}, {"with_frac":True, "gamma":0.4},
             #           {"with_frac":True, "gamma":0.6}, {"with_frac":True, "gamma":0.8}]  
-            kwargss = [{}, {"with_frac":True, "gamma":0.25}, 
-                       {"with_frac":True, "gamma":0.5}]                         
+            kwargss = [{"with_frac":True, "gamma":0.25}, 
+                       {"with_frac":True, "gamma":0.5}, {"with_frac":True, "gamma":0.75}]                         
             #kwargss = [{}, {"with_frac":True, "gamma":0.4}]                         
-            model_root_dir = join(droot, "new_unlapl_rot")
+            #model_root_dir = join(droot, "renorm_tomatoes")  # W := exp(Q^T K)
+            #model_root_dir = join(droot, "invrenorm_tomatoes")  # W := exp(-Q^T K)
+            model_root_dir = join(droot, "reg_tomatoes")  # regularized embedding
             common_kwargs = {"gradient_accumulation_steps":4,
-                             "epochs":5,
+                             "epochs":20,
                              "warmup_steps":50,
                              "divider": 1,
                              "per_device_train_batch_size":4,
@@ -176,6 +181,6 @@ if __name__ == '__main__':
             kwargss[idx]["model_dir"] = create_model_dir(model_root_dir, **kwargss[idx])            
 
         print(kwargss)        
-        #train_submit(script_name, ngpus, ncpus, kwargss,
-        #             select=select, 
-        #             job_path=model_root_dir)
+        train_submit(script_name, ngpus, ncpus, kwargss,
+                     select=select, 
+                     job_path=model_root_dir)

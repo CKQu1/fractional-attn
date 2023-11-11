@@ -21,9 +21,9 @@ def preprocess_df(df):
             dct = df.loc[i,col_name]
             if isinstance(dct, str):
                 dct = literal_eval(dct)
-            keys = list(dct.keys())
-            assert len(keys) == 1
-            df.loc[i,col_name] = dct[keys[0]]
+                keys = list(dct.keys())
+                assert len(keys) == 1
+                df.loc[i,col_name] = dct[keys[0]]
     return df
 
 def extract_json(model_dir):
@@ -73,7 +73,7 @@ def plot_single(model_dir, display=False):
         df_perf = extract_json(model_dir)
     else:
         df_perf = pd.read_csv(fpath, index_col=None)
-        df_perf = df_perf.dropna()
+        #df_perf = df_perf.dropna()
         df_perf = preprocess_df(df_perf)
 
     metric_names = ["loss", "eval_loss", "eval_accuracy", "eval_f1_score"]
@@ -107,14 +107,14 @@ def plot_multiple(model_root_dir, display=False):
     display = str_to_bool(display)
     global df_perf, model_dirs, model_dir
 
-    metric_names = ["loss", "eval_loss", "eval_accuracy", "eval_f1_score"]
-    titles = ["Loss", "Eval loss", "Eval acc", "Eval f1"]
-    #metric_names = ["eval_loss", "eval_accuracy", "eval_f1_score"]
-    #titles = ["Eval loss", "Eval acc", "Eval f1"]    
+    #metric_names = ["loss", "eval_loss", "eval_accuracy", "eval_f1_score"]
+    #titles = ["Loss", "Eval loss", "Eval acc", "Eval f1"]
+    metric_names = ["eval_loss", "eval_accuracy", "eval_f1_score"]
+    titles = ["Eval loss", "Eval acc", "Eval f1"]    
 
-    nrows, ncols = 2, 2
-    fig, axs = plt.subplots(nrows, ncols, constrained_layout=True)
-    axs = axs.flat
+    nrows, ncols = 1, 3
+    fig, axs = plt.subplots(nrows, ncols, figsize=(12, 3.5), constrained_layout=True)
+    #axs = axs.flat
 
     model_root_dirs = [njoin(model_root_dir, sub_dir) for sub_dir in next(os.walk(model_root_dir))[1] \
                        if "job" not in sub_dir]
@@ -128,10 +128,12 @@ def plot_multiple(model_root_dir, display=False):
         for model_dir in model_dirs:
             fpath = njoin(model_dir, "run_performance.csv")
             if not isfile(fpath):
+                print(f'{fpath} does not exist, extracting data from json file! \n')
                 df_perf = extract_json(model_dir)
             else:
+                print(f'{fpath} exists! \n')
                 df_perf = pd.read_csv(fpath, index_col=None)
-                df_perf = df_perf.dropna()
+                #df_perf = df_perf.dropna()
                 df_perf = preprocess_df(df_perf)
             # sort by epoch
             df_perf = df_perf.sort_values(by=['epoch'])
@@ -146,7 +148,8 @@ def plot_multiple(model_root_dir, display=False):
             for idx, metric_name in enumerate(metric_names):
                 axis = axs[idx]
                 #axis.plot(df_perf.loc[:,'step'], df_perf.loc[:,metric_name], '.')
-                axis.plot(df_perf.loc[:,'epoch'], df_perf.loc[:,metric_name], '-o', label=model_type)
+                iis_notnull = df_perf.loc[:,metric_name].notnull()
+                axis.plot(df_perf.loc[iis_notnull,'epoch'], df_perf.loc[iis_notnull,metric_name], '-o', label=model_type)
                 axis.set_title(titles[idx])
 
     # extra settings

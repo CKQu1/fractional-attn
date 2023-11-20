@@ -40,8 +40,9 @@ class DiffuserAttention(nn.Module):
         if self.with_frac:
             error_message = f"gamma = {kwargs.get('gamma')} with type {type(kwargs.get('gamma'))} is ill-defined!"
             assert 0 < kwargs.get('gamma') < 1, error_message
-            gamma = kwargs.get('gamma')
-            self.self = RegFracSelfAttention(config, layer_id, gamma)  # (detach rhos) droot/rerhoreg_tomatoes
+            gamma = kwargs.get('gamma')            
+            self.self = LNLSelfAttention(config, layer_id, gamma)
+            #self.self = RegFracSelfAttention(config, layer_id, gamma)  # (detach rhos) droot/rerhoreg_tomatoes
             #self.self = DetachedRegFracSelfAttention(config, layer_id, gamma)
             #self.self = RegFracSelfAttention(config, layer_id, gamma)  # droot/reg_tomatoes
             #self.self = RenormFracSelfAttention(config, layer_id, gamma)  # droot/renorm_tomatoes
@@ -158,6 +159,130 @@ class DiffuserSelfAttention(nn.Module):
             g.ndata['h']= nn.functional.dropout(g.ndata['h'], p=self.dropout, training=self.training)
 
         attn_output = g.ndata['h'] #BN,H,D
+        attn_output = attn_output.reshape(batch_size, seq_len,  self.num_heads, self.head_dim) # B,N,H,D        
+        assert attn_output.size() == (batch_size, seq_len, self.num_heads, self.head_dim), "Unexpected size"
+        attn_output = attn_output.transpose(0, 1).reshape(seq_len, batch_size, embed_dim).contiguous()
+        outputs = (attn_output.transpose(0, 1),) # Seq,B,D
+
+        return outputs + (global_attn_probs,) if (is_global_attn and output_attentions) else outputs
+
+
+
+# interpolation between local and non-local transition matrix (LNL: local and non-local)
+class LNLSelfAttention(nn.Module):
+    def __init__(self, config, layer_id, gamma):
+        super().__init__()
+        if config.hidden_size % config.num_attention_heads != 0:
+            raise ValueError(
+                f"The hidden size ({config.hidden_size}) is not a multiple of the number of attention "
+                f"heads ({config.num_attention_heads})"
+            )
+        self.num_heads = config.num_attention_heads
+        self.head_dim = int(config.hidden_size / config.num_attention_heads)
+        self.embed_dim = config.hidden_size
+
+        self.query = nn.Linear(config.hidden_size, self.embed_dim)
+        self.key = nn.Linear(config.hidden_size, self.embed_dim)
+        self.value = nn.Linear(config.hidden_size, self.embed_dim)
+
+        self.dropout = config.attention_probs_dropout_prob
+        self.gamma = gamma
+
+        self.layer_id = layer_id
+        attention_window = config.attention_window[self.layer_id]
+        assert (
+            attention_window % 2 == 0
+        ), f"`attention_window` for layer {self.layer_id} has to be an even value. Given {attention_window}"
+        assert (
+            attention_window > 0
+        ), f"`attention_window` for layer {self.layer_id} has to be positive. Given {attention_window}"
+
+        # weighting on local transition matrix
+        self.local_eps = nn.Parameter(torch.tensor(0.7))
+
+    def forward(
+        self,
+        hidden_states,
+        g=None,
+        attention_mask=None,
+        layer_head_mask=None,
+        is_index_masked=None,
+        is_index_global_attn=None,
+        is_global_attn=None,
+        output_attentions=False,
+    ):
+
+        hidden_states = hidden_states.transpose(0, 1) #(N,B,HD)
+        # attention_mask (B,N)
+        # project hidden states
+        query_vectors = self.query(hidden_states)
+        key_vectors = self.key(hidden_states)
+        value_vectors = self.value(hidden_states)   # (N,B,HD)
+
+        seq_len, batch_size, embed_dim = hidden_states.size()
+        assert (
+            embed_dim == self.embed_dim
+        ), f"hidden_states should have embed_dim = {self.embed_dim}, but has {embed_dim}"
+
+        # normalize query
+        query_vectors /= math.sqrt(self.head_dim)
+
+        query_vectors = query_vectors.view(seq_len, batch_size, self.num_heads, self.head_dim).transpose(0, 1) # (B,N,H,D)
+        key_vectors = key_vectors.view(seq_len, batch_size, self.num_heads, self.head_dim).transpose(0, 1) # (B,N,H,D)
+        value_vectors = value_vectors.view(seq_len, batch_size, self.num_heads, self.head_dim).transpose(0, 1) #B,N,H,D
+        
+        query_vectors =  query_vectors.reshape(-1, self.num_heads, self.head_dim)  #BN,H,D
+        key_vectors =  key_vectors.reshape(-1, self.num_heads, self.head_dim)  #BN,H,D
+        value_vectors =  value_vectors.reshape(-1, self.num_heads, self.head_dim)  #BN,H,D        
+        
+        W_G = torch.bmm(key_vectors.transpose(0,1), query_vectors.transpose(0,1).transpose(1,2)).exp()  # (H,BN,BN)
+        # can introduce dropout as masking
+        #W_G = nn.functional.dropout(W_G, p=self.dropout, training=self.training)                
+
+        """
+        attn sparsification + bool masking
+            - original g contains attention spasification, 
+            - now we combine g with token masking (for memory)
+        """                        
+        bool_mask = (attention_mask>=0).reshape(-1).unsqueeze(-1).int()  # option 1        
+        #bool_mask = (attention_mask>0).reshape(-1).unsqueeze(-1).int()  # option 2
+        g = g * (bool_mask @ bool_mask.T)
+        W_G.masked_fill_((g>0)==False, 0)        
+
+        # Bmat
+        BN = seq_len * batch_size    
+        out_degree = W_G.sum(axis=2)  # original
+        #out_degree = W_G.sum(axis=2).detach()
+        #rhos = out_degree.max(axis=1).values  # original
+        rhos = out_degree.max(axis=1).values.detach()
+        #with torch.no_grad():
+        Bmat = torch.diag_embed(rhos.unsqueeze(-1).repeat(1, BN)) + W_G - torch.diag_embed(out_degree)
+        B_power = torch.eye(BN, requires_grad=True).reshape(1, BN, BN).repeat(self.num_heads, 1, 1)
+        L_gamma = torch.eye(BN, requires_grad=True).reshape(1, BN, BN).repeat(self.num_heads, 1, 1)        
+
+        Bmat = Bmat.to_sparse()  # convert to sparse for speed-up
+        N_approx = 7
+        numerator, denominator = 1, 1
+        #error_tolerence = 1e-5  # should this be introduced?
+        with torch.no_grad():
+            for ii in range(1, N_approx+1):
+                numerator *= (self.gamma - ii + 1) * (-1)
+                denominator *= ii * rhos
+                coef = numerator/denominator            
+                B_power = torch.bmm(Bmat, B_power)  # bmm supports format sparse bmm dense only
+                L_gamma += coef.unsqueeze(-1).unsqueeze(-1) * B_power
+            L_gamma *= rhos.unsqueeze(-1).unsqueeze(-1)**self.gamma  # unnormalized fractional Laplacian
+
+            # L_gamma --> P^gamma
+            # Method 0
+            L_gamma_diags = torch.diagonal( L_gamma, dim1=-2, dim2=-1 )
+            # this can be done as the non-diagonal entries will always be non-negative
+            L_gamma = normalize(torch.diag_embed(L_gamma_diags) - L_gamma, p=1, dim=2)    
+
+            attn_output = self.local_eps * torch.bmm(normalize(W_G, p=1, dim=2), value_vectors.transpose(0,1)) + \
+                        (1 - self.local_eps) * torch.bmm(L_gamma, value_vectors.transpose(0,1))
+
+        attn_output = nn.functional.dropout(attn_output, p=self.dropout, training=self.training)
         attn_output = attn_output.reshape(batch_size, seq_len,  self.num_heads, self.head_dim) # B,N,H,D        
         assert attn_output.size() == (batch_size, seq_len, self.num_heads, self.head_dim), "Unexpected size"
         attn_output = attn_output.transpose(0, 1).reshape(seq_len, batch_size, embed_dim).contiguous()
@@ -385,9 +510,15 @@ class RegFracSelfAttention(nn.Module):
                 B_power = torch.bmm(Bmat, B_power)  # bmm supports format sparse bmm dense only
                 L_gamma += coef.unsqueeze(-1).unsqueeze(-1) * B_power
             L_gamma *= rhos.unsqueeze(-1).unsqueeze(-1)**self.gamma  # unnormalized fractional Laplacian
+            beta_denom = -L_gamma.min().detach()
 
             # L_gamma --> W_gamma
             L_gamma.masked_fill_((g>0)==True, 0)  # oppposite mask for regularization
+
+            # regularization parameter
+            beta_num = W_G[W_G > 0].min().detach()              
+            beta = beta_num/beta_denom        
+
             W_G -= L_gamma
             # W_gamma --> P^(gamma)
             W_G = normalize(W_G, p=1, dim=2)  # this can be done since entries are non-neg

@@ -75,7 +75,7 @@ def process_dataset_cols(dataset):
 """
 python -i main_seq_classification.py  --with_frac=True --gamma=0.5 --max_steps=2 --logging_steps=2 --save_steps=2 --eval_steps=2\
  --divider=100 --warmup_steps=0 --gradient_accumulation_steps=1 --dataset_name=rotten_tomatoes\
- --model_dir=droot/debug_mode12/model_0_reg
+ --model_dir=droot/debug_mode15/model_0_derhoandoutdegreg_mask=longformer
 """
 
 # quick torchrun (multi-unit)
@@ -111,7 +111,8 @@ if __name__ == '__main__':
     parser.add_argument('--gradient_accumulation_steps', default=8, type=int)
     parser.add_argument('--debug', default=False, type=bool)  # for debuggin
     # Model settings    
-    parser.add_argument('--model_name', default='diffuser', type=str)
+    parser.add_argument('--sparsify_type', default=None, type=str)
+    parser.add_argument('--model_name', default='diffuser', type=str)    
     parser.add_argument('--with_frac', default=False, type=bool)
     parser.add_argument('--gamma', default=None, type=float)
     parser.add_argument('--max_length', default=1024, type=int)
@@ -287,6 +288,16 @@ if __name__ == '__main__':
     if args.model_name == 'diffuser':
         trainer_kwargs['use_dgl'] = use_dgl
         trainer_kwargs['config'] = config
+        if args.sparsify_type == None:
+            if args.with_frac:
+                args.sparsify_type = 'longformer'
+            else:
+                args.sparsify_type = 'diffuser'
+            trainer_kwargs['sparsify_type'] = args.sparsify_type
+        else:
+            assert args.sparsify_type in ['longformer', 'diffuser'], "sparsify_type doesn not exist!"
+            trainer_kwargs['sparsify_type'] = args.sparsify_type
+
         trainer = graphTrainer(**trainer_kwargs)
     else:
         from transformers import Trainer
@@ -308,7 +319,8 @@ if __name__ == '__main__':
         run_perf = run_perf[top_names]
         run_perf.to_csv(join(model_dir, "run_performance.csv"))
 
-    model_settings = attn_setup; model_settings['train_secs'] = train_secs
+    model_settings = attn_setup; model_settings['sparsify_type'] = args.sparsify_type
+    model_settings['train_secs'] = train_secs
     model_settings.update(trainer.state.log_history[-1])
     final_perf = pd.DataFrame()
     final_perf = final_perf.append(model_settings, ignore_index=True)    

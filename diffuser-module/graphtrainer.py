@@ -19,7 +19,6 @@ class graphTrainer(Trainer):
     def __init__(
         self,
         use_dgl: bool = True,
-        sparsify_type: str = 'diffuser',
         model: Union[PreTrainedModel, nn.Module] = None,
         config: DiffuserConfig = None,
         args: TrainingArguments = None,
@@ -47,7 +46,6 @@ class graphTrainer(Trainer):
             )
         self.use_dgl = use_dgl
         self.config = config
-        self.sparsify_type = sparsify_type
         #if self.use_dgl:
         self._create_adj_mat()
 
@@ -61,30 +59,28 @@ class graphTrainer(Trainer):
         n_blocks = max_len//(attention_window//2)-1
         adj = np.zeros([max_len, max_len])
         
-        if self.sparsify_type in ['diffuser', 'longformer']:
-            # add local window att (overlap)
-            for i in range(n_blocks):
-                start = i*attention_window//2
-                end = start+attention_window
-                if end > max_len:
-                    end = max_len
-                adj[start:end, start:end] = 1
+        # add local window att (overlap)
+        for i in range(n_blocks):
+            start = i*attention_window//2
+            end = start+attention_window
+            if end > max_len:
+                end = max_len
+            adj[start:end, start:end] = 1
 
-        if self.sparsify_type == 'diffuser':
-            # add random att    
-            np.random.seed(0)
-            num_random = max_len*self.config.num_rand
-            
-            idx = np.random.choice(range(max_len*max_len), num_random ,replace=False)
-            idx_x = idx %  max_len
-            idx_y = idx // max_len
-            adj[idx_x,idx_y] = 1
+        # add random att    
+        np.random.seed(0)
+        num_random = max_len*self.config.num_rand
+        
+        idx = np.random.choice(range(max_len*max_len), num_random ,replace=False)
+        idx_x = idx %  max_len
+        idx_y = idx // max_len
+        adj[idx_x,idx_y] = 1
 
-            # add global att    
-            num_global = self.config.num_glob
-            idx = np.random.choice(range(attention_window,max_len), num_global ,replace=False)
-            adj[idx,:] = 1
-            adj[:,idx] = 1
+        # add global att    
+        num_global = self.config.num_glob
+        idx = np.random.choice(range(attention_window,max_len), num_global ,replace=False)
+        adj[idx,:] = 1
+        adj[:,idx] = 1
 
         possible_seq_len = np.arange(attention_window, max_len+attention_window, attention_window)
         self.src_dst = {k: np.nonzero(adj[:k, :k]) for k in possible_seq_len}

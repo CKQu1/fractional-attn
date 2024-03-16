@@ -41,15 +41,9 @@ class DiffuserAttention(nn.Module):
             error_message = f"gamma = {kwargs.get('gamma')} with type {type(kwargs.get('gamma'))} is ill-defined!"
             assert 0 < kwargs.get('gamma') < 1, error_message
             gamma = kwargs.get('gamma')            
-            self.self = LNLSelfAttention(config, layer_id, gamma)
-            #self.self = RegFracSelfAttention(config, layer_id, gamma)  # (detach rhos) droot/rerhoreg_tomatoes
-            #self.self = DetachedRegFracSelfAttention(config, layer_id, gamma)
-            #self.self = RegFracSelfAttention(config, layer_id, gamma)  # droot/reg_tomatoes
-            #self.self = RenormFracSelfAttention(config, layer_id, gamma)  # droot/renorm_tomatoes
-            #self.self = UnFracSelfAttention(config, layer_id, gamma)  # droot/new2_unlapl_rot
-            #self.self = SymLimitFracSelfAttention(config, layer_id, gamma)  # droot/symrot_seq_classification
-            #self.self = LimitFracSelfAttention(config, layer_id, gamma)
-            #self.self = LimitFracSelfAttention_dgl(config, layer_id, gamma)
+            #self.self = FracDMSelfAttention(config, layer_id, gamma)
+            self.self = L2Attention(config, layer_id, gamma)
+
         else:
             self.self = DiffuserSelfAttention(config, layer_id)          
         self.output = DiffuserSelfOutput(config)
@@ -167,6 +161,254 @@ class DiffuserSelfAttention(nn.Module):
         return outputs + (global_attn_probs,) if (is_global_attn and output_attentions) else outputs
 
 
+# Fractional diffusion map realization of attention
+class FracDMSelfAttention(nn.Module):
+    def __init__(self, config, layer_id, gamma):
+        super().__init__()
+        if config.hidden_size % config.num_attention_heads != 0:
+            raise ValueError(
+                f"The hidden size ({config.hidden_size}) is not a multiple of the number of attention "
+                f"heads ({config.num_attention_heads})"
+            )
+        self.num_heads = config.num_attention_heads
+        self.head_dim = int(config.hidden_size / config.num_attention_heads)
+        self.embed_dim = config.hidden_size
+
+        self.query = nn.Linear(config.hidden_size, self.embed_dim)
+        self.key = nn.Linear(config.hidden_size, self.embed_dim)
+        self.value = nn.Linear(config.hidden_size, self.embed_dim)
+
+        self.dropout = config.attention_probs_dropout_prob
+        self.gamma = gamma
+
+        self.layer_id = layer_id
+        attention_window = config.attention_window[self.layer_id]
+        assert (
+            attention_window % 2 == 0
+        ), f"`attention_window` for layer {self.layer_id} has to be an even value. Given {attention_window}"
+        assert (
+            attention_window > 0
+        ), f"`attention_window` for layer {self.layer_id} has to be positive. Given {attention_window}"
+
+    def forward(
+        self,
+        hidden_states,
+        g=None,
+        attention_mask=None,
+        layer_head_mask=None,
+        is_index_masked=None,
+        is_index_global_attn=None,
+        is_global_attn=None,
+        output_attentions=False,
+    ):
+
+        hidden_states = hidden_states.transpose(0, 1) #(N,B,HD)
+        # attention_mask (B,N)
+        # project hidden states
+        query_vectors = self.query(hidden_states)
+        key_vectors = self.key(hidden_states)
+        value_vectors = self.value(hidden_states)   # (N,B,HD)
+
+        seq_len, batch_size, embed_dim = hidden_states.size()
+        assert (
+            embed_dim == self.embed_dim
+        ), f"hidden_states should have embed_dim = {self.embed_dim}, but has {embed_dim}"
+
+        # -------------------- Strategy 1 --------------------
+        """
+        Embed the queries into a D-sphere via normalization, set the bandwidth as the diamter of an D-sphere
+        """
+
+        # normalize query
+        #query_vectors /= math.sqrt(self.head_dim)
+
+        # weight-share between query and key
+        query_vectors = query_vectors.view(seq_len, batch_size, self.num_heads, self.head_dim).transpose(0, 1) # (B,N,H,D)
+        value_vectors = value_vectors.view(seq_len, batch_size, self.num_heads, self.head_dim).transpose(0, 1) #B,N,H,D
+        
+        # normalize query row-wise (embedded in D-sphere)
+        #query_vectors =  query_vectors.reshape(-1, self.num_heads, self.head_dim)  #BN,H,D
+        query_vectors =  query_vectors.reshape(self.num_heads, -1, self.head_dim)  # (H,BN,D)
+        query_vectors = normalize(query_vectors, p=2, dim=2)
+        value_vectors =  value_vectors.reshape(-1, self.num_heads, self.head_dim)  #BN,H,D       
+
+        BN = seq_len * batch_size
+        D = value_vectors.shape[-1]
+        gamma = self.gamma
+
+        """
+        attn sparsification + bool masking
+            - original g contains attention spasification, 
+            - now we combine g with token masking (for memory)
+        """                        
+        bool_mask = (attention_mask>=0).reshape(-1).unsqueeze(-1).int()  # option 1        
+        #bool_mask = (attention_mask>0).reshape(-1).unsqueeze(-1).int()  # option 2
+        g = g * (bool_mask @ bool_mask.T)
+        #W_G.masked_fill_((g>0)==False, 0)  # HOW WILL THIS BE APPLIED???
+
+        # pairwise Euclidean distance (H,BN,D) @ (H,D,BN)
+        EucliDist = torch.cdist(query_vectors, query_vectors) # (H,BN,BN)     
+        # bandwidth set up 1   
+        #bandwidth = torch.max(EucliDist) + 1 # (H)
+        # bandwidth set up 2 (max distance on the surface of a D-sphere)  
+        bandwidth = torch.pi # (H)        
+        t = bandwidth**(gamma/2) # (H)   
+        #density estimate
+        q_hat = (2 * torch.pi * bandwidth)**(-D/2)/BN * torch.exp(EucliDist).sum(axis=-1) # (H,BN,1)
+        D_inv = torch.diag_embed(1/q_hat)
+
+        # assumes gamma strictly in (0,1)
+        #d_G = torch.acos(torch.bmm(query_vectors.view(H,BN,D), query_vectors.view(H,D,BN))) # (H,BN,BN)
+        # kernel matrix
+        K = (1 + torch.acos(torch.bmm(query_vectors, query_vectors.transpose(1,2)))/bandwidth**0.5)**(-D - gamma)
+        # symmetric right normalization
+        K_tilde = torch.bmm(D_inv, torch.bmm(K, D_inv))
+        # left normalization for Markov matrix
+        D_tilde_inv = torch.diag_embed(1 / K_tilde.sum(axis=2))
+        H = torch.bmm(D_tilde_inv, K_tilde)
+
+        # -------------------- Strategy 2 --------------------
+        """
+        Set a small bandwidth, use an efficient Dijkstra algorithm
+        """        
+
+        
+
+        # -----------------------------------------------------
+        attn_output = torch.bmm(H, value_vectors.transpose(0,1))
+
+        attn_output = nn.functional.dropout(attn_output, p=self.dropout, training=self.training)
+        attn_output = attn_output.reshape(batch_size, seq_len,  self.num_heads, self.head_dim) # B,N,H,D        
+        assert attn_output.size() == (batch_size, seq_len, self.num_heads, self.head_dim), "Unexpected size"
+        attn_output = attn_output.transpose(0, 1).reshape(seq_len, batch_size, embed_dim).contiguous()
+        outputs = (attn_output.transpose(0, 1),) # Seq,B,D
+
+        return outputs + (global_attn_probs,) if (is_global_attn and output_attentions) else outputs
+
+
+# L2 MHA (with weight-sharing)
+"""
+Based on "The Lipschitz Constant of Self-Attention"
+"""
+class L2Attention(nn.Module):
+    def __init__(self, config, layer_id, gamma):
+        super().__init__()
+        if config.hidden_size % config.num_attention_heads != 0:
+            raise ValueError(
+                f"The hidden size ({config.hidden_size}) is not a multiple of the number of attention "
+                f"heads ({config.num_attention_heads})"
+            )
+        self.num_heads = config.num_attention_heads
+        self.head_dim = int(config.hidden_size / config.num_attention_heads)
+        self.embed_dim = config.hidden_size
+
+        self.query = nn.Linear(config.hidden_size, self.embed_dim)  # weight-tying/sharing between Q and K
+        self.value = nn.Linear(config.hidden_size, self.embed_dim)
+
+        self.dropout = config.attention_probs_dropout_prob
+        self.gamma = gamma
+
+        self.layer_id = layer_id
+        attention_window = config.attention_window[self.layer_id]
+        assert (
+            attention_window % 2 == 0
+        ), f"`attention_window` for layer {self.layer_id} has to be an even value. Given {attention_window}"
+        assert (
+            attention_window > 0
+        ), f"`attention_window` for layer {self.layer_id} has to be positive. Given {attention_window}"
+
+    def forward(
+        self,
+        hidden_states,
+        g=None,
+        attention_mask=None,
+        layer_head_mask=None,
+        is_index_masked=None,
+        is_index_global_attn=None,
+        is_global_attn=None,
+        output_attentions=False,
+    ):
+
+        hidden_states = hidden_states.transpose(0, 1) #(N,B,HD)
+        # attention_mask (B,N)
+        # project hidden states
+        query_vectors = self.query(hidden_states)   # weight-tying/sharing
+        value_vectors = self.value(hidden_states)   # (N,B,HD)
+
+        seq_len, batch_size, embed_dim = hidden_states.size()
+        assert (
+            embed_dim == self.embed_dim
+        ), f"hidden_states should have embed_dim = {self.embed_dim}, but has {embed_dim}"
+    
+        """
+        Check https://github.com/lucidrains/gigagan-pytorch/issues/14 for implementation
+        """
+
+        # normalize query
+        #query_vectors /= math.sqrt(self.head_dim)
+
+        # weight-share between query and key
+        query_vectors = query_vectors.view(seq_len, batch_size, self.num_heads, self.head_dim).transpose(0, 1) # (B,N,H,D)
+        value_vectors = value_vectors.view(seq_len, batch_size, self.num_heads, self.head_dim).transpose(0, 1) #B,N,H,D
+        
+        # normalize query row-wise (embedded in D-sphere)
+        #query_vectors =  query_vectors.reshape(-1, self.num_heads, self.head_dim)  #BN,H,D
+        query_vectors =  query_vectors.reshape(self.num_heads, -1, self.head_dim)  # (H,BN,D)
+        query_vectors = normalize(query_vectors, p=2, dim=2)
+        value_vectors =  value_vectors.reshape(-1, self.num_heads, self.head_dim)  #BN,H,D       
+
+        BN = seq_len * batch_size
+        D = value_vectors.shape[-1]
+        gamma = self.gamma
+
+        """
+        attn sparsification + bool masking
+            - original g contains attention spasification, 
+            - now we combine g with token masking (for memory)
+        """                        
+        bool_mask = (attention_mask>=0).reshape(-1).unsqueeze(-1).int()  # option 1        
+        #bool_mask = (attention_mask>0).reshape(-1).unsqueeze(-1).int()  # option 2
+        g = g * (bool_mask @ bool_mask.T)
+
+        # -------------------- Strategy 1 --------------------            
+        # pairwise Euclidean distance (H,BN,D) @ (H,D,BN)
+        #EucliDist = torch.cdist(query_vectors, query_vectors) # (H,BN,BN)   
+        # P = (torch.cdist(query_vectors, query_vectors)/(D/self.num_heads)**0.5).exp()  
+        # # softmax applied
+        # P = 
+
+        # -------------------- Strategy 2 --------------------     
+        # following is basically torch.cdist().square()
+        # tied qk
+        #AB = torch.matmul(query_vectors, query_vectors.transpose(-1, -2))
+        AB = torch.bmm(query_vectors, query_vectors.transpose(-1, -2))
+        AA = torch.sum(query_vectors**2, -1, keepdim=True)
+        BB = AA.transpose(-1, -2)    # Since query and key are tied.
+        sim = -(AA - 2 * AB + BB)
+        sim = sim * (self.head_dim**-0.5)
+        attn = sim.softmax(-1)
+
+        # separate qk
+        """
+        AB = torch.matmul(q, k.transpose(-1, -2))
+        AA = torch.sum(q ** 2, -1, keepdim=True)
+        BB = torch.sum(k ** 2, -1, keepdim=True).transpose(-1, -2)
+        attn = -(AA - 2 * AB + BB)
+        attn = attn.mul(self.scale).softmax(-1)
+        """                
+
+        # -----------------------------------------------------        
+
+        attn_output = torch.bmm(attn, value_vectors.transpose(0,1))
+
+        attn_output = nn.functional.dropout(attn_output, p=self.dropout, training=self.training)
+        attn_output = attn_output.reshape(batch_size, seq_len,  self.num_heads, self.head_dim) # B,N,H,D        
+        assert attn_output.size() == (batch_size, seq_len, self.num_heads, self.head_dim), "Unexpected size"
+        attn_output = attn_output.transpose(0, 1).reshape(seq_len, batch_size, embed_dim).contiguous()
+        outputs = (attn_output.transpose(0, 1),) # Seq,B,D
+
+        return outputs + (global_attn_probs,) if (is_global_attn and output_attentions) else outputs
+
 
 # interpolation between local and non-local transition matrix (LNL: local and non-local)
 class LNLSelfAttention(nn.Module):
@@ -198,7 +440,8 @@ class LNLSelfAttention(nn.Module):
         ), f"`attention_window` for layer {self.layer_id} has to be positive. Given {attention_window}"
 
         # weighting on local transition matrix
-        self.local_eps = nn.Parameter(torch.tensor(0.7))
+        #self.local_eps = nn.Parameter(torch.tensor(0.7))
+        self.local_eps = 0.8
 
     def forward(
         self,

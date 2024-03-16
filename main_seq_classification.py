@@ -4,7 +4,7 @@ import os
 import pandas as pd
 import torch
 from time import time, sleep
-from path_setup import droot
+from constants import DROOT
 
 from os.path import join, isdir
 from sklearn.metrics import f1_score
@@ -75,7 +75,7 @@ def process_dataset_cols(dataset):
 """
 python -i main_seq_classification.py  --with_frac=True --gamma=0.5 --max_steps=2 --logging_steps=2 --save_steps=2 --eval_steps=2\
  --divider=100 --warmup_steps=0 --gradient_accumulation_steps=1 --dataset_name=rotten_tomatoes\
- --model_dir=droot/debug_mode15/model_0_derhoandoutdegreg_mask=longformer
+ --model_dir=droot/debug_all/debug_mode18/model_l2_0
 """
 
 # quick torchrun (multi-unit)
@@ -184,11 +184,11 @@ if __name__ == '__main__':
         tokenizer = AutoTokenizer.from_pretrained("distilbert-base-uncased")
 
     # save tokenized dataset
-    tokenized_dataset_dir = join(droot, "DATASETS", f"tokenized_{args.dataset_name}")
+    tokenized_dataset_dir = join(DROOT, "DATASETS", f"tokenized_{args.dataset_name}")
     if not os.path.isdir(tokenized_dataset_dir):         
         print("Downloading data!") if global_rank == 0 or not train_with_ddp else None
         # create cache for dataset
-        dataset = get_dataset(args.dataset_name, join(droot, "DATASETS"))
+        dataset = get_dataset(args.dataset_name, join(DROOT, "DATASETS"))
 
         tokenized_dataset = dataset.map(preprocess_function, batched=True)
         column_names = get_dataset_cols(tokenized_dataset)
@@ -237,9 +237,9 @@ if __name__ == '__main__':
 
     if args.model_dir == None:
         if args.with_frac and args.model_name == 'diffuser':
-            args.model_dir = join(droot, "seq_classification", "save_{args.dataset_name}_sym_frac_diffuser")
+            args.model_dir = join(DROOT, "seq_classification", "save_{args.dataset_name}_sym_frac_diffuser")
         else:
-            args.model_dir = join(droot, "seq_classification", "save_{args.dataset_name}_{args.model_name}")
+            args.model_dir = join(DROOT, "seq_classification", "save_{args.dataset_name}_{args.model_name}")
     training_args_dict = {"output_dir": args.model_dir,
                           "learning_rate": args.lr,
                           "per_device_train_batch_size": args.per_device_train_batch_size,

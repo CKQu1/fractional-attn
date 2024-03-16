@@ -1,7 +1,7 @@
 import os
 from os.path import isfile, join
 from time import sleep
-from path_setup import droot
+from constants import DROOT
 repo_dir = os.getcwd()  # main dir
 
 # for enumerating each instance of training
@@ -102,38 +102,36 @@ def get_pbs_array_data(kwargss):
     return pbs_array_data
 
 def train_submit(script_name, ngpus, ncpus, kwargss, **kwargs):
+    from constants import SPATH
     assert isfile(script_name), f"{script_name} does not exist!"
 
     # computing resource settings
     select = kwargs.get('select', 1)  # number of nodes
-    ngpus, ncpus = int(ngpus), int(ncpus)
-    singularity_path = "../built_containers/FaContainer_v2.sif"
-    command, additional_command, train_with_ddp = command_setup(ngpus, ncpus, singularity_path,
+    ngpus, ncpus = int(ngpus), int(ncpus)    
+    command, additional_command, train_with_ddp = command_setup(ngpus, ncpus, SPATH,
                                                                 select=select)    
 
     from qsub_parser import qsub, job_divider
-    from path_setup import project_ls
-    #project_ls = ["ddl"]  # can add more projects here
+    from constants import PROJECTS
+    #PROJECTS = ["ddl"]  # can add more projects here
     pbs_array_data = get_pbs_array_data(kwargss)    
     
-    perm, pbss = job_divider(pbs_array_data, len(project_ls))
+    perm, pbss = job_divider(pbs_array_data, len(PROJECTS))
     for idx, pidx in enumerate(perm):
         pbs_array_true = pbss[idx]
-        print(project_ls[pidx])
+        print(PROJECTS[pidx])
         kwargs_qsub = {"path":kwargs.get("job_path"),  # acts as PBSout
-                       "P":project_ls[pidx],
+                       "P":PROJECTS[pidx],
                        "ngpus":ngpus, 
                        "ncpus":ncpus, 
                        "select":select,
                        #"walltime":'95:59:59', 
                        #"walltime":'71:59:59',
                        #"walltime":'59:59:59',
-                       "walltime":'35:59:59',
                        #"walltime":'39:59:59',
                        #"walltime":'35:59:59',
                        #"walltime":'29:59:59',
-                       #"walltime":'23:59:59',
-                       #"walltime":'23:59:59',
+                       "walltime":'23:59:59',
                        "mem":"48GB"
                        #"mem":"16GB"
                        } 
@@ -147,8 +145,9 @@ if __name__ == '__main__':
 
     # script for running
     script_name = "main_seq_classification.py" 
-    #dataset_names = ['imdb']  # add or change datasets here
-    dataset_names = ['rotten_tomatoes']
+    # add or change datasets here
+    dataset_names = ['rotten_tomatoes','imdb']
+    dataset_names = dataset_names[:1]
     
     debug_mode = False
     for dataset_name in dataset_names:
@@ -161,29 +160,24 @@ if __name__ == '__main__':
             #kwargss = [{"with_frac":True, "gamma":0.2}, {"with_frac":True, "gamma":0.4},
             #           {"with_frac":True, "gamma":0.6}, {"with_frac":True, "gamma":0.8}]  
             #kwargss = [{"with_frac":True, "gamma":0.25}, 
-            #           {"with_frac":True, "gamma":0.5}, {"with_frac":True, "gamma":0.75}]  
-            kwargss = [{"with_frac":True, "gamma":0.5, "lr":3e-4}, {"with_frac":True, "gamma":0.5, "lr":3e-3}]    
-            #kwargss = [{"with_frac":True, "gamma":0.2}, {"with_frac":True, "gamma":0.8}]                              
-            #kwargss = [{}, {"with_frac":True, "gamma":0.4}]                         
-            #model_root_dir = join(droot, "renorm_tomatoes")  # W := exp(Q^T K)
-            #model_root_dir = join(droot, "invrenorm_tomatoes")  # W := exp(-Q^T K)
-            #model_root_dir = join(droot, "reg_tomatoes")  # regularized embedding
-            #model_root_dir = join(droot, "dereg_tomatoes")  # regularized embedding (detached frac lapl)
-            #model_root_dir = join(droot, "derhoandoutdegreg_tomatoes")  # regularized embedding (detached rho and out-degree)
-            model_root_dir = join(droot, "derhoreg_lrtest_tomatoes")  # regularized embedding (detached rho, droot/derhoreg_lrtest_tomatoes)
+            #           {"with_frac":True, "gamma":0.5}, {"with_frac":True, "gamma":0.75}]                             
+            kwargss = [{}, {"with_frac":True, "gamma":0.4}]                         
+            model_root_dir = join(DROOT, 'trained_models', "l2_mha")  # L2-MHA (without AX)
             common_kwargs = {"gradient_accumulation_steps":4,
-                             "epochs":20,
+                             #"epochs":20,
+                             "epochs":10,
                              "warmup_steps":50,
                              "divider": 1,
                              "per_device_train_batch_size":4,
-                             "per_device_eval_batch_size":4}
+                             "per_device_eval_batch_size":4
+                             }
         else:
             ngpus, ncpus = 0, 2
             select = 1
             train_with_ddp = True if max(ngpus, ncpus) > 1 else False   
 
-            kwargss = [{}, {"with_frac":True, "gamma":0.8, "lr":3e-4}]  
-            model_root_dir = join(droot, "debug_mode14")
+            kwargss = [{}, {"with_frac":True, "gamma":0.8, "lr":3e-4}]
+            model_root_dir = join(DROOT, "qsub_check")  # "debug_mode14"
             common_kwargs = {"gradient_accumulation_steps":2,
                              "divider": 100,
                              "max_steps": 200,
@@ -199,7 +193,8 @@ if __name__ == '__main__':
             kwargss[idx]["dataset_name"] = dataset_name
             models_dir, kwargss[idx]["model_dir"] = create_model_dir(model_root_dir, **kwargss[idx])         
 
-        print(kwargss)        
+        print(f'debug_mode = {debug_mode}')
+        #print(kwargss)        
         train_submit(script_name, ngpus, ncpus, kwargss,
                      select=select, 
                      job_path=model_root_dir)

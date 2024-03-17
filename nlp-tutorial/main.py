@@ -8,30 +8,31 @@ from trainer import Trainer
 
 TOKENIZER_CLASSES = {'nltk_moses': NLTKMosesTokenizer}
 
-def main(args):
-    print(args)
+# def main(args):
+#     print(args)
 
-    # Load tokenizer
-    if args.tokenizer == 'sentencepiece':
-        tokenizer = PretrainedTokenizer(pretrained_model=args.pretrained_model, vocab_file=args.vocab_file)
-    else:
-        tokenizer = TOKENIZER_CLASSES[args.tokenizer]()
-        tokenizer = Tokenizer(tokenizer=tokenizer, vocab_file =args.vocab_file)
-    # Build DataLoader
-    train_dataset = create_examples(args, tokenizer, mode='train')
-    test_dataset = create_examples(args, tokenizer, mode='test')
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=True)
+#     # Load tokenizer
+#     if args.tokenizer == 'sentencepiece':
+#         tokenizer = PretrainedTokenizer(pretrained_model=args.pretrained_model, vocab_file=args.vocab_file)
+#     else:
+#         tokenizer = TOKENIZER_CLASSES[args.tokenizer]()
+#         tokenizer = Tokenizer(tokenizer=tokenizer, vocab_file =args.vocab_file)
+#     # Build DataLoader
+#     train_dataset = create_examples(args, tokenizer, mode='train')
+#     test_dataset = create_examples(args, tokenizer, mode='test')
+#     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
+#     test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=True)
     
-    # Build Trainer
-    trainer = Trainer(args, train_loader, test_loader, tokenizer)
+#     # Build Trainer
+#     trainer = Trainer(args, train_loader, test_loader, tokenizer)
 
-    # Train & Validate
-    for epoch in range(1, args.epochs+1):
-        trainer.train(epoch)
-        trainer.validate(epoch)
-        trainer.save(epoch, args.output_model_prefix)
+#     # Train & Validate
+#     for epoch in range(1, args.epochs+1):
+#         trainer.train(epoch)
+#         trainer.validate(epoch)
+#         trainer.save(epoch, args.output_model_prefix)
 
+# !python -i main.py --dataset=imdb --epochs=10 --n_attn_heads=1 --batch_size=2 --max_seq_len=64  --divider=100
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
@@ -42,11 +43,15 @@ if __name__ == '__main__':
     parser.add_argument('--output_model_prefix', default='model',          type=str, help='output model name prefix')
     # Input parameters
     parser.add_argument('--batch_size',     default=32,   type=int,   help='batch size')
+    parser.add_argument('--divider',     default=1,   type=int,   help='divide the dataset by this number')
     parser.add_argument('--max_seq_len',    default=512,  type=int,   help='the maximum size of the input sequence')
     # Train parameters
     parser.add_argument('--epochs',         default=7,   type=int,   help='the number of epochs')
     parser.add_argument('--lr',             default=1e-4, type=float, help='learning rate')
     parser.add_argument('--no_cuda',        action='store_true')
+    # Self-attention parameters
+    parser.add_argument('--beta',           default=1,  type=int,   help='fractional power')
+    parser.add_argument('--bandwidth',      default=1,  type=float,   help='bandwidth of the kernel')
     # Model parameters
     parser.add_argument('--hidden',         default=256,  type=int,   help='the number of expected features in the transformer')
     parser.add_argument('--n_layers',       default=1,    type=int,   help='the number of heads in the multi-head attention network')
@@ -56,4 +61,31 @@ if __name__ == '__main__':
     
     args = parser.parse_args()
     
-    main(args)
+    # main(args)
+
+    print(args)
+
+    # Load tokenizer
+    print('Load tokenizer')
+    if args.tokenizer == 'sentencepiece':
+        tokenizer = PretrainedTokenizer(pretrained_model=args.pretrained_model, vocab_file=args.vocab_file)
+    else:
+        tokenizer = TOKENIZER_CLASSES[args.tokenizer]()
+        tokenizer = Tokenizer(tokenizer=tokenizer, vocab_file =args.vocab_file)
+    # Build DataLoader
+    print('Build DataLoader')
+    train_dataset = create_examples(args, tokenizer, mode='train')
+    test_dataset = create_examples(args, tokenizer, mode='test')
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
+    test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=True)
+    
+    # Build Trainer
+    print('Build Trainer')
+    trainer = Trainer(args, train_loader, test_loader, tokenizer)
+
+    # Train & Validate
+    for epoch in range(1, args.epochs+1):
+        trainer.train(epoch)
+        trainer.validate(epoch)
+        trainer.save(epoch, args.output_model_prefix)    
+

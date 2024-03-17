@@ -17,15 +17,18 @@ class Trainer:
         self.pad_id = tokenizer.pad_token_id
         self.device = 'cuda' if torch.cuda.is_available() and not args.no_cuda else 'cpu'
 
-        model = TransformerEncoder(vocab_size  = self.vocab_size,
-                                        seq_len     = args.max_seq_len,
-                                        d_model     = args.hidden,
-                                        n_layers    = args.n_layers,
-                                        n_heads     = args.n_attn_heads,
-                                        p_drop      = args.dropout,
-                                        d_ff        = args.ffn_hidden,
-                                        pad_id      = self.pad_id,
-                                        n_it = n_it)
+        model = TransformerEncoder(beta        = args.beta,
+                                   bandwidth    = args.bandwidth,
+                                   vocab_size  = self.vocab_size,
+                                   seq_len     = args.max_seq_len,
+                                   d_model     = args.hidden,
+                                   n_layers    = args.n_layers,
+                                   n_heads     = args.n_attn_heads,
+                                   p_drop      = args.dropout,
+                                   d_ff        = args.ffn_hidden,
+                                   pad_id      = self.pad_id,
+                                   n_it = n_it
+                                   )
         print('Number of parameters of the model is %d' % count_parameters(model))
 
         for layer in model.children():

@@ -1,25 +1,68 @@
 import numpy as np
 import torch
 import torch.nn as nn
-from sinkhorn import SinkhornDistance
+#from sinkhorn import SinkhornDistance
+from dijkstra import DijkstraPQ
 
 class ScaledDotProductAttention(nn.Module):
-    def __init__(self, d_k):
+    def __init__(self, beta, bandwidth, d_k):
         super(ScaledDotProductAttention, self).__init__()
-        self.d_k = d_k
+        assert beta > 0, 'beta must be greater than 0'
+
+        self.beta = beta
+        self.bandwidth = bandwidth
+        self.d_k = d_k        
 
     def forward(self, q, k, v, attn_mask, n_it=1):
         # |q| : (batch_size, n_heads, q_len, d_k), |k| : (batch_size, n_heads, k_len, d_k), |v| : (batch_size, n_heads, v_len, d_v)
         # |attn_mask| : (batch_size, n_heads, seq_len(=q_len), seq_len(=k_len))
         
-        attn_score = torch.matmul(q, k.transpose(-1, -2)) / np.sqrt(self.d_k)
-        attn_score.masked_fill_(attn_mask, -1e9)
-        attn_score_shape = attn_score.shape
-        attn_weights_soft = nn.Softmax(dim=-1)(attn_score)
+        # ---------- DP-MHA ----------
+
+        #attn_score = torch.matmul(q, k.transpose(-1, -2)) / np.sqrt(self.d_k)
+        #attn_score.masked_fill_(attn_mask, -1e9)
+        #attn_score_shape = attn_score.shape
+        #
         # |attn_score| : (batch_size, n_heads, q_len, k_len)
-        attn_score = attn_score.view(-1, attn_score_shape[2], attn_score_shape[3])
-        sink = SinkhornDistance(1, max_iter=n_it)
-        attn_weights = sink(attn_score)[0]
+        #attn_score = attn_score.view(-1, attn_score_shape[2], attn_score_shape[3])
+        #sink = SinkhornDistance(1, max_iter=n_it)
+        #attn_weights = sink(attn_score)[0]      
+
+        # ---------------------------- 
+
+        # ---------- L2-MHA ----------
+
+        ###### \begin{delete} ######
+        #print(f'q shape: {q.shape}')  
+        #print(f'k shape: {k.shape}')  
+        #print(f'v shape: {v.shape}')  
+        ###### \end{delete} ######        
+           
+        # Local kernel
+        if self.beta == 2:    
+            #attn_score = torch.cdist(q, k.transpose(-1, -2), p=2) / np.sqrt(self.d_k) 
+            attn_score = -torch.cdist(q, k, p=2)**2 / (2 * self.bandwidth)
+            attn_score.masked_fill_(attn_mask, -1e9)  # -np.inf
+            attn_score_shape = attn_score.shape
+            print(f'attn_score shape: {attn_score.shape}')  # delete
+            attn_score = attn_score.view(-1, attn_score_shape[2], attn_score_shape[3])
+            attn_weights = nn.Softmax(dim=-1)(attn_score)
+        # Non-local kernel
+        else:
+            #attn_score = -torch.cdist(q, k, p=2) / np.sqrt(self.d_k)
+            euclidean_dist = torch.cdist(q, k, p=2) / np.sqrt(self.bandwidth)
+            euclidean_dist.masked_fill_(attn_mask, 1e9)  # np.inf
+            #print(f'euclidean_dist shape: {euclidean_dist.shape}')  # delete
+            dijk = DijkstraPQ()
+            g_dist = dijk(euclidean_dist)
+            attn_score = (1 + g_dist/self.bandwidth**0.5)**(-self.d_k - self.beta)                       
+            attn_score_shape = attn_score.shape
+            attn_score = attn_score.view(-1, attn_score_shape[2], attn_score_shape[3])
+            attn_weights = nn.Softmax(dim=-1)(attn_score)                        
+
+        # ---------------------------- 
+
+        # |attn_score| : (batch_size, n_heads, q_len, k_len)
 
         attn_weights = attn_weights * attn_weights.shape[-1]
 
@@ -33,16 +76,21 @@ class ScaledDotProductAttention(nn.Module):
         return output, attn_weights
 
 class MultiHeadAttention(nn.Module):
-    def __init__(self, d_model, n_heads, n_it=1, print_attention=False):
+    def __init__(self, beta, bandwidth, d_model, n_heads, n_it=1, QK_share=True, print_attention=False):
         super(MultiHeadAttention, self).__init__()
         self.n_heads = n_heads
+        self.beta = beta
+        self.bandwidth = bandwidth
         self.d_k = self.d_v = d_model//n_heads
 
-        self.WQ = nn.Linear(d_model, d_model)
-        self.WK = nn.Linear(d_model, d_model)
+        if QK_share:
+            self.WQ = self.WK = nn.Linear(d_model, d_model)           
+        else:
+            self.WQ = nn.Linear(d_model, d_model)
+            self.WK = nn.Linear(d_model, d_model)
         self.WV = nn.Linear(d_model, d_model)
         self.n_it = n_it
-        self.scaled_dot_product_attn = ScaledDotProductAttention(self.d_k)
+        self.scaled_dot_product_attn = ScaledDotProductAttention(self.beta, self.bandwidth, self.d_k)
         self.linear = nn.Linear(n_heads * self.d_v, d_model)
         self.print_attention = print_attention
         
@@ -89,10 +137,10 @@ class PositionWiseFeedForwardNetwork(nn.Module):
         return output
 
 class EncoderLayer(nn.Module):
-    def __init__(self, d_model, n_heads, p_drop, d_ff, n_it=1, print_attention=False):
+    def __init__(self, beta, bandwidth, d_model, n_heads, p_drop, d_ff, n_it=1, QK_share=True, print_attention=False):
         super(EncoderLayer, self).__init__()
 
-        self.mha = MultiHeadAttention(d_model, n_heads, n_it=n_it, print_attention=print_attention)
+        self.mha = MultiHeadAttention(beta, bandwidth, d_model, n_heads, n_it=n_it, QK_share=True, print_attention=print_attention)
         self.dropout1 = nn.Dropout(p_drop)
         self.layernorm1 = nn.LayerNorm(d_model, eps=1e-6)
         
@@ -136,8 +184,8 @@ class TransformerEncoder(nn.Module):
     >>> encoder(inp)
     """
     
-    def __init__(self, vocab_size, seq_len, d_model=512, n_layers=6, n_heads=8, p_drop=0.1, d_ff=2048, pad_id=0,
-                 n_it=1, print_attention=False):
+    def __init__(self, beta, bandwidth, vocab_size, seq_len, d_model=512, n_layers=6, n_heads=8, p_drop=0.1, d_ff=2048, pad_id=0,
+                 n_it=1, QK_share=True, print_attention=False):
         super(TransformerEncoder, self).__init__()
         self.pad_id = pad_id
         self.sinusoid_table = self.get_sinusoid_table(seq_len+1, d_model) # (seq_len+1, d_model)
@@ -145,8 +193,8 @@ class TransformerEncoder(nn.Module):
         # layers
         self.embedding = nn.Embedding(vocab_size, d_model)
         self.pos_embedding = nn.Embedding.from_pretrained(self.sinusoid_table, freeze=True)
-        self.layers = nn.ModuleList([EncoderLayer(d_model, n_heads, p_drop, d_ff, n_it=n_it,
-                                                  print_attention=print_attention) for _ in range(n_layers)])
+        self.layers = nn.ModuleList([EncoderLayer(beta, bandwidth, d_model, n_heads, p_drop, d_ff, n_it=n_it,
+                                                  QK_share=QK_share, print_attention=print_attention) for _ in range(n_layers)])
         # layers to classify
         self.linear = nn.Linear(d_model, 2)
         self.softmax = nn.Softmax(dim=-1)

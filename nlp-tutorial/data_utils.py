@@ -64,5 +64,11 @@ def create_examples(args,
     all_label_ids = torch.tensor([feature.label_id for feature in features], dtype=torch.long)
 
     dataset = TensorDataset(all_input_ids, all_label_ids)
+    
+    if args.divider > 1:
+        import random
+        N = len(dataset)
+        idxs = random.sample(list(range(N)), int(N/args.divider))
+        dataset = torch.utils.data.Subset(dataset, idxs)        
 
     return dataset

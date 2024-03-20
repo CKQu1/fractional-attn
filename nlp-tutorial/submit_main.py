@@ -73,15 +73,16 @@ if __name__ == '__main__':
     # add or change datasets here
     dataset_names = ['imdb']  # 'rotten_tomatoes'    
     
-    ncpuss = [2]
-    #ncpuss = [1,4,8,12]
+    #ncpuss = [2]
+    ncpuss = [1,4,8,12]
     #ncpuss = list(range(1,9))
     ngpus = 0
     select = 1
     walltime = '23:59:59'
-    mem = '8GB'
+    mem = '12GB'
 
     debug_mode = True
+    print(f'debug_mode = {debug_mode}')
 
     for ii, ncpus in enumerate(ncpuss):
         for dataset_name in dataset_names:
@@ -101,28 +102,28 @@ if __name__ == '__main__':
                                 }
             else:            
                 #ngpus, ncpus = 0, 2
-
-                # args not shared
-                kwargss = [{"beta":1, "bandwidth":1}]
+                
+                kwargss = [{"beta":0.5, "bandwidth":1}, {"beta":1, "bandwidth":1}]
                 #kwargss = [{"beta":0.75, "bandwidth":1}, {"beta":1, "bandwidth":1}]
                 #model_root_dir = njoin(DROOT, "qsub_check")
-                model_root_dir = njoin(DROOT, "dp_check")
+                model_root_dir = njoin(DROOT,'dp_check',f'ncpus={ncpus}')
 
-                common_kwargs = {"epochs":        1,                             
-                                'n_attn_heads':   1,
-                                'batch_size':     2,
-                                'max_seq_len':    64,
-                                "divider":        1000,
-                                }
-                
-            kwargss = add_common_kwargs(kwargss, common_kwargs)
+                common_kwargs = {'epochs':         10,                             
+                                 'n_attn_heads':   1,
+                                 'batch_size':     8,
+                                 'max_seq_len':    200,
+                                 'divider':        100,
+                                 'n_layers':       2,
+                                 'n_attn_heads':   1
+                                 }                            
             
             for idx in range(len(kwargss)):
                 # function automatically creates dir
                 kwargss[idx]["dataset"] = dataset_name
-                models_dir, kwargss[idx]["model_dir"] = create_model_dir(model_root_dir, **kwargss[idx])         
-
-            print(f'debug_mode = {debug_mode}')
+                #models_dir, kwargss[idx]["model_dir"] = create_model_dir(model_root_dir, **kwargss[idx])         
+                kwargss[idx]['models_dir'] = model_root_dir
+            
+            kwargss = add_common_kwargs(kwargss, common_kwargs)
             #print(kwargss)        
             train_submit(script_name, kwargss,
                          ncpus=ncpus,

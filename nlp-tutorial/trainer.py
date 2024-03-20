@@ -1,4 +1,5 @@
 from pathlib import Path
+import pandas as pd
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -42,7 +43,7 @@ class Trainer:
         self.criterion = nn.CrossEntropyLoss()
 
     def train(self, epoch):
-        t = time.time()
+        t0 = time.time()
         if epoch == 12:
             for g in self.optimizer.param_groups:
                 g['lr'] /= 10
@@ -70,13 +71,16 @@ class Trainer:
             if i % (n_batches//5) == 0 and i != 0:
                 print('Iteration {} ({}/{})\tLoss: {:.4f} Acc: {:4f}%'.format(
                     i, i, n_batches, losses/i, accs/(i*self.args.batch_size)*100.))
-        print(time.time() - t)
+        delta_t = time.time() - t0
+        print(f'{delta_t} seconds')
         losses_b = losses/n_batches
         acc_ns = accs/n_samples * 100.
         print('Train Epoch: {}\t>\tLoss: {:.4f} / Acc: {:.1f}%'.format(epoch, losses_b, acc_ns))
-        return losses_b, acc_ns, attention_weights_cpu
+        return losses_b, acc_ns, delta_t, attention_weights_cpu
 
     def validate(self, epoch):
+        t0 = time.time()
+
         losses, accs = 0, 0
         n_batches, n_samples = len(self.test_loader), len(self.test_loader.dataset)
         
@@ -93,11 +97,12 @@ class Trainer:
                 losses += loss.item()
                 acc = (outputs.argmax(dim=-1) == labels).sum()
                 accs += acc.item()
+        delta_t = time.time() - t0
 
         losses_b = losses / n_batches
         acc_ns = accs / n_samples * 100.
         print('Train Epoch: {}\t>\tLoss: {:.4f} / Acc: {:.1f}%'.format(epoch, losses_b, acc_ns))
-        return losses_b, acc_ns
+        return losses_b, acc_ns, delta_t
 
     def save(self, epoch, model_prefix='model', root='.model'):
         path = Path(root) / (model_prefix + '.ep%d' % epoch)

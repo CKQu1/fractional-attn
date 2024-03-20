@@ -2,7 +2,8 @@ import numpy as np
 import sys
 import os
 import random
-from os.path import join
+from os.path import join, isfile
+from constants import BPATH
 
 def qsub(command, pbs_array_data, **kwargs):
 
@@ -95,3 +96,48 @@ def job_divider(pbs_array: list, N: int):
     assert len(perm) == len(pbss), "perm length and pbss length not equal!"
 
     return perm, pbss
+
+def command_setup(singularity_path, **kwargs):
+    assert isfile(singularity_path), "singularity_path does not exist!"
+
+    ncpus = kwargs.get('ncpus', 1) 
+    ngpus = kwargs.get('ngpus', 0)
+    select = kwargs.get('select', 1)
+    bind_path = kwargs.get('bind_path', BPATH)
+    home_path = kwargs.get('home_path', os.getcwd())
+    if len(singularity_path) > 0:
+        command = f"singularity exec --bind {bind_path} --home {home_path} {singularity_path}"
+    else:
+        command = ""
+
+    additional_command = ''
+    # if max(ngpus, ncpus) <= 1:
+    #     command += " python"
+    # elif ngpus > 1:
+    #     #command += f" CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.launch --nproc_per_node={ngpus}"
+    #     #additional_command = 'run --backend=nccl'
+    #     if select == 1:
+    #         command += f" torchrun --rdzv-backend=c10d --rdzv-endpoint=localhost:0"
+    #         command += f" --nnodes=1 --nproc_per_node={ngpus} --max-restarts=3"
+    #     else:
+    #         # tolerates 3 failures
+    #         command += f" torchrun --nnodes={select} --nproc_per_node={ngpus}"
+    #         command += f" --max-restarts=3 --rdzv-id=$JOB_ID"
+    #         command += f" --rdzv-backend=c10d --rdzv-endpoint=$HOST_NODE_ADDR"
+    # elif ngpus == 0 and ncpus > 1:
+    #     #python -m torch.distributed.launch --nproc_per_node=4 --use_env train_classification_imdb.py run --backend=gloo
+    #     #additional_command = 'run --backend=gloo'
+    #     if select == 1:
+    #         command += f" torchrun --rdzv-backend=c10d --rdzv-endpoint=localhost:0"
+    #         command += f" --nnodes=1 --nproc_per_node={ncpus} --max-restarts=3"
+    #     else:
+    #         command += f" torchrun --nnodes={select} --nproc_per_node={ncpus}"
+    #         command += f" --max-restarts=3 --rdzv-id=$JOB_ID"
+    #         command += f" --rdzv-backend=c10d --rdzv-endpoint=$HOST_NODE_ADDR"    
+
+    command += " python"
+
+    if len(singularity_path) == 0:
+        command = command[1:]
+
+    return command, additional_command

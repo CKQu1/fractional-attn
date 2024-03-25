@@ -6,6 +6,8 @@ def njoin(*args):
 
 # for enumerating each instance of training
 def get_instance(dir, s):
+    global start, end, instances, s_part
+
     if isdir(dir):
         instances = []
         dirnames = next(os.walk(dir))[1]
@@ -16,12 +18,13 @@ def get_instance(dir, s):
                     #try:        
                     for s_part in dirname.split(s):
                         if "model=" in s_part:
-                            start = s_part.find("model=") + 6
-                            end = s_part.find("_")
-                            instances.append(int(s_part[start:end]))
+                            start = s_part.find("model=")
+                            #end = start + 6
+                            #instances.append(int(s_part[start:end]))
+                            instances.append(int(s_part[start+6:]))
                     #except:
                     #    pass       
-            print(instances) 
+            #print(instances) 
             return max(instances) + 1 if len(instances) > 0 else 0
         else:
             return 0

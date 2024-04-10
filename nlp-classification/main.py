@@ -1,0 +1,331 @@
+import argparse
+import numpy as np
+import os
+import pandas as pd
+import torch
+from time import time, sleep
+from constants import DROOT, MODEL_NAMES
+from mutils import njoin, create_model_dir, convert_train_history
+from data_utils import get_dataset, get_dataset_cols, process_dataset_cols
+
+from os import makedirs
+from os.path import isdir, isfile
+from sklearn.metrics import f1_score
+from transformers import TrainingArguments, DataCollatorWithPadding
+from transformers import RobertaTokenizer
+from transformers.utils import logging
+from datasets import load_dataset, load_metric, load_from_disk
+from models.model_app import FNSFormerForSequenceClassification
+from models.model_utils import ModelConfig
+from trainer import MyTrainer
+
+import warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning) 
+warnings.simplefilter(action='ignore', category=FutureWarning)
+#warnings.filterwarnings("ignore")    
+
+# quick run (single unit)
+"""
+python -i main.py --n_layers=1 --n_attn_heads=2 --model_name=fnsformer --beta=0.5\
+ --max_len=256 --max_steps=10 --logging_steps=5 --save_steps=5 --eval_steps=5\
+ --divider=1 --warmup_steps=0 --grad_accum_step=1 --dataset_name=rotten_tomatoes\
+ --model_root=.droot/speedtest
+"""
+
+"""
+python -i main.py --n_layers=1 --n_attn_heads=2 --model_name=v2fnsformer\
+ --max_len=256 --max_steps=2 --logging_steps=2 --save_steps=2 --eval_steps=2\
+ --divider=1 --warmup_steps=0 --grad_accum_step=1 --dataset_name=rotten_tomatoes\
+ --model_root=.droot/speedtest
+"""
+
+"""
+python -i main.py --n_layers=1 --n_attn_heads=2 --model_name=dpformer\
+ --max_len=256 --epochs=1\
+ --divider=1 --warmup_steps=0 --grad_accum_step=1 --dataset_name=rotten_tomatoes\
+ --model_root=.droot/speedtest
+"""
+
+# quick torchrun (multi-unit)
+"""
+PBS_O_WORKDIR="/project/frac_attn/fractional-attn/fnsformer-module-default-trainer"
+cpath="/project/frac_attn/fractional-attn/built_containers/FaContainer_v3.sif"
+
+singularity exec --home ${PBS_O_WORKDIR} ${cpath} torchrun --nproc_per_node=4 main.py\
+ --n_layers=1 --n_attn_heads=2 --model_name=fnsformer --beta=0.5\
+ --max_len=128 --max_steps=10 --logging_steps=10 --save_steps=10 --eval_steps=10\
+ --divider=1 --warmup_steps=0 --grad_accum_step=4 --dataset_name=imdb\
+ --model_root=.droot/fnsformer_speedtest    
+
+# this setting is 4m25s per step
+torchrun --rdzv-backend=c10d --rdzv-endpoint=localhost:0 --nnodes=1 --nproc_per_node=4 main.py\
+ --n_layers=1 --n_attn_heads=2 --model_name=fnsformer --beta=0.5 --train_bs=2 --eval_bs=2\
+ --max_len=128 --max_steps=10 --logging_steps=10 --save_steps=10 --eval_steps=10\
+ --divider=1 --warmup_steps=0 --grad_accum_step=1 --dataset_name=imdb\
+ --model_root=.droot/speedtest     
+"""
+
+#torch.autograd.set_detect_anomaly(True)  # delete
+if __name__ == '__main__':
+
+    # Training options
+    parser = argparse.ArgumentParser(description='main_seq_classification.py training arguments')    
+    parser.add_argument('--train_with_ddp', default=False, type=bool, help='to use DDP or not')
+    parser.add_argument('--lr', default=3e-5, type=float, help='learning rate')
+    parser.add_argument('--train_bs', default=2, type=int)
+    parser.add_argument('--eval_bs', default=10, type=int)
+    parser.add_argument('--epochs', default=1, type=float)
+    parser.add_argument('--max_steps', default=None, type=int)
+    parser.add_argument('--weight_decay', default=0.01, type=float)
+    parser.add_argument('--eval_strat', default='steps', type=str)
+    parser.add_argument('--eval_steps', default=200, type=int)
+    parser.add_argument('--log_strat', default='steps', type=str)
+    parser.add_argument('--logging_steps', default=50, type=int)
+    parser.add_argument('--save_steps', default=50, type=int)
+    parser.add_argument('--seed', default=42, type=int)
+    parser.add_argument('--warmup_steps', default=2, type=int)
+    parser.add_argument('--grad_accum_step', default=8, type=int)
+    parser.add_argument('--debug', default=False, type=bool)  # for debuggin
+    parser.add_argument('--lr_scheduler_type', default='constant', type=str)
+    # Model settings    
+    #parser.add_argument('--sparsify_type', default=None, type=str)
+    parser.add_argument('--qk_share', default=False, type=bool)
+    parser.add_argument('--n_layers', default=1, type=int)
+    parser.add_argument('--n_attn_heads', default=2, type=int)
+    parser.add_argument('--hidden_size', default=768, type=int)    
+
+    parser.add_argument('--model_name', default='fnsformer', type=str)    
+    parser.add_argument('--beta', default=0.5, type=float)
+    parser.add_argument('--bandwidth', default=1, type=float)
+    parser.add_argument('--max_len', default=1024, type=int)    
+    # Dataset settings
+    parser.add_argument('--dataset_name', default='imdb', type=str)
+    parser.add_argument('--divider', default=5, type=int)  # downsizing the test dataset
+    # Path settings
+    parser.add_argument('--model_root', default=njoin(DROOT, 'trained_models'), type=str, help='root dir of storing the model')
+
+    args = parser.parse_args()    
+
+    repo_dir = os.getcwd()  # main dir 
+    dev = torch.device(f"cuda:{torch.cuda.device_count()}"
+                       if torch.cuda.is_available() else "cpu")   
+    device_name = "GPU" if dev.type != "cpu" else "CPU"
+    train_with_ddp = torch.distributed.is_available() and args.train_with_ddp
+    global_rank = None
+    if train_with_ddp:
+        world_size = int(os.environ["WORLD_SIZE"])
+        global_rank = int(os.environ["RANK"])
+        print(f"global_rank: {global_rank}")    
+        print(f"Device in use: {dev}.")
+        device_total = world_size
+        #backend = "gloo" if dev.type != "cpu" else "nccl"
+        #import torch.distributed as dist
+        #dist.init_process_group(backend=backend)        
+    else:
+        device_total = 1       
+
+    args.model_name = args.model_name.lower()
+    assert args.model_name in MODEL_NAMES, f'{args.model_name} does not exist in {MODEL_NAMES}'
+
+    logging.set_verbosity_debug()
+    logger = logging.get_logger()
+
+    # ---------------------------------------- 1. Dataset setup ----------------------------------------
+
+    # should max_length also be added to parser args?
+    max_length = args.max_len    
+    def preprocess_function(examples):
+        return tokenizer(examples['text'], padding='max_length', truncation=True, max_length=max_length)
+
+    def preprocess_logits_for_metrics(logits, labels):
+        preds = logits.argmax(dim=-1)
+        return preds
+        
+    if args.dataset_name == 'imdb':
+        metric_acc = load_metric("accuracy")
+        metric_f1 = load_metric("f1")
+        #metric_prcn = load_metric("precision") 
+        #metric_recall = load_metric("recall") 
+    else:
+        metric_acc = load_metric("accuracy", average='micro')
+        metric_f1 = load_metric("f1", average='micro')
+        #metric_prcn = load_metric("precision") 
+        #metric_recall = load_metric("recall")         
+    def compute_metrics(eval_pred):
+        preds, labels = eval_pred
+        acc = metric_acc.compute(predictions=preds, references=labels)        
+        f1_score = metric_f1.compute(predictions=preds, references=labels)  
+        #precision = metric_prcn.compute(predictions=preds, references=labels)        
+        #recall = metric_recall.compute(predictions=preds, references=labels)                
+        #return {"accuracy":acc,"f1_score":f1_score,"precision":precision,"recall":recall}
+        return {"accuracy":acc,"f1_score":f1_score}
+    
+    tokenizer = RobertaTokenizer(tokenizer_file = f"{repo_dir}/roberta-tokenizer/tokenizer.json",
+                                 vocab_file     = f"{repo_dir}/roberta-tokenizer/vocab.json",
+                                 merges_file    = f"{repo_dir}/roberta-tokenizer/merges.txt",
+                                 max_length     = max_length)
+    ########## add other options here ##########
+
+    # save tokenized dataset
+    tokenized_dataset_dir = njoin(DROOT, "DATASETS", f"tokenized_{args.dataset_name}")
+    if not isdir(tokenized_dataset_dir):         
+        print("Downloading data!") if global_rank == 0 or not train_with_ddp else None
+        # create cache for dataset
+        dataset = get_dataset(args.dataset_name, njoin(DROOT, "DATASETS"))
+
+        tokenized_dataset = dataset.map(preprocess_function, batched=True)
+        column_names = get_dataset_cols(tokenized_dataset)
+        if 'text' in column_names:
+            tokenized_dataset = tokenized_dataset.map(remove_columns=['text'])
+        if not isdir(tokenized_dataset_dir): os.makedirs(tokenized_dataset_dir)
+        tokenized_dataset.save_to_disk(tokenized_dataset_dir)
+        del dataset  # alleviate memory
+    else:        
+        print("Data downloaded, loading from local now! \n") if global_rank == 0 or not train_with_ddp else None
+        tokenized_dataset = load_from_disk(tokenized_dataset_dir)
+    if args.dataset_name != 'imdb':
+        tokenized_dataset = process_dataset_cols(tokenized_dataset)
+
+    keys = list(tokenized_dataset.keys())
+    if len(keys) == 1:
+        tokenized_dataset = tokenized_dataset[keys[0]].train_test_split(0.5)
+    train_dataset = tokenized_dataset["train"]
+    eval_dataset = tokenized_dataset["test"]
+    #del tokenized_dataset  # alleviate memory         
+
+    # ---------- REMOVE LATER ----------  
+    divider = args.divider  # downsize eval_dataset
+    eval_dataset = eval_dataset.filter(lambda example, idx: idx % divider == 0, with_indices=True)
+    data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
+    #config = ModelConfig.from_json_file(f"{repo_dir}/models/config.json")
+
+    # ---------------------------------------- 2. Model setup ----------------------------------------
+
+    # paths
+    if args.model_root == '':
+        model_root = njoin(DROOT, args.model_name)
+    else:
+        model_root = args.model_root   
+
+    config = ModelConfig.from_json_file(f"{repo_dir}/models/config_simple.json")
+    config.num_labels = len(set(train_dataset['label']))   
+    config.qk_share = args.qk_share
+    config.num_hidden_layers = args.n_layers
+    config.num_attention_heads = args.n_attn_heads
+    config.hidden_size = args.hidden_size
+    config.attention_window = args.max_len  # full attn, no sliding windows
+
+    attn_setup = {}
+    attn_setup['model_name'] = args.model_name
+    attn_setup['dataset_name'] = args.dataset_name
+    if 'fnsformer' in args.model_name:
+        attn_setup['beta'] = args.beta      
+        attn_setup['bandwidth'] = args.bandwidth   
+    if global_rank == 0 or not train_with_ddp:
+        print("-"*25)
+        print(f'model: {args.model_name}')
+        if 'fnsformer' in args.model_name:
+            print(f'beta = {args.beta}, bandwidth = {args.bandwidth}')
+        print(f'dataset: {args.dataset_name}')
+        print("-"*25 + "\n")          
+        models_dir, model_dir = create_model_dir(model_root, **attn_setup)   
+        if not isdir(model_dir): makedirs(model_dir) 
+
+    model =  FNSFormerForSequenceClassification(config, **attn_setup).to(dev)    
+    ########## add other options here ##########
+
+    training_args_dict = {"output_dir": model_dir,
+                          "learning_rate": args.lr,
+                          "lr_scheduler_type": args.lr_scheduler_type,
+                          "per_device_train_batch_size": args.train_bs,
+                          "per_device_eval_batch_size": args.eval_bs,
+                          "num_train_epochs": args.epochs,                          
+                          "weight_decay": args.weight_decay,
+                          "evaluation_strategy": args.eval_strat,
+                          "eval_steps": args.eval_steps,
+                          "logging_strategy": args.log_strat,
+                          "logging_steps": args.logging_steps,
+                          "save_steps": args.save_steps,    
+                          "seed": args.seed,
+                          "warmup_steps": args.warmup_steps,
+                          "gradient_accumulation_steps": args.grad_accum_step                          
+                          }
+    if args.max_steps != None:
+        training_args_dict["max_steps"] = args.max_steps
+    if args.debug == True:
+        training_args_dict["debug"] = "underflow_overflow"
+    training_args = TrainingArguments(**training_args_dict)
+            
+    steps_per_train_epoch = int(len(train_dataset)/(training_args.per_device_train_batch_size*device_total*training_args.gradient_accumulation_steps ))
+    if global_rank == 0 or not train_with_ddp:
+        print("-"*25)
+        print(f"steps_per_train_epoch {steps_per_train_epoch}")
+        print(f"per_device_train_batch_size: {training_args.per_device_train_batch_size}")
+        print(f"{device_name} count: {device_total}")
+        print(f"gradient_accumulation_steps: {training_args.gradient_accumulation_steps}")
+        print("-"*25 + "\n")
+
+    if training_args.num_train_epochs >= 1 and args.max_steps == None:
+        training_args.eval_steps    = int(steps_per_train_epoch)
+        #training_args.logging_steps = int(steps_per_train_epoch/5)
+        training_args.logging_steps = int(steps_per_train_epoch/3)
+        training_args.save_steps    = int(steps_per_train_epoch)
+
+    trainer_kwargs = {'model': model,                      
+                      'args': training_args,
+                      'train_dataset': train_dataset,
+                      'eval_dataset': eval_dataset,
+                      'tokenizer': tokenizer,
+                      'data_collator': data_collator,
+                      'compute_metrics': compute_metrics,
+                      'preprocess_logits_for_metrics': preprocess_logits_for_metrics
+                      }
+
+    # if args.model_name == 'fnsformer':
+    #     trainer_kwargs['config'] = config
+    #     # if args.sparsify_type == None:
+    #     #     if args.with_frac:
+    #     #         args.sparsify_type = 'longformer'
+    #     #     else:
+    #     #         args.sparsify_type = 'diffuser'
+    #     #     trainer_kwargs['sparsify_type'] = args.sparsify_type
+    #     # else:
+    #     #     assert args.sparsify_type in ['longformer', 'diffuser'], "sparsify_type doesn not exist!"
+    #     #     trainer_kwargs['sparsify_type'] = args.sparsify_type
+
+    #     trainer = MyTrainer(**trainer_kwargs)
+    # else:
+    #     from transformers import Trainer
+    #     trainer = Trainer(**trainer_kwargs)
+    
+    from transformers import Trainer    
+    trainer = Trainer(**trainer_kwargs)
+    # trainer_kwargs['config'] = config
+    # trainer = MyTrainer(**trainer_kwargs)
+
+    t0_train = time()  # record train time    
+    trainer.train(ignore_keys_for_eval=["loss", "hidden_states", "attentions", "global_attentions"])
+    #trainer.train()
+    train_secs = time() - t0_train
+
+    # get performance history
+    if len(trainer.state.log_history) >= 1:
+        run_perf = convert_train_history(trainer.state.log_history[:-1])
+        col_names = list(run_perf.columns)
+        top_names = ['epoch', 'step', 'learning_rate']
+        top_names += [e for e in col_names if e not in top_names]
+        run_perf = run_perf[top_names]
+        run_perf.to_csv(njoin(model_dir, "run_performance.csv"))
+
+    model_settings = attn_setup # model_settings['sparsify_type'] = args.sparsify_type
+    model_settings['train_secs'] = train_secs
+    model_settings.update(trainer.state.log_history[-1])
+    final_perf = pd.DataFrame()
+    final_perf = final_perf.append(model_settings, ignore_index=True)    
+    final_perf.to_csv(njoin(model_dir, "final_performance.csv"))
+
+    # save final model
+    trainer.save_model(njoin(model_dir, "final_model"))
+
+    print('\n')
+    print('---------- Model trained and saved! ----------')

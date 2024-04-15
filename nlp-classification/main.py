@@ -206,6 +206,7 @@ if __name__ == '__main__':
         model_root = njoin(DROOT, args.model_name)
     else:
         model_root = args.model_root   
+    if not isdir(model_root): makedirs(model_root)
 
     config = ModelConfig.from_json_file(f"{repo_dir}/models/config_simple.json")
     config.num_labels = len(set(train_dataset['label']))   

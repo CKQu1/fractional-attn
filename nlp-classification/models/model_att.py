@@ -500,7 +500,9 @@ class V2FNSSelfAttention(nn.Module):
 
         attn_score_shape = attn_score.shape
         #attn_score = attn_score.view(-1, attn_score_shape[2], attn_score_shape[3])
-        attn_weights = nn.Softmax(dim=-1)(attn_score)      
+        D_inv = torch.diag_embed(attn_score.sum(-1)**(-1))  # inverse of degree matrix of attn_score
+        K_tilde = D_inv @ attn_score @ D_inv
+        attn_weights = F.normalize(K_tilde,p=1,dim=3)  # can do this as the attn weights are always positive
         attn_weights = F.dropout(attn_weights, p=self.dropout, training=self.training)   
 
         # ---------- \begin{delete} ----------

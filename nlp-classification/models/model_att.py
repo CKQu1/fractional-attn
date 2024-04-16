@@ -106,7 +106,7 @@ class V2FNSAttention(nn.Module):
         beta = kwargs.get('beta')
         bandwidth = kwargs.get('bandwidth')
         #print(f'V2FNSAttention beta = {beta}')
-        assert 0 < beta < 1, error_message                           
+        assert 0 < beta, error_message                           
         self.self = V2FNSSelfAttention(config, layer_id, beta, bandwidth)
      
         self.output = ModelSelfOutput(config)
@@ -201,7 +201,7 @@ class DPSelfAttention(nn.Module):
         else:
             query_vectors = query_vectors.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2) # (B,H,N,D)
             value_vectors = value_vectors.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2) # (B,H,N,D)            
-            att = (query_vectors @ query_vectors.transpose(-2, -1)) * (1.0 / math.sqrt(key_vectors.size(-1)))  # (B,H,N,N)
+            att = (query_vectors @ query_vectors.transpose(-2, -1)) * (1.0 / math.sqrt(query_vectors.size(-1)))  # (B,H,N,N)
         
         # if attention_mask.dim() == 3:
         #     attention_mask_expanded = attention_mask.view(batch_size, -1, seq_len, seq_len)
@@ -385,7 +385,7 @@ class FNSSelfAttention(nn.Module):
         return outputs + (global_attn_probs,) if (is_global_attn and output_attentions) else outputs
 
 
-# -------------------- FNS Self-Attention with sphererical embedding of query/key --------------------
+# -------------------- V2: FNS Self-Attention (no direct Dijkstra deployed) --------------------
 
 class V2FNSSelfAttention(nn.Module):
     def __init__(self, config, layer_id, beta, bandwidth):
@@ -398,7 +398,12 @@ class V2FNSSelfAttention(nn.Module):
         self.num_heads = config.num_attention_heads
         self.head_dim = int(config.hidden_size / config.num_attention_heads)
         self.embed_dim = config.hidden_size
+
+        self.beta = beta
+        self.bandwidth = bandwidth
         self.qk_share = config.qk_share
+        if self.beta < 2:
+            self.d_intrinsic = config.d_intrinsic
 
         self.query = nn.Linear(config.hidden_size, self.embed_dim)
         if not self.qk_share:
@@ -406,8 +411,6 @@ class V2FNSSelfAttention(nn.Module):
         self.value = nn.Linear(config.hidden_size, self.embed_dim)
 
         self.dropout = config.attention_probs_dropout_prob
-        self.beta = beta
-        self.bandwidth = bandwidth
 
         self.layer_id = layer_id
         attention_window = config.attention_window[self.layer_id]
@@ -433,8 +436,6 @@ class V2FNSSelfAttention(nn.Module):
         # attention_mask (B,N)
         # project hidden states
         query_vectors = self.query(hidden_states)
-        if not self.qk_share:
-            key_vectors = self.key(hidden_states)
         value_vectors = self.value(hidden_states)   # (N,B,HD)
 
         #seq_len, batch_size, embed_dim = hidden_states.size()
@@ -445,17 +446,19 @@ class V2FNSSelfAttention(nn.Module):
             embed_dim == self.embed_dim
         ), f"hidden_states should have embed_dim = {self.embed_dim}, but has {embed_dim}"
 
+        # (B, N, H, D) = (batch_size, seq_len, num_heads, head_dim)        
+        #query_vectors = F.normalize(query_vectors.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2), p=2, dim=-1)  # (B,N,H,D)
+        query_vectors = query_vectors.view(batch_size, seq_len, num_heads, head_dim)                                            # (B,N,H,D)
+        #key_vectors = F.normalize(key_vectors.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2), p=2, dim=-1)      # (B,H,N,D)
+        value_vectors = value_vectors.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2)                            # (B,H,N,D)           
+        if not self.qk_share:
+            key_vectors = self.key(hidden_states)       
+            key_vectors = key_vectors.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2)
+
         # -------------------- Strategy 1 --------------------
         """
         Embed the queries into a D-sphere via normalization, set the bandwidth as the diamter of an D-sphere
         """
-        # (B, N, H, D) = (batch_size, seq_len, num_heads, head_dim)        
-
-        # normalize query/key
-        #query_vectors = F.normalize(query_vectors.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2), p=2, dim=-1)  # (B,N,H,D)
-        query_vectors = query_vectors.view(batch_size, seq_len, num_heads, head_dim)                                            # (B,N,H,D)
-        #key_vectors = F.normalize(key_vectors.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2), p=2, dim=-1)      # (B,H,N,D)
-        value_vectors = value_vectors.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2)                            # (B,H,N,D)   
 
         # correlation matrix for each attn head (seems more correct)        
         # with torch.no_grad():
@@ -476,12 +479,16 @@ class V2FNSSelfAttention(nn.Module):
         #     #print(d_intrinsic)  # delete
         #     d_intrinsic = d_intrinsic.detach()     
         
-        d_intrinsic = 3
-        #d_intrinsic = np.sqrt(head_dim)
+        if beta < 2:
+            d_intrinsic = self.d_intrinsic
+            #d_intrinsic = np.sqrt(head_dim)
         query_vectors = query_vectors.transpose(1,2)
 
         # pairwise Euclidean distance (H,BN,D) @ (H,D,BN)
-        euclidean_dist = torch.cdist(query_vectors, query_vectors, p=2)  # (H,B,N,N)      
+        if not self.qk_share:
+            euclidean_dist = torch.cdist(query_vectors, key_vectors, p=2)  # (H,B,N,N)
+        else:
+            euclidean_dist = torch.cdist(query_vectors, query_vectors, p=2)  # (H,B,N,N)      
         #print(f'Min and max distance: {euclidean_dist.min()}, {euclidean_dist.max()}')  
         #q = torch.tensor([0, 0.2, 0.4, 0.6, 0.8, 1])
         #print(f'Distance percentiles: {torch.quantile(euclidean_dist.flatten(), q)}')
@@ -490,13 +497,16 @@ class V2FNSSelfAttention(nn.Module):
         bool_mask = (attention_mask>=0).long()
         attention_mask_expanded = (bool_mask.unsqueeze(-1)@bool_mask.unsqueeze(1)).view(batch_size, 1, seq_len, seq_len).expand(-1, num_heads, -1, -1)      
 
-        #euclidean_dist = euclidean_dist.masked_fill(attention_mask_expanded==0, 1e9)
-        euclidean_dist = euclidean_dist.masked_fill(attention_mask_expanded==0, 2)  # further is capped by 2 on an d-sphere
+        euclidean_dist = euclidean_dist.masked_fill(attention_mask_expanded==0, 1e9)  # 1e9
+        #euclidean_dist = euclidean_dist.masked_fill(attention_mask_expanded==0, 2)  # further is capped by 2 on an d-sphere
         
         # On a sphere, we have g_dist = euclidean_dist
         #attn_score = (1 + euclidean_dist/self.bandwidth**0.5)**(-head_dim - beta)                  
         #attn_score = (1 + euclidean_dist/self.bandwidth**0.5)**(-beta)
-        attn_score = (1 + euclidean_dist/self.bandwidth**0.5)**(-d_intrinsic - beta)
+        if beta < 2:
+            attn_score = (1 + euclidean_dist/self.bandwidth**0.5)**(-d_intrinsic-beta)
+        else:
+            attn_score = torch.exp((-euclidean_dist/self.bandwidth**0.5)**(beta/(beta-1)))
 
         attn_score_shape = attn_score.shape
         #attn_score = attn_score.view(-1, attn_score_shape[2], attn_score_shape[3])

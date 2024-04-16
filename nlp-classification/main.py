@@ -26,14 +26,15 @@ warnings.simplefilter(action='ignore', category=FutureWarning)
 
 # quick run (single unit)
 """
-python -i main.py --n_layers=1 --n_attn_heads=2 --model_name=fnsformer --beta=0.5\
- --max_len=256 --max_steps=10 --logging_steps=5 --save_steps=5 --eval_steps=5\
+python -i main.py --n_layers=1 --n_attn_heads=2 --model_name=dpformer\
+ --max_len=256 --max_steps=2 --logging_steps=2 --save_steps=2 --eval_steps=2\
  --divider=1 --warmup_steps=0 --grad_accum_step=1 --dataset_name=rotten_tomatoes\
  --model_root=.droot/speedtest
 """
 
 """
-python -i main.py --n_layers=1 --n_attn_heads=2 --model_name=v2fnsformer\
+python -i main.py --n_layers=1 --n_attn_heads=2 --model_name=v2fnsformer --beta=1\
+ --qk_share=False --d_intrinsic=50\
  --max_len=256 --max_steps=2 --logging_steps=2 --save_steps=2 --eval_steps=2\
  --divider=1 --warmup_steps=0 --grad_accum_step=1 --dataset_name=rotten_tomatoes\
  --model_root=.droot/speedtest
@@ -90,6 +91,7 @@ if __name__ == '__main__':
     # Model settings    
     #parser.add_argument('--sparsify_type', default=None, type=str)
     parser.add_argument('--qk_share', default=False, type=bool)
+    parser.add_argument('--d_intrinsic', default=3, type=int)
     parser.add_argument('--n_layers', default=1, type=int)
     parser.add_argument('--n_attn_heads', default=2, type=int)
     parser.add_argument('--hidden_size', default=768, type=int)    
@@ -206,22 +208,25 @@ if __name__ == '__main__':
         model_root = njoin(DROOT, args.model_name)
     else:
         model_root = args.model_root   
-    if not isdir(model_root): makedirs(model_root)
+    #if not isdir(model_root): makedirs(model_root)
 
     config = ModelConfig.from_json_file(f"{repo_dir}/models/config_simple.json")
     config.num_labels = len(set(train_dataset['label']))   
     config.qk_share = args.qk_share
+    if 'fnsformer' in args.model_name and args.beta < 2:
+        config.d_intrinsic = args.d_intrinsic
     config.num_hidden_layers = args.n_layers
     config.num_attention_heads = args.n_attn_heads
     config.hidden_size = args.hidden_size
     config.attention_window = args.max_len  # full attn, no sliding windows
 
-    attn_setup = {}
+    attn_setup = {'qk_share': args.qk_share}
     attn_setup['model_name'] = args.model_name
     attn_setup['dataset_name'] = args.dataset_name
     if 'fnsformer' in args.model_name:
         attn_setup['beta'] = args.beta      
         attn_setup['bandwidth'] = args.bandwidth   
+        attn_setup['d_intrinsic'] = args.d_intrinsic
     if global_rank == 0 or not train_with_ddp:
         print("-"*25)
         print(f'model: {args.model_name}')

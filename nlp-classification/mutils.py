@@ -28,7 +28,8 @@ def get_instance(dir, *args):  # for enumerating each instance of training
         dirnames = next(os.walk(dir))[1]
         if len(dirnames) > 0:
             for dirname in dirnames:        
-                is_append = (len(os.listdir(njoin(dir, dirname))) > 0)  # make sure file is non-empty
+                #is_append = (len(os.listdir(njoin(dir, dirname))) > 0)  # make sure file is non-empty
+                is_append = True
                 for s in args:
                     is_append = is_append and (s in dirname)
                 #print(f'{dirname} is_append: {is_append}')  # delete
@@ -60,7 +61,7 @@ def create_model_dir(model_root_dir, **kwargs):
         model_dir = njoin(models_dir, f"model={instance}_beta={beta}_eps={bandwidth}")
     else:
         instance = get_instance(models_dir, 'model=')
-        model_dir = njoin(models_dir, f'model={instance}')        
+        model_dir = njoin(models_dir, f'model={instance}')                
     if not os.path.isdir(model_dir): os.makedirs(model_dir)     
        
     return models_dir, model_dir      

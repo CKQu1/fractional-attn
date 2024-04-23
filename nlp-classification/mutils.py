@@ -50,18 +50,28 @@ def get_instance(dir, *args):  # for enumerating each instance of training
 
 def create_model_dir(model_root_dir, **kwargs):
     model_name = kwargs.get('model_name', 'fnsformer')    
-    dataset_name = kwargs.get('dataset_name', 'imdb')    
-          
-    models_dir = njoin(model_root_dir, f"{model_name}_{dataset_name}")
-    if not os.path.isdir(models_dir): os.makedirs(models_dir)   
-    if model_name == 'fnsformer': 
-        beta = kwargs.get("beta", 1)
-        bandwidth = kwargs.get("bandwidth", 1)        
-        instance = get_instance(models_dir, 'model=', f'_beta={beta}_eps={bandwidth}')
-        model_dir = njoin(models_dir, f"model={instance}_beta={beta}_eps={bandwidth}")
+    dataset_name = kwargs.get('dataset_name', 'imdb')
+    if '_' in dataset_name:
+        dataset_code = ''.join([s[0] for s in dataset_name.split('_')])
     else:
-        instance = get_instance(models_dir, 'model=')
-        model_dir = njoin(models_dir, f'model={instance}')                
+        dataset_code = dataset_name
+    qk_share = kwargs.get('qk_share')
+    #print(f'qk_share = {qk_share}')
+    assert isinstance(qk_share,bool), f'qk_share is not bool, has value {qk_share}'
+
+    dirname = f'{model_name}-{dataset_code}'
+    dirname += '-qqv' if qk_share is True else '-qkv'  # qk weight-tying
+    if 'fnsformer' in model_name:                 
+        beta = kwargs.get("beta", 1)
+        bandwidth = kwargs.get("bandwidth", 1)             
+        dirname += f'-beta={beta}-eps={bandwidth}'
+        if (model_name=='v2fnsformer' or model_name=='v3fnsformer') and beta < 2:
+            d_intrinsic = kwargs.get('d_intrinsic')
+            dirname += f'-dman={d_intrinsic}'
+    models_dir = njoin(model_root_dir, dirname)
+    instance = get_instance(models_dir, 'model=')
+    model_dir = njoin(models_dir, f'model={instance}')    
+    if not os.path.isdir(models_dir): os.makedirs(models_dir)
     if not os.path.isdir(model_dir): os.makedirs(model_dir)     
        
     return models_dir, model_dir      

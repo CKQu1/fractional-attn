@@ -33,8 +33,16 @@ python -i main.py --n_layers=1 --n_attn_heads=2 --model_name=dpformer\
 """
 
 """
-python -i main.py --n_layers=1 --n_attn_heads=2 --model_name=v2fnsformer --beta=1\
- --qk_share=False --d_intrinsic=50\
+python -i main.py --n_layers=1 --n_attn_heads=2 --model_name=v3fnsformer --beta=1\
+ --qk_share=False\
+ --max_len=256 --max_steps=2 --logging_steps=2 --save_steps=2 --eval_steps=2\
+ --divider=1 --warmup_steps=0 --grad_accum_step=1 --dataset_name=rotten_tomatoes\
+ --model_root=.droot/speedtest
+"""
+
+"""
+python -i main.py --n_layers=1 --n_attn_heads=2 --model_name=v3fnsformer --beta=1  --bandwidth=2\
+ --qk_share=True\
  --max_len=256 --max_steps=2 --logging_steps=2 --save_steps=2 --eval_steps=2\
  --divider=1 --warmup_steps=0 --grad_accum_step=1 --dataset_name=rotten_tomatoes\
  --model_root=.droot/speedtest
@@ -195,11 +203,17 @@ if __name__ == '__main__':
     eval_dataset = tokenized_dataset["test"]
     #del tokenized_dataset  # alleviate memory         
 
+    # convert to torch.Tensor from list
+    train_dataset.set_format('torch')
+    eval_dataset.set_format('torch')
+
     # ---------- REMOVE LATER ----------  
-    divider = args.divider  # downsize eval_dataset
-    eval_dataset = eval_dataset.filter(lambda example, idx: idx % divider == 0, with_indices=True)
+    divider = args.divider  # downsize dataset for 
+    if divider > 1:
+        train_dataset = train_dataset.filter(lambda example, idx: idx % divider == 0, with_indices=True)
+        eval_dataset = eval_dataset.filter(lambda example, idx: idx % divider == 0, with_indices=True)
     data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
-    #config = ModelConfig.from_json_file(f"{repo_dir}/models/config.json")
+    #config = ModelConfig.from_json_file(f"{repo_dir}/models/config.json")    
 
     # ---------------------------------------- 2. Model setup ----------------------------------------
 
@@ -213,12 +227,6 @@ if __name__ == '__main__':
     config = ModelConfig.from_json_file(f"{repo_dir}/models/config_simple.json")
     config.num_labels = len(set(train_dataset['label']))   
     config.qk_share = args.qk_share
-    if 'fnsformer' in args.model_name and args.beta < 2:
-        config.d_intrinsic = args.d_intrinsic
-    config.num_hidden_layers = args.n_layers
-    config.num_attention_heads = args.n_attn_heads
-    config.hidden_size = args.hidden_size
-    config.attention_window = args.max_len  # full attn, no sliding windows
 
     attn_setup = {'qk_share': args.qk_share}
     attn_setup['model_name'] = args.model_name
@@ -226,7 +234,19 @@ if __name__ == '__main__':
     if 'fnsformer' in args.model_name:
         attn_setup['beta'] = args.beta      
         attn_setup['bandwidth'] = args.bandwidth   
-        attn_setup['d_intrinsic'] = args.d_intrinsic
+        if (args.model_name=='v2fnsformer' or args.model_name=='v3fnsformer') and args.beta < 2:
+            # estimate d_intrinsic
+            # ----------
+
+            # ----------
+            config.d_intrinsic = args.d_intrinsic
+            attn_setup['d_intrinsic'] = args.d_intrinsic
+
+    config.num_hidden_layers = args.n_layers
+    config.num_attention_heads = args.n_attn_heads
+    config.hidden_size = args.hidden_size
+    config.attention_window = args.max_len  # full attn, no sliding windows            
+
     if global_rank == 0 or not train_with_ddp:
         print("-"*25)
         print(f'model: {args.model_name}')

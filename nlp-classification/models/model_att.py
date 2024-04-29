@@ -591,6 +591,9 @@ class V3FNSSelfAttention(nn.Module):
         self.beta = beta
         self.bandwidth = bandwidth
         self.qk_share = config.qk_share
+        self.sphere_radius = config.sphere_radius
+        self.mask_val = config.mask_val
+
         # embed query/key into lower dim
         if self.beta < 2:
             self.d_intrinsic = config.d_intrinsic
@@ -659,31 +662,27 @@ class V3FNSSelfAttention(nn.Module):
                 key_vectors = F.normalize(key_vectors.view(batch_size, seq_len, num_heads, d_intrinsic).transpose(1, 2), p=2, dim=-1)
             else:      
                 key_vectors = F.normalize(key_vectors.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2), p=2, dim=-1)      # (B,H,N,D)  
-            #euclidean_dist = torch.cdist(query_vectors, key_vectors, p=2)  # (H,B,N,N)
+            #g_dist = torch.cdist(query_vectors, key_vectors, p=2)  # (H,B,N,N)
             # directly get geodesic distance
-            euclidean_dist = torch.acos(torch.clamp(query_vectors @ key_vectors.transpose(-2, -1), -1+eps, 1-eps))
+            g_dist = torch.acos(torch.clamp(query_vectors @ key_vectors.transpose(-2, -1), -1+eps, 1-eps)) * self.sphere_radius
         else:
-            #euclidean_dist = torch.cdist(query_vectors, query_vectors, p=2)  # (H,B,N,N)      
+            #g_dist = torch.cdist(query_vectors, query_vectors, p=2)  # (H,B,N,N)      
             # directly get geodesic distance
-            euclidean_dist = torch.acos(torch.clamp(query_vectors @ query_vectors.transpose(-2, -1), -1+1, 1-eps))                        
-        #print(f'Min and max distance: {euclidean_dist.min()}, {euclidean_dist.max()}')  
+            g_dist = torch.acos(torch.clamp(query_vectors @ query_vectors.transpose(-2, -1), -1+1, 1-eps)) * self.sphere_radius                        
+        #print(f'Min and max distance: {g_dist.min()}, {g_dist.max()}')  
         #q = torch.tensor([0, 0.2, 0.4, 0.6, 0.8, 1])
-        #print(f'Distance percentiles: {torch.quantile(euclidean_dist.flatten(), q)}')
+        #print(f'Distance percentiles: {torch.quantile(g_dist.flatten(), q)}')
 
         # obtained from class Model in models/model.py
         bool_mask = (attention_mask>=0).long()
         attention_mask_expanded = (bool_mask.unsqueeze(-1)@bool_mask.unsqueeze(1)).view(batch_size, 1, seq_len, seq_len).expand(-1, num_heads, -1, -1)      
 
-        euclidean_dist = euclidean_dist.masked_fill(attention_mask_expanded==0, 2)  # 1e9
-        #euclidean_dist = euclidean_dist.masked_fill(attention_mask_expanded==0, 2)  # further is capped by 2 on an d-sphere
-        
-        # On a sphere, we have g_dist = euclidean_dist
-        #attn_score = (1 + euclidean_dist/self.bandwidth**0.5)**(-head_dim - beta)                  
-        #attn_score = (1 + euclidean_dist/self.bandwidth**0.5)**(-beta)
+        g_dist = g_dist.masked_fill(attention_mask_expanded==0, self.mask_val)  # 1e9
+
         if beta < 2:
-            attn_score = (1 + euclidean_dist/self.bandwidth**0.5)**(-d_intrinsic-beta)
+            attn_score = (1 + g_dist/self.bandwidth**0.5)**(-d_intrinsic-beta)
         else:
-            attn_score = torch.exp((-euclidean_dist/self.bandwidth**0.5)**(beta/(beta-1)))
+            attn_score = torch.exp((-g_dist/self.bandwidth**0.5)**(beta/(beta-1)))
 
         attn_score_shape = attn_score.shape
         #attn_score = attn_score.view(-1, attn_score_shape[2], attn_score_shape[3])
@@ -699,9 +698,9 @@ class V3FNSSelfAttention(nn.Module):
         #     print(f'key_vectors shape: {key_vectors.shape}')
         # print(f'query_vectors shape: {query_vectors.shape}')
         # print(f'value_vectors shape: {value_vectors.shape}')
-        # print(f'euclidean_dist shape: {euclidean_dist.shape}')
-        # #print(euclidean_dist)
-        # print(f'euclidean_dist nans: {torch.isnan(euclidean_dist.view(-1)).sum()}')
+        # print(f'g_dist shape: {g_dist.shape}')
+        # #print(g_dist)
+        # print(f'g_dist nans: {torch.isnan(g_dist.view(-1)).sum()}')
         # print(f'attention_mask shape: {attention_mask.shape}')        
         # print(f'attention_mask_expanded shape: {attention_mask_expanded.shape}')        
         # print(f'attn_score shape: {attn_score.shape}')

@@ -33,8 +33,7 @@ python -i main.py --n_layers=1 --n_attn_heads=2 --model_name=dpformer\
 """
 
 """
-python -i main.py --n_layers=1 --n_attn_heads=2 --model_name=v3fnsformer --beta=1\
- --qk_share=False\
+python -i main.py --n_layers=1 --n_attn_heads=2 --model_name=v3fnsformer --beta=1.5\
  --max_len=256 --max_steps=2 --logging_steps=2 --save_steps=2 --eval_steps=2\
  --divider=1 --warmup_steps=0 --grad_accum_step=1 --dataset_name=rotten_tomatoes\
  --model_root=.droot/speedtest
@@ -99,13 +98,13 @@ if __name__ == '__main__':
     # Model settings    
     #parser.add_argument('--sparsify_type', default=None, type=str)
     parser.add_argument('--qk_share', default=False, type=bool)
-    parser.add_argument('--d_intrinsic', default=3, type=int)
+    #parser.add_argument('--d_intrinsic', default=3, type=int)
     parser.add_argument('--n_layers', default=1, type=int)
     parser.add_argument('--n_attn_heads', default=2, type=int)
     parser.add_argument('--hidden_size', default=768, type=int)    
 
     parser.add_argument('--model_name', default='fnsformer', type=str)    
-    parser.add_argument('--beta', default=0.5, type=float)
+    parser.add_argument('--beta', default=1, type=float)
     parser.add_argument('--bandwidth', default=1, type=float)
     parser.add_argument('--max_len', default=1024, type=int)    
     # Dataset settings
@@ -239,8 +238,19 @@ if __name__ == '__main__':
             # ----------
 
             # ----------
-            config.d_intrinsic = args.d_intrinsic
-            attn_setup['d_intrinsic'] = args.d_intrinsic
+            # config.d_intrinsic = args.d_intrinsic
+            # attn_setup['d_intrinsic'] = args.d_intrinsic
+            config.d_intrinsic = args.hidden_size
+            config.sphere_radius = ((np.pi**(1/config.d_intrinsic)-1)/np.pi)   
+            #config.sphere_radius = 1
+            attn_setup['d_intrinsic'] = args.hidden_size
+
+        elif (args.model_name=='v2fnsformer' or args.model_name=='v3fnsformer') and args.beta >= 2:
+            config.sphere_radius = 1
+
+        config.mask_val = config.sphere_radius * np.pi
+        attn_setup['sphere_radius'] = config.sphere_radius       
+        attn_setup['mask_val'] = np.pi * config.sphere_radius            
 
     config.num_hidden_layers = args.n_layers
     config.num_attention_heads = args.n_attn_heads
@@ -253,9 +263,10 @@ if __name__ == '__main__':
         if 'fnsformer' in args.model_name:
             print(f'beta = {args.beta}, bandwidth = {args.bandwidth}')
         print(f'dataset: {args.dataset_name}')
-        print("-"*25 + "\n")          
+        print(attn_setup)
         models_dir, model_dir = create_model_dir(model_root, **attn_setup)   
-        if not isdir(model_dir): makedirs(model_dir) 
+        print(f'Model will be saved in {model_dir}')        
+        print("-"*25 + "\n")          
 
     model =  FNSFormerForSequenceClassification(config, **attn_setup).to(dev)    
     ########## add other options here ##########
@@ -271,7 +282,7 @@ if __name__ == '__main__':
                           "eval_steps": args.eval_steps,
                           "logging_strategy": args.log_strat,
                           "logging_steps": args.logging_steps,
-                          "save_steps": args.save_steps,    
+                          "save_steps": args.save_steps,                          
                           "seed": args.seed,
                           "warmup_steps": args.warmup_steps,
                           "gradient_accumulation_steps": args.grad_accum_step                          

@@ -13,7 +13,7 @@ from mutils import njoin, str_to_bool, str_to_ls, create_model_dir, convert_trai
 # ---------- Global plot settings ----------
 font_type = {'family' : 'sans-serif'}
 plt.rc('font', **font_type)
-plt.rc('legend',fontsize=7.5)
+plt.rc('legend',fontsize=7)
 # ------------------------------------------
 
 # Example:
@@ -25,7 +25,7 @@ python -i plot_results.py plot_model .droot/trained_models_v4\
 def plot_model(model_root_dir, dirnames, instances, 
                datasets, metrics, display=False):
     global df, df_setting, df_filtered, fig_file, axs
-
+    global model_dir
     # for local_keys in ['dirnames', 'datasets', 'metrics']:
     #     locals()[local_keys] = str_to_ls(locals()[local_keys])
 
@@ -48,6 +48,7 @@ def plot_model(model_root_dir, dirnames, instances,
     for idx, dataset in tqdm(enumerate(datasets)):
         for jdx, dirname in enumerate(dirnames): 
             model_dir = njoin(model_root_dir, dirname, f'model={instances[jdx]}')
+            model_dir = model_dir.replace('\\','')
             df = pd.read_csv(njoin(model_dir, 'run_performance.csv'))    
             df_setting = pd.read_csv(njoin(model_dir,'final_performance.csv'))        
             for kdx, metric in enumerate(metrics):
@@ -59,10 +60,9 @@ def plot_model(model_root_dir, dirnames, instances,
                 if 'fnsformer' in dirname:
                     beta, bandwidth  = df_setting.loc[0,['beta','bandwidth']]      
                     model_settings = rf'$\beta$ = {beta}, $\varepsilon$ = {bandwidth}'
-                    if beta < 2:
-                        #$d_{\mathcal{M}}$
-                        d_intrinsic = df_setting.loc[0,'d_intrinsic']
-                        model_settings += rf', $d$ = {d_intrinsic}'
+                    # if beta < 2:                        
+                    #     d_intrinsic = df_setting.loc[0,'d_intrinsic']
+                    #     model_settings += rf', $d$ = {d_intrinsic}'  #$d_{\mathcal{M}}$
                     model_name += f' ({model_settings})'
                 if 'acc' in metric or 'f1' in metric:
                     metric_plot = df_filtered.loc[:,metric] * 100
@@ -77,8 +77,8 @@ def plot_model(model_root_dir, dirnames, instances,
 
         axs[idx,0].set_ylabel(NAMES_DICT[dataset])
     #axs[0,0].legend(loc=7)
-    axs[0,0].legend(loc='upper center', bbox_to_anchor=(0.5, 1.05),
-                    ncol=2, frameon=False)
+    axs[0,0].legend(loc='upper left', #bbox_to_anchor=(0.5, 1.05),
+                    ncol=1, frameon=False)
 
     if display:
         plt.show()

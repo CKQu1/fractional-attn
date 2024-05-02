@@ -97,7 +97,7 @@ if __name__ == '__main__':
     parser.add_argument('--grad_accum_step', default=8, type=int)
     parser.add_argument('--debug', default=False, type=bool)  # for debuggin
     parser.add_argument('--lr_scheduler_type', default='constant', type=str)
-    parser.add_argument('--milestones', default=[10,20], type=str or list) # Epoch units
+    parser.add_argument('--milestones', default='', type=str or list) # Epoch units
     parser.add_argument('--gamma', default=0.1, type=float) # Decay factor
     # Model settings    
     #parser.add_argument('--sparsify_type', default=None, type=str)
@@ -310,7 +310,10 @@ if __name__ == '__main__':
         training_args.save_steps    = int(steps_per_train_epoch)
 
     if isinstance(args.milestones,str):
-        args.milestones = [int(str_epoch) for str_epoch in args.milestones.split(',')]
+        if args.milestones == '':
+            args.milestones = [int(args.epoch/2), args.epoch]
+        else:
+            args.milestones = [int(str_epoch) for str_epoch in args.milestones.split(',')]
 
     optimizer = AdamW(params=model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     scheduler = MultiStepLR(optimizer=optimizer, milestones=args.milestones, gamma=args.gamma)

@@ -12,7 +12,7 @@ from data_utils import get_dataset, get_dataset_cols, process_dataset_cols
 
 from os import makedirs
 from os.path import isdir, isfile
-from sklearn.metrics import f1_score
+#from sklearn.metrics import f1_score
 from transformers import TrainingArguments, DataCollatorWithPadding
 from transformers import RobertaTokenizer
 from transformers import AdamW
@@ -97,6 +97,9 @@ if __name__ == '__main__':
     parser.add_argument('--grad_accum_step', default=8, type=int)
     parser.add_argument('--debug', default=False, type=bool)  # for debuggin
     parser.add_argument('--lr_scheduler_type', default='constant', type=str)
+    parser.add_argument('--do_train', default=True, type=bool)
+    parser.add_argument('--do_eval', default=True, type=bool)
+
     parser.add_argument('--milestones', default='', type=str or list) # Epoch units
     parser.add_argument('--gamma', default=0.1, type=float) # Decay factor
     # Model settings    
@@ -113,7 +116,7 @@ if __name__ == '__main__':
     parser.add_argument('--max_len', default=1024, type=int)    
     # Dataset settings
     parser.add_argument('--dataset_name', default='imdb', type=str)
-    parser.add_argument('--divider', default=5, type=int)  # downsizing the test dataset
+    parser.add_argument('--divider', default=1, type=int)  # downsizing the test dataset
     # Path settings
     parser.add_argument('--model_root', default=njoin(DROOT, 'trained_models'), type=str, help='root dir of storing the model')
 
@@ -145,7 +148,6 @@ if __name__ == '__main__':
 
     # ---------------------------------------- 1. Dataset setup ----------------------------------------
 
-    # should max_length also be added to parser args?
     max_length = args.max_len    
     def preprocess_function(examples):
         return tokenizer(examples['text'], padding='max_length', truncation=True, max_length=max_length)
@@ -156,19 +158,20 @@ if __name__ == '__main__':
         
     # [None, 'micro', 'macro', 'weighted']
     average_type = 'micro'
-    metric_acc = load_metric("accuracy", average=average_type)
-    metric_f1 = load_metric("f1", average=average_type)
-    # metric_prcn = load_metric("precision", averge=average_type) 
-    # metric_recall = load_metric("recall", averge=average_type)                 
+    metric_acc = load_metric("accuracy")  # average=average_type
+    # metric_f1 = load_metric("f1")
+    # metric_prcn = load_metric("precision") 
+    # metric_recall = load_metric("recall")                 
          
     def compute_metrics(eval_pred):
         preds, labels = eval_pred
         acc = metric_acc.compute(predictions=preds, references=labels)        
-        f1_score = metric_f1.compute(predictions=preds, references=labels)  
+        #f1_score = metric_f1.compute(predictions=preds, references=labels)  
         #precision = metric_prcn.compute(predictions=preds, references=labels)        
         #recall = metric_recall.compute(predictions=preds, references=labels)                
         #return {"accuracy":acc,"f1_score":f1_score,"precision":precision,"recall":recall}
-        return {"accuracy":acc,"f1_score":f1_score}
+        #return {"accuracy":acc,"f1_score":f1_score}
+        return {"accuracy":acc}
     
     tokenizer = RobertaTokenizer(tokenizer_file = f"{repo_dir}/roberta-tokenizer/tokenizer.json",
                                  vocab_file     = f"{repo_dir}/roberta-tokenizer/vocab.json",
@@ -256,22 +259,13 @@ if __name__ == '__main__':
     config.num_hidden_layers = args.n_layers
     config.num_attention_heads = args.n_attn_heads
     config.hidden_size = args.hidden_size
-    config.attention_window = args.max_len  # full attn, no sliding windows            
+    config.attention_window = args.max_len  # full attn, no sliding windows                    
+
+    model = FNSFormerForSequenceClassification(config, **attn_setup).to(dev)    
+    ########## add other model options here ##########
 
     if global_rank == 0 or not train_with_ddp:
-        print("-"*25)
-        print(f'model: {args.model_name}')
-        if 'fnsformer' in args.model_name:
-            print(f'beta = {args.beta}, bandwidth = {args.bandwidth}')
-        print(f'dataset: {args.dataset_name}')
-        print(attn_setup)
-        models_dir, model_dir = create_model_dir(model_root, **attn_setup)   
-        print(f'Model will be saved in {model_dir}')        
-        print("-"*25 + "\n")          
-
-    model =  FNSFormerForSequenceClassification(config, **attn_setup).to(dev)    
-    ########## add other options here ##########
-
+        models_dir, model_dir = create_model_dir(model_root, **attn_setup)
     training_args_dict = {"output_dir": model_dir,
                           "learning_rate": args.lr,
                           "lr_scheduler_type": args.lr_scheduler_type,
@@ -286,13 +280,29 @@ if __name__ == '__main__':
                           "save_steps": args.save_steps,                          
                           "seed": args.seed,
                           "warmup_steps": args.warmup_steps,
-                          "gradient_accumulation_steps": args.grad_accum_step                          
+                          "gradient_accumulation_steps": args.grad_accum_step,
+                          "do_train": args.do_train,                          
+                          "do_eval": args.do_eval
                           }
     if args.max_steps != None:
         training_args_dict["max_steps"] = args.max_steps
     if args.debug == True:
         training_args_dict["debug"] = "underflow_overflow"
     training_args = TrainingArguments(**training_args_dict)
+
+    if global_rank == 0 or not train_with_ddp:
+        print("-"*25)
+        print(training_args_dict)
+        print(f'milestones: {args.milestones}')
+        print(f'gamma: {args.gamma}')
+        print('\n')
+        print(f'model: {args.model_name}')
+        if 'fnsformer' in args.model_name:
+            print(f'beta = {args.beta}, bandwidth = {args.bandwidth}')
+        print(f'dataset: {args.dataset_name}')
+        print(attn_setup)           
+        print(f'Model will be saved in {model_dir}')        
+        print("-"*25 + "\n")      
             
     steps_per_train_epoch = int(len(train_dataset)/(training_args.per_device_train_batch_size*device_total*training_args.gradient_accumulation_steps ))
     if global_rank == 0 or not train_with_ddp:
@@ -352,7 +362,7 @@ if __name__ == '__main__':
     # trainer = MyTrainer(**trainer_kwargs)
 
     t0_train = time()  # record train time    
-    trainer.train(ignore_keys_for_eval=["hidden_states", "attentions", "global_attentions"])  # "loss" 
+    trainer.train(ignore_keys_for_eval=["hidden_states", "attentions", "global_attentions"])  # "loss"
     #trainer.train()
     train_secs = time() - t0_train
 
@@ -365,12 +375,24 @@ if __name__ == '__main__':
         run_perf = run_perf[top_names]
         run_perf.to_csv(njoin(model_dir, "run_performance.csv"))
 
+    #if global_rank == 0 or not train_with_ddp:
     model_settings = attn_setup # model_settings['sparsify_type'] = args.sparsify_type
     model_settings['train_secs'] = train_secs
     model_settings.update(trainer.state.log_history[-1])
     final_perf = pd.DataFrame()
     final_perf = final_perf.append(model_settings, ignore_index=True)    
     final_perf.to_csv(njoin(model_dir, "final_performance.csv"))
+    train_settings = pd.DataFrame(columns=["lr", "lr_scheduler_type", "train_bs", "eval_bs",
+                                           "epochs", "weight_decay", "eval_strat", "eval_steps",
+                                           "log_strat", "logging_steps", "save_steps",                          
+                                           "seed", "warmup_steps",  "grad_accum_step", 
+                                           "milestones", "gamma"], index=range(1))
+    train_settings.iloc[0] = [args.lr, args.lr_scheduler_type, args.train_bs, args.eval_bs,
+                              args.epochs, args.weight_decay, args.eval_strat, args.eval_steps,
+                              args.log_strat, args.logging_steps, args.save_steps, 
+                              args.seed, args.warmup_steps, args.grad_accum_step, args.milestones,
+                              args.gamma]
+    train_settings.to_csv(njoin(model_dir, "train_setting.csv"))
 
     # save final model
     trainer.save_model(njoin(model_dir, "final_model"))

@@ -321,7 +321,7 @@ if __name__ == '__main__':
 
     if isinstance(args.milestones,str):
         if args.milestones == '':
-            args.milestones = [int(args.epoch/2), args.epoch]
+            args.milestones = [int(args.epochs/2), args.epochs]
         else:
             args.milestones = [int(str_epoch) for str_epoch in args.milestones.split(',')]
 

@@ -64,9 +64,11 @@ if __name__ == '__main__':
     print(f'---------- debug_mode = {debug_mode} ---------- \n')
     
     kwargss_all = []
-    for didx, dataset_name in enumerate(dataset_names):
+    #for didx, dataset_name in enumerate(dataset_names):
+    for didx, dataset_name in enumerate(dataset_names[1:]):
         if not debug_mode:
             ngpus, ncpus = 0, 16
+            #ngpus, ncpus = 0, 8
             select = 1
             walltime = '23:59:59'
             mem = '16GB'            
@@ -74,9 +76,21 @@ if __name__ == '__main__':
             #kwargss = [{'model_name': 'dpformer'}]                            
             #kwargss = [{'model_name': 'fnsformer', 'beta': 0.5, 'bandwidth': 1}]      
             #kwargss = [{'model_name': 'dpformer'}, {'model_name': 'spherefnsformer', 'beta': 0.5, 'bandwidth': 1}]                   
-            kwargss = [{'model_name': 'v2fnsformer', 'beta': 0.5, 'bandwidth': 5}, 
-                       {'model_name': 'v2fnsformer', 'beta': 0.5, 'bandwidth': 15}]
-            model_root = njoin(DROOT, 'trained_models_v2')
+            # kwargss = [{'model_name': 'v2fnsformer', 'beta': 0.5, 'bandwidth': 5}, 
+            #            {'model_name': 'v2fnsformer', 'beta': 0.5, 'bandwidth': 15}]
+            #kwargss = [{'model_name': 'v2fnsformer', 'beta': 0.5, 'bandwidth': 5}, {'model_name': 'dpformer'}]
+            # int(768/2)
+            # kwargss = [{'model_name': 'v2fnsformer', 'beta': 1, 'bandwidth':15, 'd_intrinsic':10, 'qk_share':True}, 
+            #            {'model_name': 'v2fnsformer', 'beta': 1, 'bandwidth':15, 'd_intrinsic':10, 'qk_share':False},
+            #            {'model_name': 'v2fnsformer', 'beta': 2, 'bandwidth':15, 'qk_share':True},
+            #            {'model_name': 'v2fnsformer', 'beta': 2, 'bandwidth':15, 'qk_share':False},
+            #            {'model_name': 'dpformer', 'qk_share':True},
+            #            {'model_name': 'dpformer', 'qk_share':False}]
+
+            kwargss = [{'model_name':'dpformer'},
+                       {'model_name':'v3fnsformer','beta':1.5},
+                       {'model_name':'v3fnsformer','beta':2}]           
+            model_root = njoin(DROOT, 'trained_models_v5')
             common_kwargs = {'n_layers':          1,
                              'n_attn_heads':      2,
                              'divider':           1,
@@ -85,27 +99,22 @@ if __name__ == '__main__':
                              'train_bs':          4,
                              'eval_bs':           4,
                              'max_len':           max_lens[didx],                             
-                            #  'max_steps':         100,
-                            #  'logging_steps':     20,
-                            #  'save_steps':        20,
-                            #  'eval_steps':        20   
-                            #  'max_steps':         2000,
-                            #  'logging_steps':     100,
-                            #  'save_steps':        100,
-                            #  'eval_steps':        100 
                              'epochs':            10                                                   
                              }  
 
         else:     
                    
-            ngpus, ncpus = 0, 6  
+            ngpus, ncpus = 0, 2  
             select = 2  
             walltime = '23:59:59'
             mem = '12GB'                 
 
             #kwargss = [{'model_name': 'dpformer'}]
             #kwargss = [{"beta":0.5, "bandwidth":1}, {"beta":1, "bandwidth":1}]
-            kwargss = [{'model_name': 'dpformer'}, {'model_name': 'spherefnsformer', 'beta': 0.5, 'bandwidth': 1}]              
+            #kwargss = [{'model_name': 'dpformer'}, {'model_name': 'spherefnsformer', 'beta': 0.5, 'bandwidth': 1}]              
+            kwargss = [{'model_name':'dpformer'},
+                       {'model_name':'v3fnsformer','beta':1.5},
+                       {'model_name':'v3fnsformer','beta':2}]              
             model_root = njoin(DROOT,'submit_main_check',f'ncpus={ncpus * select}_ngpus={ngpus * select}')
             common_kwargs = {'n_layers':                     1,
                              'n_attn_heads':                 2,

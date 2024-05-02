@@ -5,6 +5,7 @@ import pandas as pd
 import torch
 from torch.optim.lr_scheduler import MultiStepLR
 from time import time, sleep
+from typing import Union
 from constants import DROOT, MODEL_NAMES
 from mutils import njoin, create_model_dir, convert_train_history
 from data_utils import get_dataset, get_dataset_cols, process_dataset_cols
@@ -42,9 +43,8 @@ python -i main.py --n_layers=1 --n_attn_heads=2 --model_name=v3fnsformer --beta=
 """
 
 """
-python -i main.py --n_layers=1 --n_attn_heads=2 --model_name=v3fnsformer --beta=1  --bandwidth=2\
- --qk_share=True\
- --max_len=256 --max_steps=2 --logging_steps=2 --save_steps=2 --eval_steps=2\
+python -i main.py --n_layers=1 --n_attn_heads=2 --model_name=v3fnsformer --beta=1.5 --bandwidth=2\
+ --milestones=3,10 --max_len=256 --max_steps=2 --logging_steps=2 --save_steps=2 --eval_steps=2\
  --divider=1 --warmup_steps=0 --grad_accum_step=1 --dataset_name=rotten_tomatoes\
  --model_root=.droot/speedtest
 """
@@ -97,7 +97,7 @@ if __name__ == '__main__':
     parser.add_argument('--grad_accum_step', default=8, type=int)
     parser.add_argument('--debug', default=False, type=bool)  # for debuggin
     parser.add_argument('--lr_scheduler_type', default='constant', type=str)
-    parser.add_argument('--milestones', default=[10,20], type=list) # Epoch units
+    parser.add_argument('--milestones', default=[10,20], type=str or list) # Epoch units
     parser.add_argument('--gamma', default=0.1, type=float) # Decay factor
     # Model settings    
     #parser.add_argument('--sparsify_type', default=None, type=str)
@@ -154,16 +154,13 @@ if __name__ == '__main__':
         preds = logits.argmax(dim=-1)
         return preds
         
-    if args.dataset_name == 'imdb':
-        metric_acc = load_metric("accuracy")
-        metric_f1 = load_metric("f1")
-        #metric_prcn = load_metric("precision") 
-        #metric_recall = load_metric("recall") 
-    else:
-        metric_acc = load_metric("accuracy", average='micro')
-        metric_f1 = load_metric("f1", average='micro')
-        #metric_prcn = load_metric("precision") 
-        #metric_recall = load_metric("recall")         
+    # [None, 'micro', 'macro', 'weighted']
+    average_type = 'micro'
+    metric_acc = load_metric("accuracy", average=average_type)
+    metric_f1 = load_metric("f1", average=average_type)
+    # metric_prcn = load_metric("precision", averge=average_type) 
+    # metric_recall = load_metric("recall", averge=average_type)                 
+         
     def compute_metrics(eval_pred):
         preds, labels = eval_pred
         acc = metric_acc.compute(predictions=preds, references=labels)        
@@ -312,6 +309,9 @@ if __name__ == '__main__':
         training_args.logging_steps = int(steps_per_train_epoch/3)
         training_args.save_steps    = int(steps_per_train_epoch)
 
+    if isinstance(args.milestones,str):
+        args.milestones = [int(str_epoch) for str_epoch in args.milestones.split(',')]
+
     optimizer = AdamW(params=model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     scheduler = MultiStepLR(optimizer=optimizer, milestones=args.milestones, gamma=args.gamma)
     
@@ -349,7 +349,7 @@ if __name__ == '__main__':
     # trainer = MyTrainer(**trainer_kwargs)
 
     t0_train = time()  # record train time    
-    trainer.train(ignore_keys_for_eval=["loss", "hidden_states", "attentions", "global_attentions"])
+    trainer.train(ignore_keys_for_eval=["hidden_states", "attentions", "global_attentions"])  # "loss" 
     #trainer.train()
     train_secs = time() - t0_train
 

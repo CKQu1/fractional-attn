@@ -7,7 +7,7 @@ from torch.optim.lr_scheduler import MultiStepLR
 from time import time, sleep
 from typing import Union
 from constants import DROOT, MODEL_NAMES
-from mutils import njoin, create_model_dir, convert_train_history
+from mutils import njoin, create_model_dir, convert_train_history, structural_model_root
 from data_utils import get_dataset, get_dataset_cols, process_dataset_cols
 
 from os import makedirs
@@ -17,10 +17,11 @@ from transformers import TrainingArguments, DataCollatorWithPadding
 from transformers import RobertaTokenizer
 from transformers import AdamW
 from transformers.utils import logging
+from transformers.trainer_pt_utils import get_parameter_names
+
 from datasets import load_dataset, load_metric, load_from_disk
 from models.model_app import FNSFormerForSequenceClassification
 from models.model_utils import ModelConfig
-from trainer import MyTrainer
 
 import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning) 
@@ -81,6 +82,7 @@ if __name__ == '__main__':
     # Training options
     parser = argparse.ArgumentParser(description='main_seq_classification.py training arguments')    
     parser.add_argument('--train_with_ddp', default=False, type=bool, help='to use DDP or not')
+    parser.add_argument('--use_custom_optim', default=False, type=bool, help='to use custom optimizer')
     parser.add_argument('--lr', default=3e-5, type=float, help='learning rate')
     parser.add_argument('--train_bs', default=2, type=int)
     parser.add_argument('--eval_bs', default=10, type=int)
@@ -93,10 +95,10 @@ if __name__ == '__main__':
     parser.add_argument('--logging_steps', default=50, type=int)
     parser.add_argument('--save_steps', default=50, type=int)
     parser.add_argument('--seed', default=42, type=int)
-    parser.add_argument('--warmup_steps', default=2, type=int)
+    parser.add_argument('--warmup_steps', default=0, type=int or type(None))
     parser.add_argument('--grad_accum_step', default=8, type=int)
     parser.add_argument('--debug', default=False, type=bool)  # for debuggin
-    parser.add_argument('--lr_scheduler_type', default='constant', type=str)
+    parser.add_argument('--lr_scheduler_type', default=None, type=str or type(None))
     parser.add_argument('--do_train', default=True, type=bool)
     parser.add_argument('--do_eval', default=True, type=bool)
 
@@ -118,7 +120,7 @@ if __name__ == '__main__':
     parser.add_argument('--dataset_name', default='imdb', type=str)
     parser.add_argument('--divider', default=1, type=int)  # downsizing the test dataset
     # Path settings
-    parser.add_argument('--model_root', default=njoin(DROOT, 'trained_models'), type=str, help='root dir of storing the model')
+    parser.add_argument('--model_root', default='', type=str, help='root dir of storing the model')
 
     args = parser.parse_args()    
 
@@ -222,7 +224,16 @@ if __name__ == '__main__':
 
     # paths
     if args.model_root == '':
-        model_root = njoin(DROOT, args.model_name)
+        model_root = structural_model_root(qk_share=args.qk_share, n_layers=args.n_layers,
+                                           n_attn_heads=args.n_attn_heads, hidden_size=args.hidden_size,
+                                           lr=args.lr, bs=args.train_bs, 
+                                           use_custom_optim=args.use_custom_optim,
+                                           milestones=args.milestones, gamma=args.gamma,
+                                           epochs=args.epochs                                               
+                                           )       
+        model_root = njoin(DROOT, model_root)
+
+
     else:
         model_root = args.model_root   
     #if not isdir(model_root): makedirs(model_root)
@@ -266,35 +277,72 @@ if __name__ == '__main__':
 
     if global_rank == 0 or not train_with_ddp:
         models_dir, model_dir = create_model_dir(model_root, **attn_setup)
-    training_args_dict = {"output_dir": model_dir,
-                          "learning_rate": args.lr,
-                          "lr_scheduler_type": args.lr_scheduler_type,
+    
+    warmup_steps = args.max_step if args.warmup_steps is None else args.warmup_steps
+    training_args_dict = {"output_dir": model_dir,                         
                           "per_device_train_batch_size": args.train_bs,
                           "per_device_eval_batch_size": args.eval_bs,
-                          "num_train_epochs": args.epochs,                          
-                          "weight_decay": args.weight_decay,
+                          "num_train_epochs": args.epochs,                                                    
                           "evaluation_strategy": args.eval_strat,
                           "eval_steps": args.eval_steps,
                           "logging_strategy": args.log_strat,
                           "logging_steps": args.logging_steps,
                           "save_steps": args.save_steps,                          
                           "seed": args.seed,
-                          "warmup_steps": args.warmup_steps,
+                          "warmup_steps": warmup_steps,
                           "gradient_accumulation_steps": args.grad_accum_step,
                           "do_train": args.do_train,                          
                           "do_eval": args.do_eval
                           }
-    if args.max_steps != None:
-        training_args_dict["max_steps"] = args.max_steps
-    if args.debug == True:
-        training_args_dict["debug"] = "underflow_overflow"
-    training_args = TrainingArguments(**training_args_dict)
 
+    if args.max_steps is not None:
+        training_args_dict["max_steps"] = args.max_steps
+    if args.debug is True:
+        training_args_dict["debug"] = "underflow_overflow"        
+
+    if args.use_custom_optim is False:
+
+        if args.lr_scheduler_type is not None:            
+            training_args_dict["lr_scheduler_type"] = args.lr_scheduler_type
+
+        training_args_dict["learning_rate"] = args.lr
+        training_args_dict["weight_decay"] = args.weight_decay    
+        training_args = TrainingArguments(**training_args_dict)
+
+    else:
+
+        # CLEAN UP LATER        
+
+        # Create adamw_torch optimizer manually (https://github.com/huggingface/transformers/issues/18635)
+        # decay_parameters = get_parameter_names(model, [torch.nn.LayerNorm])
+        # decay_parameters = [name for name in decay_parameters if "bias" not in name]
+        # optimizer_grouped_parameters = [
+        #     {
+        #         "params": [p for n, p in model.named_parameters() if n in decay_parameters],
+        #         #"weight_decay": training_args.weight_decay,
+        #         "weight_decay": args.weight_decay,
+        #     },
+        #     {
+        #         "params": [p for n, p in model.named_parameters() if n not in decay_parameters],
+        #         "weight_decay": 0.0,
+        #     },
+        # ]
+
+        if isinstance(args.milestones,str):
+            if args.milestones == '':
+                args.milestones = [int(args.epochs/2), args.epochs]
+            else:
+                args.milestones = [int(str_epoch) for str_epoch in args.milestones.split(',')]             
+         
+
+    training_args = TrainingArguments(**training_args_dict)
+    steps_per_train_epoch = int(len(train_dataset)/(training_args.per_device_train_batch_size*device_total*training_args.gradient_accumulation_steps ))    
     if global_rank == 0 or not train_with_ddp:
         print("-"*25)
         print(training_args_dict)
-        print(f'milestones: {args.milestones}')
-        print(f'gamma: {args.gamma}')
+        if args.use_custom_optim is True:
+            print(f'milestones: {args.milestones}')
+            print(f'gamma: {args.gamma}')
         print('\n')
         print(f'model: {args.model_name}')
         if 'fnsformer' in args.model_name:
@@ -304,8 +352,6 @@ if __name__ == '__main__':
         print(f'Model will be saved in {model_dir}')        
         print("-"*25 + "\n")      
             
-    steps_per_train_epoch = int(len(train_dataset)/(training_args.per_device_train_batch_size*device_total*training_args.gradient_accumulation_steps ))
-    if global_rank == 0 or not train_with_ddp:
         print("-"*25)
         print(f"steps_per_train_epoch {steps_per_train_epoch}")
         print(f"per_device_train_batch_size: {training_args.per_device_train_batch_size}")
@@ -314,20 +360,10 @@ if __name__ == '__main__':
         print("-"*25 + "\n")
 
     if training_args.num_train_epochs >= 1 and args.max_steps == None:
-        training_args.eval_steps    = int(steps_per_train_epoch)
-        #training_args.logging_steps = int(steps_per_train_epoch/5)
-        training_args.logging_steps = int(steps_per_train_epoch/3)
+        training_args.eval_steps    = int(steps_per_train_epoch)        
+        training_args.logging_steps = int(steps_per_train_epoch/3)  # int(steps_per_train_epoch/5)
         training_args.save_steps    = int(steps_per_train_epoch)
-
-    if isinstance(args.milestones,str):
-        if args.milestones == '':
-            args.milestones = [int(args.epochs/2), args.epochs]
-        else:
-            args.milestones = [int(str_epoch) for str_epoch in args.milestones.split(',')]
-
-    optimizer = AdamW(params=model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-    scheduler = MultiStepLR(optimizer=optimizer, milestones=args.milestones, gamma=args.gamma)
-    
+        
     trainer_kwargs = {'model': model,                      
                       'args': training_args,
                       'train_dataset': train_dataset,
@@ -335,9 +371,50 @@ if __name__ == '__main__':
                       'tokenizer': tokenizer,
                       'data_collator': data_collator,
                       'compute_metrics': compute_metrics,
-                      'preprocess_logits_for_metrics': preprocess_logits_for_metrics,
-                      'optimizers': (optimizer, scheduler)
+                      'preprocess_logits_for_metrics': preprocess_logits_for_metrics                                            
                       }
+    if args.use_custom_optim is True:
+        from CustomTrainer import CustomTrainer
+
+        # Create adamw_torch optimizer manually (https://github.com/huggingface/transformers/issues/18635)
+        decay_parameters = get_parameter_names(model, [torch.nn.LayerNorm])
+        decay_parameters = [name for name in decay_parameters if "bias" not in name]
+        optimizer_grouped_parameters = [
+            {
+                "params": [p for n, p in model.named_parameters() if n in decay_parameters],
+                "weight_decay": args.weight_decay,
+            },
+            {
+                "params": [p for n, p in model.named_parameters() if n not in decay_parameters],
+                "weight_decay": 0.0,
+            },
+        ] 
+                
+        #params=model.parameters()
+        optimizer = AdamW(optimizer_grouped_parameters, 
+                          lr=args.lr,
+                          betas=(training_args.adam_beta1, training_args.adam_beta2),
+                          eps=training_args.adam_epsilon
+                          )
+        scheduler = MultiStepLR(optimizer=optimizer, milestones=args.milestones, gamma=args.gamma)     
+        trainer_kwargs['optimizers'] = (optimizer, scheduler)     
+        trainer = CustomTrainer(**trainer_kwargs)
+
+        if global_rank == 0 or not train_with_ddp:
+            print("-"*25)
+            print('CustomTrainer initialized!')
+            print("-"*25 + "\n")
+
+    else:
+        from transformers import Trainer    
+        trainer = Trainer(**trainer_kwargs)
+        # trainer_kwargs['config'] = config
+        # trainer = MyTrainer(**trainer_kwargs)    
+         
+        if global_rank == 0 or not train_with_ddp:
+            print("-"*25)
+            print('HF Trainer initialized!')
+            print("-"*25 + "\n")             
 
     # if args.model_name == 'fnsformer':
     #     trainer_kwargs['config'] = config
@@ -354,12 +431,7 @@ if __name__ == '__main__':
     #     trainer = MyTrainer(**trainer_kwargs)
     # else:
     #     from transformers import Trainer
-    #     trainer = Trainer(**trainer_kwargs)
-    
-    from transformers import Trainer    
-    trainer = Trainer(**trainer_kwargs)
-    # trainer_kwargs['config'] = config
-    # trainer = MyTrainer(**trainer_kwargs)
+    #     trainer = Trainer(**trainer_kwargs)    
 
     t0_train = time()  # record train time    
     trainer.train(ignore_keys_for_eval=["hidden_states", "attentions", "global_attentions"])  # "loss"

@@ -48,6 +48,7 @@ def get_instance(dir, *args):  # for enumerating each instance of training
     else:
         return 0
 
+# create model_dir which determines the instance for the specific model/training setting
 def create_model_dir(model_root_dir, **kwargs):
     model_name = kwargs.get('model_name', 'fnsformer')    
     dataset_name = kwargs.get('dataset_name', 'imdb')
@@ -60,7 +61,7 @@ def create_model_dir(model_root_dir, **kwargs):
     assert isinstance(qk_share,bool), f'qk_share is not bool, has value {qk_share}'
 
     dirname = f'{model_name}-{dataset_code}'
-    dirname += '-qqv' if qk_share is True else '-qkv'  # qk weight-tying
+    #dirname += '-qqv' if qk_share is True else '-qkv'  # qk weight-tying
     if 'fnsformer' in model_name:                 
         beta = kwargs.get("beta", 1)
         bandwidth = kwargs.get("bandwidth", 1)             
@@ -75,6 +76,30 @@ def create_model_dir(model_root_dir, **kwargs):
     if not os.path.isdir(model_dir): os.makedirs(model_dir)     
        
     return models_dir, model_dir      
+
+# creates structural model_root based on model/training setting
+def structural_model_root(**kwargs):
+
+    use_custom_optim = kwargs.get('use_custom_optim')
+    qk_share = kwargs.get('qk_share'); n_layers = kwargs.get('n_layers')
+    n_attn_heads = kwargs.get('n_attn_heads'); hidden_size = kwargs.get('hidden_size')
+
+    lr = kwargs.get('lr'); bs = kwargs.get('bs'); milestones = kwargs.get('milestones'); gamma = kwargs.get('gamma')
+    epochs = kwargs.get('epochs')
+
+    affix = 'qqv' if qk_share==True else 'qkv'
+    if isinstance(milestones, str):
+        milestones_str = milestones
+    else:
+        milestones_str = ','.join(str(s) for s in milestones)    
+    if use_custom_optim is True:
+        model_root = njoin(f'layers={n_layers}-heads={n_attn_heads}-hidden={hidden_size}-{affix}',
+                           f'lr={lr}-bs={bs}-milestones={milestones_str}-gamma={gamma}-epochs={epochs}')    
+    else:
+        model_root = njoin(f'layers={n_layers}-heads={n_attn_heads}-hidden={hidden_size}-{affix}',
+                           f'lr={lr}-bs={bs}-epochs={epochs}')            
+
+    return model_root    
 
 # -------------------- Main utils --------------------        
 

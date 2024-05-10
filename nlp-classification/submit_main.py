@@ -91,7 +91,7 @@ if __name__ == '__main__':
                        {'model_name':'v3fnsformer','beta':2}]           
                              
             common_kwargs = {'seed':              0,
-                             'n_layers':          2,
+                             'n_layers':          3,
                              'n_attn_heads':      2,
                              'hidden_size':       768,
                              'divider':           1,

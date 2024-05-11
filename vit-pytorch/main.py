@@ -14,10 +14,7 @@ from torch.utils.data import DataLoader
 from transformers import ViTImageProcessor, ViTForImageClassification
 from transformers import TrainingArguments, Trainer
 
-from constants import DROOT
-from mutils import njoin
-
-
+from tqdm import tqdm
 from os import makedirs
 from os.path import isdir, isfile
 from transformers import TrainingArguments, DataCollatorWithPadding
@@ -33,7 +30,6 @@ warnings.simplefilter(action='ignore', category=FutureWarning)
 from torch import nn, optim
 from tutils import save_experiment, save_checkpoint
 from data_utils import prepare_data
-from vit_pytorch.vit import ViTForClassfication
 
 
 class MyTrainer:
@@ -57,7 +53,7 @@ class MyTrainer:
         # Keep track of the losses and accuracies
         train_losses, test_losses, accuracies = [], [], []
         # Train the model
-        for i in range(epochs):
+        for i in tqdm(range(epochs)):
             train_loss = self.train_epoch(trainloader)
             accuracy, test_loss = self.evaluate(testloader)
             train_losses.append(train_loss)
@@ -122,6 +118,12 @@ class MyTrainer:
 # quick run (single unit)
 """
 python -i main.py --epochs=1
+
+python -i main.py --epochs=1 --use_faster_attn=False
+
+python -i main.py --epochs=1 --model_name=fnsvit 
+
+python -i main.py --epochs=1 --model_name=fnsvit --use_faster_attn=False
 """
 
 if __name__ == '__main__':
@@ -130,46 +132,46 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='vit-pytorch/main.py training arguments')    
     parser.add_argument('--train_with_ddp', default=False, type=bool, help='to use DDP or not')
     parser.add_argument('--lr', default=3e-5, type=float, help='learning rate')
-    parser.add_argument('--train_bs', default=2, type=int)
+    parser.add_argument('--train_bs', default=4, type=int)
     parser.add_argument('--eval_bs', default=10, type=int)
     parser.add_argument('--epochs', default=1, type=int)
     parser.add_argument('--max_steps', default=None, type=int)
     parser.add_argument('--weight_decay', default=0.01, type=float)
-    parser.add_argument('--eval_strat', default='steps', type=str)
-    parser.add_argument('--eval_steps', default=200, type=int)
-    parser.add_argument('--log_strat', default='steps', type=str)
-    parser.add_argument('--logging_steps', default=50, type=int)
-    parser.add_argument('--save_steps', default=50, type=int)
-    parser.add_argument('--seed', default=42, type=int)
-    parser.add_argument('--warmup_steps', default=2, type=int)
-    parser.add_argument('--grad_accum_step', default=8, type=int)
-    parser.add_argument('--debug', default=False, type=bool)  # for debuggin
-    parser.add_argument('--lr_scheduler_type', default='constant', type=str)
-    parser.add_argument('--do_train', default=True, type=bool)
-    parser.add_argument('--do_eval', default=True, type=bool)
+    # parser.add_argument('--milestones', default='', type=str or list) # Epoch units
+    # parser.add_argument('--gamma', default=0.1, type=float) # Decay factor    
 
-    parser.add_argument('--milestones', default='', type=str or list) # Epoch units
-    parser.add_argument('--gamma', default=0.1, type=float) # Decay factor
+    # Log options
+    # parser.add_argument('--eval_strat', default='steps', type=str)
+    # parser.add_argument('--eval_steps', default=200, type=int)
+    # parser.add_argument('--log_strat', default='steps', type=str)
+    # parser.add_argument('--logging_steps', default=50, type=int)
+    # parser.add_argument('--save_steps', default=50, type=int)
+    # parser.add_argument('--seed', default=42, type=int)
+    # parser.add_argument('--warmup_steps', default=2, type=int)
+    # parser.add_argument('--grad_accum_step', default=8, type=int)
+    # parser.add_argument('--debug', default=False, type=bool)  # for debuggin
+    # parser.add_argument('--lr_scheduler_type', default='constant', type=str)
+    # parser.add_argument('--do_train', default=True, type=bool)
+    # parser.add_argument('--do_eval', default=True, type=bool)
+    parser.add_argument('--model_root', default=njoin(DROOT, 'trained_models'), type=str, help='root dir of storing the model')
+
     # Model settings    
     # parser.add_argument('--sparsify_type', default=None, type=str)
-    # parser.add_argument('--qk_share', default=False, type=bool)
-    # parser.add_argument('--d_intrinsic', default=3, type=int)
+    parser.add_argument('--qk_share', default=False, type=bool)
+    parser.add_argument('--model_name', default='dpvit', type=str, help='dpvit | fnsvit')    
+    parser.add_argument('--beta', default=1, type=float)
+    parser.add_argument('--bandwidth', default=1, type=float)  
 
-    parser.add_argument('--model_name', default='dpvit', type=str)    
-    # parser.add_argument('--beta', default=1, type=float)
-    # parser.add_argument('--bandwidth', default=1, type=float)  
     # Dataset settings
     parser.add_argument('--dataset_name', default='cifar10', type=str)
-    parser.add_argument('--divider', default=1, type=int)  # downsizing the test dataset
-    # Path settings
-    parser.add_argument('--model_root', default=njoin(DROOT, 'trained_models'), type=str, help='root dir of storing the model')
+    parser.add_argument('--divider', default=1, type=int)  # downsizing the test dataset    
 
     # config settings
     parser.add_argument('--patch_size', default=4, type=int)
     parser.add_argument('--hidden_size', default=48, type=int)
+    #parser.add_argument('--intermediate_size', default=4 * 48, type=int)    
     parser.add_argument('--n_layers', default=4, type=int)
     parser.add_argument('--n_attn_heads', default=2, type=int)
-    #parser.add_argument('--intermediate_size', default=4 * 48, type=int)
     parser.add_argument('--hidden_dropout_prob', default=0.0, type=float)
     parser.add_argument('--attention_probs_dropout_prob', default=0.0, type=float)
     parser.add_argument('--initializer_range', default=0.02, type=float)
@@ -185,6 +187,7 @@ if __name__ == '__main__':
 
     args = parser.parse_args()    
 
+    # ---------- Device and system ----------
     dev = torch.device(f"cuda:{torch.cuda.device_count()}"
                        if torch.cuda.is_available() else "cpu")   
     device_name = "GPU" if dev.type != "cpu" else "CPU"
@@ -202,6 +205,9 @@ if __name__ == '__main__':
     else:
         device_total = 1       
 
+    assert args.model_name in MODEL_NAMES, 'model_name does not exist!'
+
+    # ---------- Model config ----------
     config = {
         "patch_size": args.patch_size,  # Input image size: 32x32 -> 8x8 patches
         "hidden_size": args.hidden_size,
@@ -220,20 +226,40 @@ if __name__ == '__main__':
     # These are not hard constraints, but are used to prevent misconfigurations
     assert config["hidden_size"] % config["num_attention_heads"] == 0
     assert config['intermediate_size'] == 4 * config['hidden_size']
-    assert config['image_size'] % config['patch_size'] == 0
+    assert config['image_size'] % config['patch_size'] == 0       
 
-    attn_setup = {'qk_share': False}
+    attn_setup = {'qk_share': args.qk_share}
     attn_setup['model_name'] = args.model_name
     attn_setup['dataset_name'] = args.dataset_name
+    if args.model_name == 'fnsvit':
+        config['beta'] = attn_setup['beta'] = args.beta      
+        config['bandwidth'] = attn_setup['bandwidth'] = args.bandwidth   
+        if args.beta < 2:            
+            config['d_intrinsic'] = int(config["hidden_size"] / config["num_attention_heads"])  # head_dim
+            config['sphere_radius'] = ((np.pi**(1/config['d_intrinsic'])-1)/np.pi)                            
+        else:
+            config['sphere_radius'] = 1
+
+        #config['mask_val'] = config['sphere_radius'] * np.pi
+        attn_setup['sphere_radius'] = config['sphere_radius']       
+        attn_setup['mask_val'] = np.pi * config['sphere_radius']               
 
     batch_size = args.train_bs
     epochs = args.epochs    
     save_model_every_n_epochs = args.save_model_every
-    # Load the CIFAR10 dataset
-    trainloader, testloader, _ = prepare_data(batch_size=batch_size)
-    # Create the model, optimizer, loss function and trainer
+
+    # ---------- Load dataset ----------
+    if args.dataset_name == 'cifar10':
+        trainloader, testloader, _ = prepare_data(batch_size=batch_size)
+    
+    # ---------- Create the model, optimizer, loss function and trainer ----------
     if args.model_name == 'dpvit':
+        from vit_pytorch.vit import ViTForClassfication
         model = ViTForClassfication(config)
+    elif args.model_name == 'fnsvit':
+        from vit_pytorch.fns_vit import FNSViTForClassfication
+        model = FNSViTForClassfication(config)        
+
     optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     loss_fn = nn.CrossEntropyLoss()
     if args.model_root == '':
@@ -242,5 +268,6 @@ if __name__ == '__main__':
         model_root = args.model_root   
     models_dir, model_dir = create_model_dir(model_root, **attn_setup)
 
+    #quit()  # delete
     trainer = MyTrainer(config, model, optimizer, loss_fn, args.exp_name, device=dev, base_dir=model_dir)
     trainer.train(trainloader, testloader, epochs, save_model_every_n_epochs=save_model_every_n_epochs)    

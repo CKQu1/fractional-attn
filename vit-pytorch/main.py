@@ -7,7 +7,7 @@ from torch.optim.lr_scheduler import MultiStepLR
 from time import time, sleep
 from typing import Union
 from constants import DROOT, MODEL_NAMES
-from mutils import njoin, create_model_dir, convert_train_history
+from mutils import njoin, create_model_dir, convert_train_history, structural_model_root
 
 from datasets import load_dataset, load_metric
 from torch.utils.data import DataLoader
@@ -130,7 +130,6 @@ if __name__ == '__main__':
 
     # Training options
     parser = argparse.ArgumentParser(description='vit-pytorch/main.py training arguments')    
-    parser.add_argument('--train_with_ddp', default=False, type=bool, help='to use DDP or not')
     parser.add_argument('--lr', default=3e-5, type=float, help='learning rate')
     parser.add_argument('--train_bs', default=4, type=int)
     parser.add_argument('--eval_bs', default=10, type=int)
@@ -170,7 +169,7 @@ if __name__ == '__main__':
     parser.add_argument('--patch_size', default=4, type=int)
     parser.add_argument('--hidden_size', default=48, type=int)
     #parser.add_argument('--intermediate_size', default=4 * 48, type=int)    
-    parser.add_argument('--n_layers', default=4, type=int)
+    parser.add_argument('--n_layers', default=1, type=int)
     parser.add_argument('--n_attn_heads', default=2, type=int)
     parser.add_argument('--hidden_dropout_prob', default=0.0, type=float)
     parser.add_argument('--attention_probs_dropout_prob', default=0.0, type=float)
@@ -184,28 +183,12 @@ if __name__ == '__main__':
     parser.add_argument("--save_model_every", default=0, type=int)
     parser.add_argument("--exp_name", default='image-task', type=str)
 
-
     args = parser.parse_args()    
+    assert args.model_name in MODEL_NAMES, 'model_name does not exist!'
 
     # ---------- Device and system ----------
     dev = torch.device(f"cuda:{torch.cuda.device_count()}"
-                       if torch.cuda.is_available() else "cpu")   
-    device_name = "GPU" if dev.type != "cpu" else "CPU"
-    train_with_ddp = torch.distributed.is_available() and args.train_with_ddp
-    global_rank = None
-    if train_with_ddp:
-        world_size = int(os.environ["WORLD_SIZE"])
-        global_rank = int(os.environ["RANK"])
-        print(f"global_rank: {global_rank}")    
-        print(f"Device in use: {dev}.")
-        device_total = world_size
-        #backend = "gloo" if dev.type != "cpu" else "nccl"
-        #import torch.distributed as dist
-        #dist.init_process_group(backend=backend)        
-    else:
-        device_total = 1       
-
-    assert args.model_name in MODEL_NAMES, 'model_name does not exist!'
+                       if torch.cuda.is_available() else "cpu")           
 
     # ---------- Model config ----------
     config = {
@@ -240,7 +223,6 @@ if __name__ == '__main__':
         else:
             config['sphere_radius'] = 1
 
-        #config['mask_val'] = config['sphere_radius'] * np.pi
         attn_setup['sphere_radius'] = config['sphere_radius']       
         attn_setup['mask_val'] = np.pi * config['sphere_radius']               
 
@@ -263,7 +245,14 @@ if __name__ == '__main__':
     optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     loss_fn = nn.CrossEntropyLoss()
     if args.model_root == '':
-        model_root = njoin(DROOT, args.model_name)
+        model_root = structural_model_root(qk_share=args.qk_share, n_layers=args.n_layers,
+                                           n_attn_heads=args.n_attn_heads, hidden_size=args.hidden_size,
+                                           lr=args.lr, bs=args.train_bs, 
+                                           use_custom_optim=args.use_custom_optim,
+                                           milestones=args.milestones, gamma=args.gamma,
+                                           epochs=args.epochs                                               
+                                           )       
+        model_root = njoin(DROOT, model_root)
     else:
         model_root = args.model_root   
     models_dir, model_dir = create_model_dir(model_root, **attn_setup)

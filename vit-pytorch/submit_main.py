@@ -57,56 +57,53 @@ if __name__ == '__main__':
     script_name = "main.py"       # script for running
     dataset_names = ['cifar10']   # add or change datasets here
     
-    debug_mode = False
+    debug_mode = True
     print(f'---------- debug_mode = {debug_mode} ---------- \n')
     
-    seeds = [0, 1]    
+    seeds = [0]    
     kwargss_all = []
     for seed in seeds:
         for didx, dataset_name in enumerate(dataset_names):
             if not debug_mode:
                 select = 1; ngpus, ncpus = 0, 1            
-                walltime = '23:59:59'
-                mem = '16GB'            
+                walltime, mem = '23:59:59', '16GB'                             
 
-                kwargss = [{'model_name':'dpvit'}]                                        
-                common_kwargs = {'seed':             seed,
-                                'n_layers':          2,
-                                'n_attn_heads':      2,
-                                'hidden_size':       768,                         
-                                'train_bs':          4,
-                                'eval_bs':           4,                            
-                                'epochs':            100,
-                                'lr':                3e-5,                                                   
-                                'weight_decay':      0
-                                }  
+                kwargss = [{'model_name':'fnsvit', 'beta': 1.5}, {'model_name':'fnsvit', 'beta': 2}, 
+                           {'model_name':'dpvit'}
+                           ]                                        
+                common_kwargs = {'seed':              seed,
+                                 'n_layers':          1,
+                                 'n_attn_heads':      2,
+                                 'hidden_size':       768,                         
+                                 'train_bs':          4,
+                                 'eval_bs':           4,                            
+                                 'epochs':            100,
+                                 'lr':                3e-5,                                                   
+                                 'weight_decay':      0
+                                 }  
 
                 model_root = njoin(DROOT, 'test_stage')
 
-            else:     
-                    
-                ngpus, ncpus = 0, 2  
-                select = 2  
-                walltime = '23:59:59'
-                mem = '12GB'                 
+            else:                         
+                ngpus, ncpus = 0, 1
+                select = 1  
+                walltime, mem = '23:59:59', '8GB'                
         
-                kwargss = [{'model_name':'dpformer'},
-                        {'model_name':'v3fnsformer','beta':1.5},
-                        {'model_name':'v3fnsformer','beta':2}]              
-                model_root = njoin(DROOT,'submit_main_check',f'ncpus={ncpus * select}_ngpus={ngpus * select}')
-                common_kwargs = {'n_layers':                    1,
-                                'n_attn_heads':                 2,
-                                'divider':                      1,
-                                'warmup_steps':                 0,                             
-                                'train_bs':                     4,
-                                'eval_bs':                      4,
-                                'max_len':                      128,                             
-                                'max_steps':                    50,
-                                'logging_steps':                10,
-                                'save_steps':                   10,
-                                'eval_steps':                   10,
-                                'weight_decay':                 0                         
-                                }                                                     
+                kwargss = [{'model_name':'fnsvit', 'beta': 1.5}, {'model_name':'fnsvit', 'beta': 2}, 
+                           {'model_name':'dpvit'}
+                           ]            
+                #model_root = njoin(DROOT,'submit_main_check',f'ncpus={ncpus * select}_ngpus={ngpus * select}')
+                model_root = njoin(DROOT, 'test_stage')
+                common_kwargs = {'seed':              seed,
+                                 'n_layers':          1,
+                                 'n_attn_heads':      2,
+                                 'hidden_size':       768,                         
+                                 'train_bs':          4,
+                                 'eval_bs':           4,                            
+                                 'epochs':            2,
+                                 'lr':                3e-5,                                                   
+                                 'weight_decay':      0
+                                 }                                                    
             
             for idx in range(len(kwargss)):
                 # function automatically creates dir
@@ -119,9 +116,9 @@ if __name__ == '__main__':
     #print(kwargss_all)  
     #quit()  # delete      
     train_submit(script_name, kwargss_all,
-                ncpus=ncpus,
-                ngpus=ngpus,
-                select=select, 
-                walltime=walltime,
-                mem=mem,
-                job_path=model_root)
+                 ncpus=ncpus,
+                 ngpus=ngpus,
+                 select=select, 
+                 walltime=walltime,
+                 mem=mem,
+                 job_path=model_root)

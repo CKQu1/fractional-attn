@@ -249,13 +249,7 @@ if __name__ == '__main__':
         attn_setup['beta'] = args.beta      
         attn_setup['bandwidth'] = args.bandwidth   
         if (args.model_name=='v2fnsformer' or args.model_name=='v3fnsformer') and args.beta < 2:
-            # estimate d_intrinsic
-            # ----------
-
-            # ----------
-            # config.d_intrinsic = args.d_intrinsic
-            # attn_setup['d_intrinsic'] = args.d_intrinsic
-            config.d_intrinsic = args.hidden_size
+            config.d_intrinsic = int(args.hidden_size/args.n_attn_heads)  # head_dim
             config.sphere_radius = ((np.pi**(1/config.d_intrinsic)-1)/np.pi)   
             #config.sphere_radius = 1
             attn_setup['d_intrinsic'] = args.hidden_size

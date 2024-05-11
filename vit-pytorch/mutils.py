@@ -72,8 +72,8 @@ def create_model_dir(model_root_dir, **kwargs):
     models_dir = njoin(model_root_dir, dirname)
     instance = get_instance(models_dir, 'model=')
     model_dir = njoin(models_dir, f'model={instance}')    
-    if not os.path.isdir(models_dir): os.makedirs(models_dir)
-    if not os.path.isdir(model_dir): os.makedirs(model_dir)     
+    #if not os.path.isdir(models_dir): os.makedirs(models_dir)
+    #if not os.path.isdir(model_dir): os.makedirs(model_dir)     
        
     return models_dir, model_dir      
 

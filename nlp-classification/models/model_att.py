@@ -596,7 +596,7 @@ class V3FNSSelfAttention(nn.Module):
 
         # embed query/key into lower dim
         if self.beta < 2:
-            self.d_intrinsic = config.d_intrinsic
+            self.d_intrinsic = config.d_intrinsic  # should still be self.head_dim
             #self.d_intrinsic = self.head_dim
             self.query = nn.Linear(config.hidden_size, self.d_intrinsic * self.num_heads)
             if not self.qk_share:
@@ -657,7 +657,7 @@ class V3FNSSelfAttention(nn.Module):
         # pairwise Euclidean distance (H,BN,D) @ (H,D,BN)
         eps = 1e-7  # for limiting the divergence from acos
         if not self.qk_share:
-            key_vectors = self.key(hidden_states) 
+            key_vectors = self.key(hidden_states)
             if beta < 2:
                 key_vectors = F.normalize(key_vectors.view(batch_size, seq_len, num_heads, d_intrinsic).transpose(1, 2), p=2, dim=-1)
             else:      
@@ -668,7 +668,8 @@ class V3FNSSelfAttention(nn.Module):
         else:
             #g_dist = torch.cdist(query_vectors, query_vectors, p=2)  # (H,B,N,N)      
             # directly get geodesic distance
-            g_dist = torch.acos(torch.clamp(query_vectors @ query_vectors.transpose(-2, -1), -1+1, 1-eps)) * self.sphere_radius                        
+            pass
+            g_dist = torch.acos(torch.clamp(query_vectors @ query_vectors.transpose(-2, -1), -1+eps, 1-eps)) * self.sphere_radius                        
         #print(f'Min and max distance: {g_dist.min()}, {g_dist.max()}')  
         #q = torch.tensor([0, 0.2, 0.4, 0.6, 0.8, 1])
         #print(f'Distance percentiles: {torch.quantile(g_dist.flatten(), q)}')

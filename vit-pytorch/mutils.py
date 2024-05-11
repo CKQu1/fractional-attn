@@ -48,9 +48,10 @@ def get_instance(dir, *args):  # for enumerating each instance of training
     else:
         return 0
 
+# create model_dir which determines the instance for the specific model/training setting
 def create_model_dir(model_root_dir, **kwargs):
-    model_name = kwargs.get('model_name', 'fnsformer')    
-    dataset_name = kwargs.get('dataset_name', 'imdb')
+    model_name = kwargs.get('model_name', 'fnsvit')    
+    dataset_name = kwargs.get('dataset_name', 'cifar10')
     if '_' in dataset_name:
         dataset_code = ''.join([s[0] for s in dataset_name.split('_')])
     else:
@@ -61,13 +62,13 @@ def create_model_dir(model_root_dir, **kwargs):
 
     dirname = f'{model_name}-{dataset_code}'
     dirname += '-qqv' if qk_share is True else '-qkv'  # qk weight-tying
-    if 'fnsformer' in model_name:                 
+    if model_name == 'fnsvit':                 
         beta = kwargs.get("beta", 1)
         bandwidth = kwargs.get("bandwidth", 1)             
         dirname += f'-beta={beta}-eps={bandwidth}'
-        if (model_name=='v2fnsformer' or model_name=='v3fnsformer') and beta < 2:
-            d_intrinsic = kwargs.get('d_intrinsic')
-            dirname += f'-dman={d_intrinsic}'
+        # if beta < 2:
+        #     d_intrinsic = kwargs.get('d_intrinsic')
+        #     dirname += f'-dman={d_intrinsic}'
     models_dir = njoin(model_root_dir, dirname)
     instance = get_instance(models_dir, 'model=')
     model_dir = njoin(models_dir, f'model={instance}')    
@@ -75,6 +76,30 @@ def create_model_dir(model_root_dir, **kwargs):
     if not os.path.isdir(model_dir): os.makedirs(model_dir)     
        
     return models_dir, model_dir      
+
+# creates structural model_root based on model/training setting
+def structural_model_root(**kwargs):
+
+    use_custom_optim = kwargs.get('use_custom_optim')
+    qk_share = kwargs.get('qk_share'); n_layers = kwargs.get('n_layers')
+    n_attn_heads = kwargs.get('n_attn_heads'); hidden_size = kwargs.get('hidden_size')
+
+    lr = kwargs.get('lr'); bs = kwargs.get('bs'); milestones = kwargs.get('milestones'); gamma = kwargs.get('gamma')
+    epochs = kwargs.get('epochs')
+
+    affix = 'qqv' if qk_share==True else 'qkv'
+    if isinstance(milestones, str):
+        milestones_str = milestones
+    else:
+        milestones_str = ','.join(str(s) for s in milestones)    
+    if use_custom_optim is True:
+        model_root = njoin(f'layers={n_layers}-heads={n_attn_heads}-hidden={hidden_size}-{affix}',
+                           f'lr={lr}-bs={bs}-milestones={milestones_str}-gamma={gamma}-epochs={epochs}')    
+    else:
+        model_root = njoin(f'layers={n_layers}-heads={n_attn_heads}-hidden={hidden_size}-{affix}',
+                           f'lr={lr}-bs={bs}-epochs={epochs}')            
+
+    return model_root       
 
 # -------------------- Main utils --------------------        
 

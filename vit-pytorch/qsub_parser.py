@@ -128,6 +128,8 @@ def command_setup_ddp(singularity_path, **kwargs):
     select = kwargs.get('select', 1)
 
     HOST_NODE_ADDR = kwargs.get('HOST_NODE_ADDR', 0)
+    # if 'master_port' in kwargs:
+    #     master_port = kwargs.get('master_port')
 
     bind_path = kwargs.get('bind_path', BPATH)
     home_path = kwargs.get('home_path', os.getcwd())
@@ -143,6 +145,7 @@ def command_setup_ddp(singularity_path, **kwargs):
         #command += f" CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.launch --nproc_per_node={ngpus}"
         #additional_command = 'run --backend=nccl'
         if select == 1:
+
             # tolerates 3 failures
             # command += f" torchrun --rdzv-backend=c10d --rdzv-endpoint=localhost:0"
             # command += f" --nnodes=1 --nproc_per_node={ngpus} --max-restarts=3"
@@ -161,6 +164,20 @@ def command_setup_ddp(singularity_path, **kwargs):
             command += f" torchrun --rdzv-backend=c10d --rdzv-endpoint=localhost:{HOST_NODE_ADDR}"
             command += f" --nnodes={select} --nproc_per_node={ngpus}"            
 
+            # command += f" torchrun --rdzv-backend=c10d --rdzv-endpoint=localhost:0"
+            # command += f" --nnodes=1 --nproc_per_node={ngpus} --max-restarts=3"
+            command += f" torchrun --standalone --nnodes=1 --nproc_per_node={ncpus}"
+            #if 'master_port' in kwargs:
+            #    command += f" --master_port={master_port}"
+        else:
+            # tolerates 3 failures
+            # command += f" torchrun --nnodes={select} --nproc_per_node={ngpus}"
+            # command += f" --max-restarts=3 --rdzv-id=$JOB_ID"
+            # command += f" --rdzv-backend=c10d --rdzv-endpoint=$HOST_NODE_ADDR"
+            command += f" torchrun --nnodes={select} --nproc_per_node={ncpus}"
+            if 'master_port' in kwargs:
+                command += f" --master_port={master_port}"            
+                
     elif ngpus == 0 and ncpus > 1:
         #python -m torch.distributed.launch --nproc_per_node=4 --use_env train_classification_imdb.py run --backend=gloo
         #additional_command = 'run --backend=gloo'
@@ -180,6 +197,19 @@ def command_setup_ddp(singularity_path, **kwargs):
               
             command += f" torchrun --rdzv-backend=c10d --rdzv-endpoint=localhost:{HOST_NODE_ADDR}"
             command += f" --nnodes={select} --nproc_per_node={ncpus}"                    
+
+            # command += f" torchrun --rdzv-backend=c10d --rdzv-endpoint=localhost:0"            
+            # command += f" --nnodes=1 --nproc_per_node={ncpus} --max-restarts=3"
+            command += f" torchrun --standalone --nnodes=1 --nproc_per_node={ncpus}"
+            # if 'master_port' in kwargs:
+            #     command += f" --master_port={master_port}"            
+        else:
+            # command += f" torchrun --nnodes={select} --nproc_per_node={ncpus}"
+            # command += f" --max-restarts=3 --rdzv-id=$JOB_ID"
+            # command += f" --rdzv-backend=c10d --rdzv-endpoint=$HOST_NODE_ADDR"    
+            command += f" torchrun --nnodes={select} --nproc_per_node={ncpus}"          
+            if 'master_port' in kwargs:
+                command += f" --master_port={master_port}"            
 
     if len(singularity_path) == 0:
         command = command[1:]

@@ -18,14 +18,15 @@ plt.rc('legend',fontsize=7)
 
 # Example:
 """
-python -i plot_results.py plot_model .droot/trained_models_v4\
+python -i plot_results.py plot_model .droot/trained_models_v6\
  v3fnsformer-imdb-qqv-beta=1.0-eps=1-dman=5,v3fnsformer-imdb-qqv-beta=2.0-eps=1,dpformer-imdb-qqv\
- 0,0,0 imdb eval_loss,eval_accuracy,eval_f1_score
+ 0,0,0 imdb eval_loss,eval_accuracy
 """
 def plot_model(model_root_dir, dirnames, instances, 
                datasets, metrics, display=False):
     global df, df_setting, df_filtered, fig_file, axs
     global model_dir
+    global config_dict
     # for local_keys in ['dirnames', 'datasets', 'metrics']:
     #     locals()[local_keys] = str_to_ls(locals()[local_keys])
 
@@ -35,6 +36,8 @@ def plot_model(model_root_dir, dirnames, instances,
     metrics = str_to_ls(metrics)
     display = str_to_bool(display)
 
+    model_root_dir = model_root_dir.replace('\\','')
+    print(f'model_root_dir = {model_root_dir}')
     print(metrics)
 
     nrows, ncols = len(datasets), len(metrics)
@@ -44,6 +47,16 @@ def plot_model(model_root_dir, dirnames, instances,
     if axs.ndim == 1:
         axs = np.expand_dims(axs, axis=0)
 
+    # get model config
+    qk_share = 'qkv' if 'qkv' in model_root_dir else 'qqv'
+    config_dict = {}
+    for ls in model_root_dir.split('/'):
+        for ele in ls.split('-'):
+            if '=' in ele:
+                key, val = ele.split('=')
+                config_dict[key] = val
+
+    #quit()  # delete
     model_names = []
     for idx, dataset in tqdm(enumerate(datasets)):
         for jdx, dirname in enumerate(dirnames): 
@@ -84,7 +97,9 @@ def plot_model(model_root_dir, dirnames, instances,
         plt.show()
     else:
         if not isdir(FIGS_DIR): makedirs(FIGS_DIR)
-        fig_file = '-'.join(model_names)+'_'+'-'.join(datasets)
+        layers, heads, hidden = int(config_dict['layers']), int(config_dict['heads']), int(config_dict['hidden'])
+        fig_file = f'layers={layers}-heads={heads}-hidden={hidden}-'
+        fig_file += '-'.join(model_names)+'_'+'-'.join(datasets)
         if isfile(njoin(FIGS_DIR, fig_file)):
             version = len([fname for fname in os.listdir(FIGS_DIR) if fname==fig_file])
             fig_file += f'-v{version}'

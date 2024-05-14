@@ -41,6 +41,11 @@ python -i main.py --n_layers=1 --n_attn_heads=2 --model_name=v3fnsformer --beta=
  --max_len=256 --max_steps=2 --logging_steps=2 --save_steps=2 --eval_steps=2\
  --divider=1 --warmup_steps=0 --grad_accum_step=1 --dataset_name=rotten_tomatoes\
  --model_root=.droot/speedtest
+
+torchrun --nnodes=1 --nproc_per_node=4 main.py --n_layers=1 --n_attn_heads=2 --model_name=v3fnsformer --beta=1.5\
+ --max_len=256 --max_steps=2 --logging_steps=2 --save_steps=2 --eval_steps=2\
+ --divider=1 --warmup_steps=0 --grad_accum_step=1 --dataset_name=rotten_tomatoes\
+ --model_root=.droot/speedtest
 """
 
 """
@@ -62,11 +67,11 @@ python -i main.py --n_layers=1 --n_attn_heads=2 --model_name=dpformer\
 PBS_O_WORKDIR="/project/frac_attn/fractional-attn/fnsformer-module-default-trainer"
 cpath="/project/frac_attn/fractional-attn/built_containers/FaContainer_v3.sif"
 
-singularity exec --home ${PBS_O_WORKDIR} ${cpath} torchrun --nproc_per_node=4 main.py\
- --n_layers=1 --n_attn_heads=2 --model_name=fnsformer --beta=0.5\
+singularity exec --home ${PBS_O_WORKDIR} ${cpath} torchrun --nnodes=1 --nproc_per_node=4 main.py\
+ --n_layers=1 --n_attn_heads=2 --model_name=v3fnsformer --beta=1.5\
  --max_len=128 --max_steps=10 --logging_steps=10 --save_steps=10 --eval_steps=10\
  --divider=1 --warmup_steps=0 --grad_accum_step=4 --dataset_name=imdb\
- --model_root=.droot/fnsformer_speedtest    
+ --model_root=.droot/speedtest    
 
 # this setting is 4m25s per step
 torchrun --rdzv-backend=c10d --rdzv-endpoint=localhost:0 --nnodes=1 --nproc_per_node=4 main.py\
@@ -128,19 +133,18 @@ if __name__ == '__main__':
     dev = torch.device(f"cuda:{torch.cuda.device_count()}"
                        if torch.cuda.is_available() else "cpu")   
     device_name = "GPU" if dev.type != "cpu" else "CPU"
-    train_with_ddp = torch.distributed.is_available() and args.train_with_ddp
+    ddp = torch.distributed.is_available() and args.train_with_ddp
     global_rank = None
-    if train_with_ddp:
+    if ddp:
         world_size = int(os.environ["WORLD_SIZE"])
         global_rank = int(os.environ["RANK"])
         print(f"global_rank: {global_rank}")    
         print(f"Device in use: {dev}.")
         device_total = world_size
-        #backend = "gloo" if dev.type != "cpu" else "nccl"
-        #import torch.distributed as dist
-        #dist.init_process_group(backend=backend)        
-    else:
+        master_process = global_rank == 0 # this process will do logging, checkpointing etc.             
+    else:        
         device_total = 1       
+        master_process = True
 
     args.model_name = args.model_name.lower()
     assert args.model_name in MODEL_NAMES, f'{args.model_name} does not exist in {MODEL_NAMES}'
@@ -184,7 +188,7 @@ if __name__ == '__main__':
     # save tokenized dataset
     tokenized_dataset_dir = njoin(DROOT, "DATASETS", f"tokenized_{args.dataset_name}")
     if not isdir(tokenized_dataset_dir):         
-        print("Downloading data!") if global_rank == 0 or not train_with_ddp else None
+        print("Downloading data!") if master_process else None
         # create cache for dataset
         dataset = get_dataset(args.dataset_name, njoin(DROOT, "DATASETS"))
 
@@ -196,7 +200,7 @@ if __name__ == '__main__':
         tokenized_dataset.save_to_disk(tokenized_dataset_dir)
         del dataset  # alleviate memory
     else:        
-        print("Data downloaded, loading from local now! \n") if global_rank == 0 or not train_with_ddp else None
+        print("Data downloaded, loading from local now! \n") if master_process else None
         tokenized_dataset = load_from_disk(tokenized_dataset_dir)
     if args.dataset_name != 'imdb':
         tokenized_dataset = process_dataset_cols(tokenized_dataset)
@@ -249,6 +253,7 @@ if __name__ == '__main__':
         attn_setup['beta'] = args.beta      
         attn_setup['bandwidth'] = args.bandwidth   
         if (args.model_name=='v2fnsformer' or args.model_name=='v3fnsformer') and args.beta < 2:
+
             config.d_intrinsic = int(args.hidden_size/args.n_attn_heads)  # head_dim
             config.sphere_radius = ((np.pi**(1/config.d_intrinsic)-1)/np.pi)   
             #config.sphere_radius = 1
@@ -269,7 +274,7 @@ if __name__ == '__main__':
     model = FNSFormerForSequenceClassification(config, **attn_setup).to(dev)    
     ########## add other model options here ##########
 
-    if global_rank == 0 or not train_with_ddp:
+    if master_process:
         models_dir, model_dir = create_model_dir(model_root, **attn_setup)
     
     warmup_steps = args.max_step if args.warmup_steps is None else args.warmup_steps
@@ -331,7 +336,7 @@ if __name__ == '__main__':
 
     training_args = TrainingArguments(**training_args_dict)
     steps_per_train_epoch = int(len(train_dataset)/(training_args.per_device_train_batch_size*device_total*training_args.gradient_accumulation_steps ))    
-    if global_rank == 0 or not train_with_ddp:
+    if master_process:
         print("-"*25)
         print(training_args_dict)
         if args.use_custom_optim is True:
@@ -394,7 +399,7 @@ if __name__ == '__main__':
         trainer_kwargs['optimizers'] = (optimizer, scheduler)     
         trainer = CustomTrainer(**trainer_kwargs)
 
-        if global_rank == 0 or not train_with_ddp:
+        if master_process:
             print("-"*25)
             print('CustomTrainer initialized!')
             print("-"*25 + "\n")
@@ -405,7 +410,7 @@ if __name__ == '__main__':
         # trainer_kwargs['config'] = config
         # trainer = MyTrainer(**trainer_kwargs)    
          
-        if global_rank == 0 or not train_with_ddp:
+        if master_process:
             print("-"*25)
             print('HF Trainer initialized!')
             print("-"*25 + "\n")             
@@ -441,27 +446,27 @@ if __name__ == '__main__':
         run_perf = run_perf[top_names]
         run_perf.to_csv(njoin(model_dir, "run_performance.csv"))
 
-    #if global_rank == 0 or not train_with_ddp:
-    model_settings = attn_setup # model_settings['sparsify_type'] = args.sparsify_type
-    model_settings['train_secs'] = train_secs
-    model_settings.update(trainer.state.log_history[-1])
-    final_perf = pd.DataFrame()
-    final_perf = final_perf.append(model_settings, ignore_index=True)    
-    final_perf.to_csv(njoin(model_dir, "final_performance.csv"))
-    train_settings = pd.DataFrame(columns=["lr", "lr_scheduler_type", "train_bs", "eval_bs",
-                                           "epochs", "weight_decay", "eval_strat", "eval_steps",
-                                           "log_strat", "logging_steps", "save_steps",                          
-                                           "seed", "warmup_steps",  "grad_accum_step", 
-                                           "milestones", "gamma"], index=range(1))
-    train_settings.iloc[0] = [args.lr, args.lr_scheduler_type, args.train_bs, args.eval_bs,
-                              args.epochs, args.weight_decay, args.eval_strat, args.eval_steps,
-                              args.log_strat, args.logging_steps, args.save_steps, 
-                              args.seed, args.warmup_steps, args.grad_accum_step, args.milestones,
-                              args.gamma]
-    train_settings.to_csv(njoin(model_dir, "train_setting.csv"))
+    if master_process:
+        model_settings = attn_setup # model_settings['sparsify_type'] = args.sparsify_type
+        model_settings['train_secs'] = train_secs
+        model_settings.update(trainer.state.log_history[-1])
+        final_perf = pd.DataFrame()
+        final_perf = final_perf.append(model_settings, ignore_index=True)    
+        final_perf.to_csv(njoin(model_dir, "final_performance.csv"))
+        train_settings = pd.DataFrame(columns=["lr", "lr_scheduler_type", "train_bs", "eval_bs",
+                                            "epochs", "weight_decay", "eval_strat", "eval_steps",
+                                            "log_strat", "logging_steps", "save_steps",                          
+                                            "seed", "warmup_steps",  "grad_accum_step", 
+                                            "milestones", "gamma"], index=range(1))
+        train_settings.iloc[0] = [args.lr, args.lr_scheduler_type, args.train_bs, args.eval_bs,
+                                args.epochs, args.weight_decay, args.eval_strat, args.eval_steps,
+                                args.log_strat, args.logging_steps, args.save_steps, 
+                                args.seed, args.warmup_steps, args.grad_accum_step, args.milestones,
+                                args.gamma]
+        train_settings.to_csv(njoin(model_dir, "train_setting.csv"))
 
-    # save final model
-    trainer.save_model(njoin(model_dir, "final_model"))
+        # save final model
+        trainer.save_model(njoin(model_dir, "final_model"))
 
-    print('\n')
-    print('---------- Model trained and saved! ----------')
+        print('\n')
+        print('---------- Model trained and saved! ----------')

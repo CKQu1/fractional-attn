@@ -312,9 +312,9 @@ if __name__ == '__main__':
 
     # poor man's data loader
     if dataset == 'iwslt14': 
-        # Define tokenizers
-        tokenizer_src = AutoTokenizer.from_pretrained('Helsinki-NLP/opus-mt-de-en')  # German tokenizer
-        tokenizer_trg = AutoTokenizer.from_pretrained('Helsinki-NLP/opus-mt-en-de')  # English tokenizer
+        # Define tokenizers (using these for now...)
+        tokenizer_src = AutoTokenizer.from_pretrained('dbmdz/german-gpt2')  # German tokenizer
+        tokenizer_trg = AutoTokenizer.from_pretrained('openai-community/gpt2')  # English tokenizer
         # Get pad token ids and vocab sizes
         config["src_vocab_size"] = tokenizer_src.vocab_size
         config["src_pad_token_id"] = tokenizer_src.pad_token_id
@@ -362,7 +362,7 @@ if __name__ == '__main__':
             encoder_mask, decoder_mask = encoder_mask.pin_memory().to(device, non_blocking=True), decoder_mask.pin_memory().to(device, non_blocking=True)
         else:
             x, y, encoder_mask, decoder_mask = x.to(device), y.to(device), encoder_mask.to(device), decoder_mask.to(device)
-        return x, y        
+        return x, y, encoder_mask, decoder_mask    
 
     # init these up here, can override if init_from='resume' (i.e. from a checkpoint)
     iter_num = 0
@@ -471,8 +471,8 @@ if __name__ == '__main__':
 
     # helps estimate an arbitrarily accurate loss over either split using many batches
     def greedy_decode(model, source, source_mask, tokenizer_trg, max_len, device):
-        sos_idx = tokenizer_trg.token_to_id('[SOS]')
-        eos_idx = tokenizer_trg.token_to_id('[EOS]')
+        sos_idx = tokenizer_trg.bos_token_id
+        eos_idx = tokenizer_trg.eos_token_id
 
         # Precompute the encoder output and reuse it for every step
         encoder_output = model.encoder(source, source_mask)
@@ -483,12 +483,11 @@ if __name__ == '__main__':
                 break
 
             # build causal mask for target 
-            decoder_mask = torch.triu(torch.ones((1, decoder_input.size(1), decoder_input.size(1))), diagonal=1).type(torch.int)
-            decoder_mask = (decoder_mask == 0).type_as(source_mask).to(device)
+            decoder_mask = torch.stack([(source_mask[i,0,0,:] != 0).unsqueeze(0).int() & causal_mask(config["max_length"]) for i in range(source_mask.shape[0])]) # (B,1,N,N)
+            decoder_mask = decoder_mask.type_as(source_mask).to(device)
 
             # calculate output
-            out = model.decode(encoder_output, source_mask, decoder_input, decoder_mask)
-
+            out = model.decode(decoder_input, encoder_output, source_mask, decoder_mask)
             # get next token
             prob = model.project(out[:, -1])
             _, next_word = torch.max(prob, dim=1)
@@ -511,14 +510,13 @@ if __name__ == '__main__':
             predicted = []
             expected = []
             for k in range(eval_iters):
-                X, Y = get_batch(split)
+                X, Y, encoder_mask, decoder_mask = get_batch(split)
                 with ctx:
                     #logits, loss = model(X, Y)
-                    logits, _ = model(X)
+                    logits, _, _, _ = model(X, encoder_mask, decoder_mask)
                     loss = loss_fn(logits, Y)
-                    # Compute BLEU
-                    X_mask = (X != config["src_pad_token_id"]).unsqueeze(0).unsqueeze(0).int() # (1,1,seq_len) ?
-                    model_out = greedy_decode(model, X, X_mask, tokenizer_trg, config["max_length"], device)
+                    # Generate sentence
+                    model_out = greedy_decode(model, X, encoder_mask, tokenizer_trg, config["max_length"], device)
                     model_out_text = tokenizer_trg.decode(model_out.detach().cpu().numpy())
                     predicted.append(model_out_text)
                     expected.append(tokenizer_trg.decode(Y.detach().cpu().numpy()))
@@ -551,7 +549,7 @@ if __name__ == '__main__':
         wandb.init(project=wandb_project, name=wandb_run_name, config=config)
     
     # training loop
-    X, Y = get_batch('train') # fetch the very first batch
+    X, Y, encoder_mask, decoder_mask = get_batch('train') # fetch the very first batch
     t0 = time.time()
     local_iter_num = 0 # number of iterations in the lifetime of this process
     raw_model = model.module if ddp else model # unwrap DDP container if needed
@@ -568,20 +566,20 @@ if __name__ == '__main__':
 
         # evaluate the loss on train/val sets and write checkpoints
         if iter_num % eval_interval == 0 and master_process:
-            losses, accs = estimate_loss()
-            print(f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}, train acc {accs['train']:.4f}, val acc {accs['val']:.4f}")
+            losses, bleu = estimate_loss()
+            print(f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}, train bleu {bleu['train']:.4f}, val bleu {bleu['val']:.4f}")
             if wandb_log: # CHANGE
                 wandb.log({
                     "iter": iter_num,
                     "train/loss": losses['train'],
                     "val/loss": losses['val'],
-                    "train/acc": accs['train'],
-                    "val/acc": accs['val'],
+                    "train/bleu": bleu['train'],
+                    "val/bleu": bleu['val'],
                     "lr": lr
                     #"mfu": running_mfu*100, # convert to percentage
                 })
             else:
-                metrics_ls.append([iter_num, lr, losses['train'].item(), losses['val'].item(), accs['train'].item(), accs['val'].item()])
+                metrics_ls.append([iter_num, lr, losses['train'].item(), losses['val'].item(), bleu['train'].item(), bleu['val'].item()])
 
             if losses['val'] < best_val_loss or always_save_checkpoint:
                 best_val_loss = losses['val']
@@ -610,12 +608,12 @@ if __name__ == '__main__':
                 model.require_backward_grad_sync = (micro_step == gradient_accumulation_steps - 1)
             with ctx:
                 #logits, loss = model(X, Y)
-                logits, _, _, _ = model(X)
-                loss = loss_fn(logits, Y) # CHECK 
+                logits, _, _, _ = model(X, encoder_mask, decoder_mask)
+                loss = loss_fn(logits, Y) 
                 # loss = loss_fn(logits.view(-1, config["trg_vocab_size"]), Y.view(-1)) 
                 loss = loss / gradient_accumulation_steps # scale the loss to account for gradient accumulation
             # immediately async prefetch next batch while model is doing the forward pass on the GPU
-            X, Y = get_batch('train')
+            X, Y, encoder_mask, decoder_mask = get_batch('train')
             # backward pass, with gradient scaling if training in fp16
             scaler.scale(loss).backward()
         # clip the gradient

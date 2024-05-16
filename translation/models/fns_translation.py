@@ -4,20 +4,6 @@ from torch import nn
 from torch.nn import functional as F
 
 
-def create_position_ids_from_input_ids(input_ids, padding_idx):
-    """
-    Replace non-padding symbols with their position numbers. Position numbers begin at padding_idx+1. Padding symbols
-    are ignored. This is modified from fairseq's `utils.make_positions`.
-    Args:
-        x: torch.Tensor x:
-    Returns: torch.Tensor
-    """
-    # The series of casts and type-conversions here are carefully balanced to both work with ONNX export and XLA.
-    mask = input_ids.ne(padding_idx).int()
-    incremental_indices = torch.cumsum(mask, dim=1).type_as(mask) * mask
-    return incremental_indices.long() + padding_idx
-
-
 # https://github.com/tintn/vision-transformer-from-scratch/blob/main/vit.py
 class NewGELUActivation(nn.Module):
     """
@@ -366,7 +352,7 @@ class FNSEncoder(nn.Module):
 
     def forward(self, x, attention_mask=None, output_attentions=False):
         # Create the position ids from the input token ids. Any padded tokens remain padded.
-        position_ids = create_position_ids_from_input_ids(x, self.padding_idx).to(x.device)
+        position_ids = torch.arange(0, x.shape[-1]).to(x.device)
         position_embeddings = self.positional_embedding(position_ids)
         token_embeddings = self.token_embedding(x)
         # Dropout 
@@ -413,7 +399,7 @@ class FNSDecoder(nn.Module):
         
     def forward(self, x, embedding_output_states, src_mask=None, trg_mask=None, output_attentions=False):
         # Create the position ids from the input token ids. Any padded tokens remain padded.
-        position_ids = create_position_ids_from_input_ids(x, self.padding_idx).to(x.device)
+        position_ids = torch.arange(0, x.shape[-1]).to(x.device)
         position_embeddings = self.positional_embedding(position_ids)
         token_embeddings = self.token_embedding(x)
         # Dropout 

@@ -71,33 +71,28 @@ def create_model_dir(model_root_dir, **kwargs):
         #     dirname += f'-dman={d_intrinsic}'
     models_dir = njoin(model_root_dir, dirname)
     instance = get_instance(models_dir, 'model=')
-    model_dir = njoin(models_dir, f'model={instance}')    
-    #if not os.path.isdir(models_dir): os.makedirs(models_dir)
-    #if not os.path.isdir(model_dir): os.makedirs(model_dir)     
+    model_dir = njoin(models_dir, f'model={instance}')        
        
     return models_dir, model_dir      
 
 # creates structural model_root based on model/training setting
 def structural_model_root(**kwargs):
 
-    use_custom_optim = kwargs.get('use_custom_optim')
-    qk_share = kwargs.get('qk_share'); n_layers = kwargs.get('n_layers')
-    n_attn_heads = kwargs.get('n_attn_heads'); hidden_size = kwargs.get('hidden_size')
+    PATH_CONFIG_DICT = {'layers': 'n_layers', 'heads': 'n_attn_heads', 'hidden': 'hidden_size'}
 
-    lr = kwargs.get('lr'); bs = kwargs.get('bs'); milestones = kwargs.get('milestones'); gamma = kwargs.get('gamma')
-    epochs = kwargs.get('epochs')
-
+    qk_share = kwargs.get('qk_share', False)
     affix = 'qqv' if qk_share==True else 'qkv'
-    if isinstance(milestones, str):
-        milestones_str = milestones
-    else:
-        milestones_str = ','.join(str(s) for s in milestones)    
-    if use_custom_optim is True:
-        model_root = njoin(f'layers={n_layers}-heads={n_attn_heads}-hidden={hidden_size}-{affix}',
-                           f'lr={lr}-bs={bs}-milestones={milestones_str}-gamma={gamma}-epochs={epochs}')    
-    else:
-        model_root = njoin(f'layers={n_layers}-heads={n_attn_heads}-hidden={hidden_size}-{affix}',
-                           f'lr={lr}-bs={bs}-epochs={epochs}')            
+
+    # lr = kwargs.get('lr'); bs = kwargs.get('bs'); epochs = kwargs.get('epochs')
+    
+    model_root = ''
+    for metric_name in PATH_CONFIG_DICT.keys():
+        metric = PATH_CONFIG_DICT[metric_name]
+        if metric in kwargs:
+            metric_val = kwargs.get(metric)
+            model_root += f'{metric_name}={metric_val}-'
+    model_root += affix
+    #model_root = njoin(model_root, f'lr={lr}-bs={bs}-epochs={epochs}')            
 
     return model_root       
 

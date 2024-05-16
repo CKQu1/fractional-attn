@@ -79,7 +79,7 @@ if __name__ == '__main__':
     parser.add_argument('--eval_iters', default=200, type=int)
     parser.add_argument('--eval_only', default=False, type=bool)
     parser.add_argument('--always_save_checkpoint', default=True, type=bool)    
-    parser.add_argument('--model_root', default=njoin(DROOT, 'trained_models'), type=str, help='root dir of storing the model')
+    parser.add_argument('--model_root', default='', type=str, help='root dir of storing the model')
     
     parser.add_argument("--save_model_every", default=0, type=int)
     parser.add_argument("--exp_name", default='image-task', type=str)
@@ -103,7 +103,7 @@ if __name__ == '__main__':
     parser.add_argument('--divider', default=1, type=int)  # downsizing the test dataset    
 
     # Config settings
-    # parser.add_argument('--qk_share', default=False, type=bool)
+    parser.add_argument('--qk_share', default=False, type=bool)
     parser.add_argument('--patch_size', default=4, type=int)
     parser.add_argument('--hidden_size', default=48, type=int)
     parser.add_argument('--n_layers', default=1, type=int)
@@ -168,7 +168,7 @@ if __name__ == '__main__':
     assert config['intermediate_size'] == 4 * config['hidden_size']
     assert config['image_size'] % config['patch_size'] == 0
 
-    attn_setup = {'qk_share': False}
+    attn_setup = {'qk_share': args.qk_share}
     attn_setup['model_name'] = args.model_name
     attn_setup['dataset_name'] = args.dataset_name    
     if args.model_name == 'fnsvit':
@@ -266,13 +266,9 @@ if __name__ == '__main__':
     
     if args.model_root == '':
         model_root = structural_model_root(qk_share=args.qk_share, n_layers=args.n_layers,
-                                           n_attn_heads=args.n_attn_heads, hidden_size=args.hidden_size,
-                                           lr=args.lr, bs=args.train_bs, 
-                                           use_custom_optim=args.use_custom_optim,
-                                           milestones=args.milestones, gamma=args.gamma,
-                                           epochs=args.epochs                                               
+                                           n_attn_heads=args.n_attn_heads, hidden_size=args.hidden_size  # lr=args.lr, bs=args.train_bs,                                                                                          
                                            )       
-        model_root = njoin(DROOT, 'ddp_formers', model_root)
+        model_root = njoin(DROOT, model_root)
     else:
         model_root = args.model_root  
     models_dir, out_dir = create_model_dir(model_root, **attn_setup)   
@@ -321,8 +317,8 @@ if __name__ == '__main__':
         else:
             data = testloader
         ix = torch.randint(len(data), (batch_size,))
-        x = torch.stack([trainloader.dataset[i][0] for i in ix])
-        y = torch.tensor([testloader.dataset[i][1] for i in ix])
+        x = torch.stack([data.dataset[i][0] for i in ix])
+        y = torch.tensor([data.dataset[i][1] for i in ix])
         if device_type == 'cuda':
             # pin arrays x,y, which allows us to move them to GPU asynchronously (non_blocking=True)
             x, y = x.pin_memory().to(device, non_blocking=True), y.pin_memory().to(device, non_blocking=True)

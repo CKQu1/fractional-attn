@@ -14,7 +14,7 @@ from mutils import njoin, str_to_bool, str_to_ls, create_model_dir, convert_trai
 font_type = {'family' : 'sans-serif'}
 plt.rc('font', **font_type)
 plt.rc('legend',fontsize=7)
-lwidth = 0.5
+lwidth = 0.35
 # ------------------------------------------
 
 # Example:
@@ -22,10 +22,22 @@ lwidth = 0.5
 python -i plot_results.py plot_model .droot/formers_trained
 """
 def plot_model(model_root_dir, dirnames, instances, 
-               datasets, metrics, display=False):
+               datasets, metrics, 
+               mod_rows=5,
+               display=False):
+    
+    """
+    - model_root_dir (str): the root dir of models performance saved
+    - dirnames (str): the dirnames of the models
+    - instances (str): the instance of training
+    - mod_rows (int): number for modding df_filtered
+    - display (bool): whether to display the figure
+    """
+
     global df, df_setting, df_filtered, fig_file, axs
     global model_dir
     global config_dict, model_dict
+    global metric_plot
     # for local_keys in ['dirnames', 'datasets', 'metrics']:
     #     locals()[local_keys] = str_to_ls(locals()[local_keys])
 
@@ -34,6 +46,8 @@ def plot_model(model_root_dir, dirnames, instances,
     instances = str_to_ls(instances)
     metrics = str_to_ls(metrics)
     display = str_to_bool(display)
+
+    mod_rows = int(mod_rows)
 
     model_root_dir = model_root_dir.replace('\\','')
     print(f'model_root_dir = {model_root_dir}')
@@ -65,6 +79,7 @@ def plot_model(model_root_dir, dirnames, instances,
             #df_setting = pd.read_csv(njoin(model_dir,'final_performance.csv'))        
             for kdx, metric in enumerate(metrics):
                 df_filtered = df[df[metric].notna()]
+                df_filtered = df_filtered.iloc[::mod_rows]
 
                 model_name = NAMES_DICT[dirname.split('-')[0]]
                 if model_name not in model_names:

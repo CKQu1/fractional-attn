@@ -142,7 +142,7 @@ def command_setup_ddp(singularity_path, **kwargs):
         if select == 1:
             # command += f" torchrun --rdzv-backend=c10d --rdzv-endpoint=localhost:0"
             # command += f" --nnodes=1 --nproc_per_node={ngpus} --max-restarts=3"
-            command += f" torchrun --nnodes=1 --nproc_per_node={ncpus}"
+            command += f" torchrun --standalone --nnodes=1 --nproc_per_node={ncpus}"
         else:
             # tolerates 3 failures
             # command += f" torchrun --nnodes={select} --nproc_per_node={ngpus}"
@@ -155,7 +155,7 @@ def command_setup_ddp(singularity_path, **kwargs):
         if select == 1:
             # command += f" torchrun --rdzv-backend=c10d --rdzv-endpoint=localhost:0"            
             # command += f" --nnodes=1 --nproc_per_node={ncpus} --max-restarts=3"
-            command += f" torchrun --nnodes=1 --nproc_per_node={ncpus}"
+            command += f" torchrun --standalone --nnodes=1 --nproc_per_node={ncpus}"
         else:
             # command += f" torchrun --nnodes={select} --nproc_per_node={ncpus}"
             # command += f" --max-restarts=3 --rdzv-id=$JOB_ID"

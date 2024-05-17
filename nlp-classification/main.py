@@ -274,8 +274,10 @@ if __name__ == '__main__':
     model = FNSFormerForSequenceClassification(config, **attn_setup).to(dev)    
     ########## add other model options here ##########
 
+    models_dir, model_dir = create_model_dir(model_root, **attn_setup)
     if master_process:
-        models_dir, model_dir = create_model_dir(model_root, **attn_setup)
+        if not os.path.isdir(models_dir): os.makedirs(models_dir)
+        if not os.path.isdir(model_dir): os.makedirs(model_dir)                
     
     warmup_steps = args.max_step if args.warmup_steps is None else args.warmup_steps
     training_args_dict = {"output_dir": model_dir,                         
@@ -437,16 +439,16 @@ if __name__ == '__main__':
     #trainer.train()
     train_secs = time() - t0_train
 
-    # get performance history
-    if len(trainer.state.log_history) >= 1:
-        run_perf = convert_train_history(trainer.state.log_history[:-1])
-        col_names = list(run_perf.columns)
-        top_names = ['epoch', 'step', 'learning_rate']
-        top_names += [e for e in col_names if e not in top_names]
-        run_perf = run_perf[top_names]
-        run_perf.to_csv(njoin(model_dir, "run_performance.csv"))
-
     if master_process:
+        # get performance history
+        if len(trainer.state.log_history) >= 1:
+            run_perf = convert_train_history(trainer.state.log_history[:-1])
+            col_names = list(run_perf.columns)
+            top_names = ['epoch', 'step', 'learning_rate']
+            top_names += [e for e in col_names if e not in top_names]
+            run_perf = run_perf[top_names]
+            run_perf.to_csv(njoin(model_dir, "run_performance.csv"))
+
         model_settings = attn_setup # model_settings['sparsify_type'] = args.sparsify_type
         model_settings['train_secs'] = train_secs
         model_settings.update(trainer.state.log_history[-1])

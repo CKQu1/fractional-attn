@@ -2,7 +2,7 @@ import os
 from os.path import isfile, isdir
 from time import sleep
 from constants import *
-from mutils import njoin, get_instance
+from mutils import njoin, get_instance, structural_model_root
 from qsub_parser import command_setup, qsub, job_divider
 
 def add_common_kwargs(kwargss, common_kwargs):
@@ -67,9 +67,8 @@ if __name__ == '__main__':
     #for didx, dataset_name in enumerate(dataset_names):
     for didx, dataset_name in enumerate(dataset_names[1:]):
         if not debug_mode:
-            ngpus, ncpus = 0, 16
-            #ngpus, ncpus = 0, 8
-            select = 1
+            select = 1; ngpus, ncpus = 0, 18
+            #select = 2; ngpus, ncpus = 0, 12            
             walltime = '23:59:59'
             mem = '16GB'            
 
@@ -90,17 +89,43 @@ if __name__ == '__main__':
             kwargss = [{'model_name':'dpformer'},
                        {'model_name':'v3fnsformer','beta':1.5},
                        {'model_name':'v3fnsformer','beta':2}]           
-            model_root = njoin(DROOT, 'trained_models_v5')
-            common_kwargs = {'n_layers':          1,
+                             
+            common_kwargs = {'seed':              0,
+                             'n_layers':          3,
                              'n_attn_heads':      2,
+                             'hidden_size':       768,
                              'divider':           1,
                              'warmup_steps':      0, 
                              'grad_accum_step':   2,                            
                              'train_bs':          4,
                              'eval_bs':           4,
                              'max_len':           max_lens[didx],                             
-                             'epochs':            10                                                   
+                             'epochs':            15,
+                             'lr_scheduler_type': 'constant',
+                             'lr':                5e-5,
+                             #'use_custom_optim':  True,
+                             #'gamma':             0.1,
+                             #'milestones':        '1,2',      
+                             'gamma':             0.1,
+                             'milestones':        '',                                                 
+                             'weight_decay':      0
                              }  
+            if 'qk_share' not in common_kwargs.keys():
+                qk_share = False
+            else:
+                qk_share = common_kwargs['qk_share']
+            if 'use_custom_optim' not in common_kwargs.keys():
+                use_custom_optim = False
+            else:
+                use_custom_optim = common_kwargs['use_custom_optim']            
+            model_root_dirname = structural_model_root(qk_share=qk_share, n_layers=common_kwargs['n_layers'],
+                                                       n_attn_heads=common_kwargs['n_attn_heads'], hidden_size=common_kwargs['hidden_size'],
+                                                       lr=common_kwargs['lr'], bs=common_kwargs['train_bs'], 
+                                                       use_custom_optim=use_custom_optim,
+                                                       milestones=common_kwargs['milestones'], gamma=common_kwargs['gamma'],
+                                                       epochs=common_kwargs['epochs']                                               
+                                                       )       
+            model_root = njoin(DROOT, 'formers_trained', model_root_dirname)
 
         else:     
                    
@@ -126,7 +151,8 @@ if __name__ == '__main__':
                              'max_steps':                    50,
                              'logging_steps':                10,
                              'save_steps':                   10,
-                             'eval_steps':                   10                         
+                             'eval_steps':                   10,
+                             'weight_decay':                 0                         
                              }                                                     
         
         for idx in range(len(kwargss)):

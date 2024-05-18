@@ -14,19 +14,30 @@ from mutils import njoin, str_to_bool, str_to_ls, create_model_dir, convert_trai
 font_type = {'family' : 'sans-serif'}
 plt.rc('font', **font_type)
 plt.rc('legend',fontsize=7)
+lwidth = 0.35
 # ------------------------------------------
 
 # Example:
 """
-python -i plot_results.py plot_model .droot/trained_models_v6\
- v3fnsformer-imdb-qqv-beta=1.0-eps=1-dman=5,v3fnsformer-imdb-qqv-beta=2.0-eps=1,dpformer-imdb-qqv\
- 0,0,0 imdb eval_loss,eval_accuracy
+python -i plot_results.py plot_model .droot/formers_trained
 """
 def plot_model(model_root_dir, dirnames, instances, 
-               datasets, metrics, display=False):
+               datasets, metrics, 
+               mod_rows=5,
+               display=False):
+    
+    """
+    - model_root_dir (str): the root dir of models performance saved
+    - dirnames (str): the dirnames of the models
+    - instances (str): the instance of training
+    - mod_rows (int): number for modding df_filtered
+    - display (bool): whether to display the figure
+    """
+
     global df, df_setting, df_filtered, fig_file, axs
     global model_dir
-    global config_dict
+    global config_dict, model_dict
+    global metric_plot
     # for local_keys in ['dirnames', 'datasets', 'metrics']:
     #     locals()[local_keys] = str_to_ls(locals()[local_keys])
 
@@ -35,6 +46,8 @@ def plot_model(model_root_dir, dirnames, instances,
     instances = str_to_ls(instances)
     metrics = str_to_ls(metrics)
     display = str_to_bool(display)
+
+    mod_rows = int(mod_rows)
 
     model_root_dir = model_root_dir.replace('\\','')
     print(f'model_root_dir = {model_root_dir}')
@@ -48,7 +61,7 @@ def plot_model(model_root_dir, dirnames, instances,
         axs = np.expand_dims(axs, axis=0)
 
     # get model config
-    qk_share = 'qkv' if 'qkv' in model_root_dir else 'qqv'
+    qk_share = 'qqv' if 'qqv' in model_root_dir else 'qkv'
     config_dict = {}
     for ls in model_root_dir.split('/'):
         for ele in ls.split('-'):
@@ -63,15 +76,24 @@ def plot_model(model_root_dir, dirnames, instances,
             model_dir = njoin(model_root_dir, dirname, f'model={instances[jdx]}')
             model_dir = model_dir.replace('\\','')
             df = pd.read_csv(njoin(model_dir, 'run_performance.csv'))    
-            df_setting = pd.read_csv(njoin(model_dir,'final_performance.csv'))        
+            #df_setting = pd.read_csv(njoin(model_dir,'final_performance.csv'))        
             for kdx, metric in enumerate(metrics):
                 df_filtered = df[df[metric].notna()]
+                df_filtered = df_filtered.iloc[::mod_rows]
 
                 model_name = NAMES_DICT[dirname.split('-')[0]]
                 if model_name not in model_names:
                     model_names.append(model_name)
-                if 'fnsformer' in dirname:
-                    beta, bandwidth  = df_setting.loc[0,['beta','bandwidth']]      
+                if 'fns' in dirname:
+                    #beta, bandwidth  = df_setting.loc[0,['beta','bandwidth']]    
+                    model_dict = {}
+                    for ls in dirname.split('/'):
+                        for ele in ls.split('-'):
+                            if '=' in ele:
+                                key, val = ele.split('=')
+                                model_dict[key] = val
+
+                    beta, bandwidth = model_dict['beta'], model_dict['eps']
                     model_settings = rf'$\beta$ = {beta}, $\varepsilon$ = {bandwidth}'
                     # if beta < 2:                        
                     #     d_intrinsic = df_setting.loc[0,'d_intrinsic']
@@ -81,12 +103,14 @@ def plot_model(model_root_dir, dirnames, instances,
                     metric_plot = df_filtered.loc[:,metric] * 100
                 else:
                     metric_plot = df_filtered.loc[:,metric]
-                axs[idx,kdx].plot(df_filtered.loc[:,'epoch'], metric_plot, label=model_name)
+                #axs[idx,kdx].plot(df_filtered.loc[:,'epoch'], metric_plot, label=model_name)
+                axs[idx,kdx].plot(df_filtered.loc[:,'iter'], metric_plot, label=model_name,
+                                  linewidth=lwidth)
 
                 if idx == 0:
                     axs[idx,kdx].set_title(NAMES_DICT[metric])
                 elif idx == nrows - 1:
-                    axs[idx,kdx].set_xlabel('Epoch')
+                    axs[idx,kdx].set_xlabel('Steps')
 
         axs[idx,0].set_ylabel(NAMES_DICT[dataset])
     #axs[0,0].legend(loc=7)

@@ -6,7 +6,7 @@ from torch.nn import functional as F
 import torchvision
 import torchvision.transforms as transforms
 
-from vit_pytorch.vit import ViTForClassfication
+#from vit_pytorch.vit import ViTForClassfication
 
 from constants import *
 from mutils import njoin
@@ -41,24 +41,24 @@ def save_checkpoint(experiment_name, model, epoch, base_dir="experiments"):
     torch.save(model.state_dict(), cpfile)
 
 
-def load_experiment(experiment_name, checkpoint_name="model_final.pt", base_dir="experiments"):
-    outdir = os.path.join(base_dir, experiment_name)
-    # Load the config
-    configfile = os.path.join(outdir, 'config.json')
-    with open(configfile, 'r') as f:
-        config = json.load(f)
-    # Load the metrics
-    jsonfile = os.path.join(outdir, 'metrics.json')
-    with open(jsonfile, 'r') as f:
-        data = json.load(f)
-    train_losses = data['train_losses']
-    test_losses = data['test_losses']
-    accuracies = data['accuracies']
-    # Load the model
-    model = ViTForClassfication(config)
-    cpfile = os.path.join(outdir, checkpoint_name)
-    model.load_state_dict(torch.load(cpfile))
-    return config, model, train_losses, test_losses, accuracies
+# def load_experiment(experiment_name, checkpoint_name="model_final.pt", base_dir="experiments"):
+#     outdir = os.path.join(base_dir, experiment_name)
+#     # Load the config
+#     configfile = os.path.join(outdir, 'config.json')
+#     with open(configfile, 'r') as f:
+#         config = json.load(f)
+#     # Load the metrics
+#     jsonfile = os.path.join(outdir, 'metrics.json')
+#     with open(jsonfile, 'r') as f:
+#         data = json.load(f)
+#     train_losses = data['train_losses']
+#     test_losses = data['test_losses']
+#     accuracies = data['accuracies']
+#     # Load the model
+#     model = ViTForClassfication(config)
+#     cpfile = os.path.join(outdir, checkpoint_name)
+#     model.load_state_dict(torch.load(cpfile))
+#     return config, model, train_losses, test_losses, accuracies
 
 
 def visualize_images():

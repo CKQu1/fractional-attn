@@ -138,9 +138,9 @@ python -i main.py --epochs=1
 
 python -i main.py --epochs=1 --use_faster_attn=False
 
-python -i main.py --epochs=1 --model_name=fnsvit 
+python -i main.py --epochs=1 --model_name=fnstranslation 
 
-python -i main.py --epochs=1 --model_name=fnsvit --use_faster_attn=False
+python -i main.py --epochs=1 --model_name=fnstranslation --use_faster_attn=False
 """
 
 if __name__ == "__main__":
@@ -195,6 +195,7 @@ if __name__ == "__main__":
     parser.add_argument("--divider", default=1, type=int)  # downsizing the test dataset
 
     # config settings
+    parser.add_argument("--n_attn_heads", default=2, type=int)
     parser.add_argument("--hidden_size", default=48, type=int)
     # parser.add_argument('--intermediate_size', default=4 * 48, type=int)
     parser.add_argument("--num_encoder_layers", default=1, type=int)
@@ -245,7 +246,6 @@ if __name__ == "__main__":
     # These are not hard constraints, but are used to prevent misconfigurations
     assert config["hidden_size"] % config["num_attention_heads"] == 0
     assert config["intermediate_size"] == 4 * config["hidden_size"]
-    assert config["image_size"] % config["patch_size"] == 0
 
     attn_setup = {"qk_share": args.qk_share}
     attn_setup["model_name"] = args.model_name

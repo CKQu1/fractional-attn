@@ -108,7 +108,7 @@ if __name__ == '__main__':
     parser.add_argument('--do_eval', default=True, type=bool)
 
     parser.add_argument('--milestones', default='', type=str or list) # Epoch units
-    parser.add_argument('--gamma', default=0.1, type=float) # Decay factor
+    parser.add_argument('--gamma', default=None, type=float or type(None)) # Decay factor
     # Model settings    
     #parser.add_argument('--sparsify_type', default=None, type=str)
     parser.add_argument('--qk_share', default=False, type=bool)
@@ -279,7 +279,12 @@ if __name__ == '__main__':
         if not os.path.isdir(models_dir): os.makedirs(models_dir)
         if not os.path.isdir(model_dir): os.makedirs(model_dir)                
     
-    warmup_steps = args.max_step if args.warmup_steps is None else args.warmup_steps
+    if args.lr_scheduler_type in ['linear', 'cosine']:
+        if args.warmup_steps is None:
+            warmup_steps = 100   
+        else:
+            warmup_steps = args.warmup_steps
+
     training_args_dict = {"output_dir": model_dir,                         
                           "per_device_train_batch_size": args.train_bs,
                           "per_device_eval_batch_size": args.eval_bs,
@@ -305,6 +310,7 @@ if __name__ == '__main__':
 
         if args.lr_scheduler_type is not None:            
             training_args_dict["lr_scheduler_type"] = args.lr_scheduler_type
+            #training_args_dict["lr_scheduler_kwargs"] = lr_scheduler_kwargs
 
         training_args_dict["learning_rate"] = args.lr
         training_args_dict["weight_decay"] = args.weight_decay    
@@ -456,10 +462,10 @@ if __name__ == '__main__':
         final_perf = final_perf.append(model_settings, ignore_index=True)    
         final_perf.to_csv(njoin(model_dir, "final_performance.csv"))
         train_settings = pd.DataFrame(columns=["lr", "lr_scheduler_type", "train_bs", "eval_bs",
-                                            "epochs", "weight_decay", "eval_strat", "eval_steps",
-                                            "log_strat", "logging_steps", "save_steps",                          
-                                            "seed", "warmup_steps",  "grad_accum_step", 
-                                            "milestones", "gamma"], index=range(1))
+                                               "epochs", "weight_decay", "eval_strat", "eval_steps",
+                                               "log_strat", "logging_steps", "save_steps",                          
+                                               "seed", "warmup_steps",  "grad_accum_step", 
+                                               "milestones", "gamma"], index=range(1))
         train_settings.iloc[0] = [args.lr, args.lr_scheduler_type, args.train_bs, args.eval_bs,
                                 args.epochs, args.weight_decay, args.eval_strat, args.eval_steps,
                                 args.log_strat, args.logging_steps, args.save_steps, 

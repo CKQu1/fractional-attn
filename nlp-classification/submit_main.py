@@ -60,7 +60,7 @@ if __name__ == '__main__':
     dataset_names = ['rotten_tomatoes','imdb']
     max_lens = [256, 512]    
     
-    debug_mode = False
+    debug_mode = True
     print(f'---------- debug_mode = {debug_mode} ---------- \n')
     
     kwargss_all = []
@@ -72,27 +72,13 @@ if __name__ == '__main__':
             walltime = '23:59:59'
             mem = '16GB'            
 
-            #kwargss = [{'model_name': 'dpformer'}]                            
-            #kwargss = [{'model_name': 'fnsformer', 'beta': 0.5, 'bandwidth': 1}]      
-            #kwargss = [{'model_name': 'dpformer'}, {'model_name': 'spherefnsformer', 'beta': 0.5, 'bandwidth': 1}]                   
-            # kwargss = [{'model_name': 'v2fnsformer', 'beta': 0.5, 'bandwidth': 5}, 
-            #            {'model_name': 'v2fnsformer', 'beta': 0.5, 'bandwidth': 15}]
-            #kwargss = [{'model_name': 'v2fnsformer', 'beta': 0.5, 'bandwidth': 5}, {'model_name': 'dpformer'}]
-            # int(768/2)
-            # kwargss = [{'model_name': 'v2fnsformer', 'beta': 1, 'bandwidth':15, 'd_intrinsic':10, 'qk_share':True}, 
-            #            {'model_name': 'v2fnsformer', 'beta': 1, 'bandwidth':15, 'd_intrinsic':10, 'qk_share':False},
-            #            {'model_name': 'v2fnsformer', 'beta': 2, 'bandwidth':15, 'qk_share':True},
-            #            {'model_name': 'v2fnsformer', 'beta': 2, 'bandwidth':15, 'qk_share':False},
-            #            {'model_name': 'dpformer', 'qk_share':True},
-            #            {'model_name': 'dpformer', 'qk_share':False}]
-
             kwargss = [{'model_name':'dpformer'},
                        {'model_name':'v3fnsformer','beta':1.5},
                        {'model_name':'v3fnsformer','beta':2}]           
                              
             common_kwargs = {'seed':              0,
-                             'n_layers':          3,
-                             'n_attn_heads':      2,
+                             'n_layers':          4,
+                             'n_attn_heads':      4,
                              'hidden_size':       768,
                              'divider':           1,
                              'warmup_steps':      0, 
@@ -110,14 +96,9 @@ if __name__ == '__main__':
                              'milestones':        '',                                                 
                              'weight_decay':      0
                              }  
-            if 'qk_share' not in common_kwargs.keys():
-                qk_share = False
-            else:
-                qk_share = common_kwargs['qk_share']
-            if 'use_custom_optim' not in common_kwargs.keys():
-                use_custom_optim = False
-            else:
-                use_custom_optim = common_kwargs['use_custom_optim']            
+            qk_share = False if 'qk_share' not in common_kwargs.keys() else common_kwargs['qk_share']
+            use_custom_optim = False if 'use_custom_optim' not in common_kwargs.keys() else common_kwargs['use_custom_optim']
+                                                        
             model_root_dirname = structural_model_root(qk_share=qk_share, n_layers=common_kwargs['n_layers'],
                                                        n_attn_heads=common_kwargs['n_attn_heads'], hidden_size=common_kwargs['hidden_size'],
                                                        lr=common_kwargs['lr'], bs=common_kwargs['train_bs'], 
@@ -129,31 +110,39 @@ if __name__ == '__main__':
 
         else:     
                    
-            ngpus, ncpus = 0, 2  
-            select = 2  
+            ngpus, ncpus = 0, 8  
+            select = 1  
             walltime = '23:59:59'
             mem = '12GB'                 
-
-            #kwargss = [{'model_name': 'dpformer'}]
-            #kwargss = [{"beta":0.5, "bandwidth":1}, {"beta":1, "bandwidth":1}]
-            #kwargss = [{'model_name': 'dpformer'}, {'model_name': 'spherefnsformer', 'beta': 0.5, 'bandwidth': 1}]              
+         
             kwargss = [{'model_name':'dpformer'},
                        {'model_name':'v3fnsformer','beta':1.5},
-                       {'model_name':'v3fnsformer','beta':2}]              
-            model_root = njoin(DROOT,'submit_main_check',f'ncpus={ncpus * select}_ngpus={ngpus * select}')
-            common_kwargs = {'n_layers':                     1,
-                             'n_attn_heads':                 2,
-                             'divider':                      1,
-                             'warmup_steps':                 0,                             
-                             'train_bs':                     4,
-                             'eval_bs':                      4,
-                             'max_len':                      128,                             
-                             'max_steps':                    50,
-                             'logging_steps':                10,
-                             'save_steps':                   10,
-                             'eval_steps':                   10,
-                             'weight_decay':                 0                         
-                             }                                                     
+                       {'model_name':'v3fnsformer','beta':2}]           
+                             
+            common_kwargs = {'seed':              0,
+                             'n_layers':          1,
+                             'n_attn_heads':      2,
+                             'hidden_size':       768,
+                             'divider':           1,
+                             'warmup_steps':      0, 
+                             'grad_accum_step':   2,                            
+                             'train_bs':          4,
+                             'eval_bs':           4,
+                             'max_len':           max_lens[didx],                             
+                             'epochs':            15,
+                             'lr_scheduler_type': 'cosine',
+                             'lr':                5e-5,
+                             #'use_custom_optim':  True,
+                             #'gamma':             0.1,
+                             #'milestones':        '1,2',      
+                             'gamma':             0.1,
+                             'milestones':        '',                                                 
+                             'weight_decay':      0
+                             }  
+            qk_share = False if 'qk_share' not in common_kwargs.keys() else common_kwargs['qk_share']
+            use_custom_optim = False if 'use_custom_optim' not in common_kwargs.keys() else common_kwargs['use_custom_optim'] 
+
+            model_root = njoin(DROOT, 'submit_main_check', f'ncpus={select*ncpus}-ngpus={select*ngpus}')                                                 
         
         for idx in range(len(kwargss)):
             # function automatically creates dir

@@ -86,16 +86,18 @@ def structural_model_root(**kwargs):
     epochs = kwargs.get('epochs')
 
     affix = 'qqv' if qk_share==True else 'qkv'
-    if isinstance(milestones, str):
-        milestones_str = milestones
-    else:
-        milestones_str = ','.join(str(s) for s in milestones)    
+    # if isinstance(milestones, str):
+    #     milestones_str = milestones
+    # else:
+    #     milestones_str = ','.join(str(s) for s in milestones)    
     if use_custom_optim is True:
-        model_root = njoin(f'layers={n_layers}-heads={n_attn_heads}-hidden={hidden_size}-{affix}',
-                           f'lr={lr}-bs={bs}-milestones={milestones_str}-gamma={gamma}-epochs={epochs}')    
+        # model_root = njoin(f'layers={n_layers}-heads={n_attn_heads}-hidden={hidden_size}-{affix}',
+        #                    f'lr={lr}-bs={bs}-milestones={milestones_str}-gamma={gamma}-epochs={epochs}')    
+        model_root = njoin(f'layers={n_layers}-heads={n_attn_heads}-hidden={hidden_size}-epochs={epochs}-{affix}')                              
     else:
-        model_root = njoin(f'layers={n_layers}-heads={n_attn_heads}-hidden={hidden_size}-{affix}',
-                           f'lr={lr}-bs={bs}-epochs={epochs}')            
+        # model_root = njoin(f'layers={n_layers}-heads={n_attn_heads}-hidden={hidden_size}-{affix}',
+        #                    f'lr={lr}-bs={bs}-epochs={epochs}')            
+        model_root = njoin(f'layers={n_layers}-heads={n_attn_heads}-hidden={hidden_size}-epochs={epochs}-{affix}')             
 
     return model_root    
 

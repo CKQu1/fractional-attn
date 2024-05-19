@@ -23,7 +23,7 @@ python -i plot_results.py plot_model .droot/formers_trained
 """
 def plot_model(model_root_dir, dirnames, instances, 
                datasets, metrics, 
-               mod_rows=5,
+               mod_rows=1,
                display=False):
     
     """
@@ -51,7 +51,7 @@ def plot_model(model_root_dir, dirnames, instances,
 
     model_root_dir = model_root_dir.replace('\\','')
     print(f'model_root_dir = {model_root_dir}')
-    print(metrics)
+    print(f'{metrics} \n')
 
     nrows, ncols = len(datasets), len(metrics)
     figsize = (10,2.5*nrows)
@@ -76,7 +76,8 @@ def plot_model(model_root_dir, dirnames, instances,
             model_dir = njoin(model_root_dir, dirname, f'model={instances[jdx]}')
             model_dir = model_dir.replace('\\','')
             df = pd.read_csv(njoin(model_dir, 'run_performance.csv'))    
-            #df_setting = pd.read_csv(njoin(model_dir,'final_performance.csv'))        
+            #df_setting = pd.read_csv(njoin(model_dir,'final_performance.csv'))  
+            print_metrics = {}      
             for kdx, metric in enumerate(metrics):
                 df_filtered = df[df[metric].notna()]
                 df_filtered = df_filtered.iloc[::mod_rows]
@@ -101,9 +102,11 @@ def plot_model(model_root_dir, dirnames, instances,
                     model_name += f' ({model_settings})'
                 if 'acc' in metric or 'f1' in metric:
                     metric_plot = df_filtered.loc[:,metric] * 100
+                    best_metric = metric_plot.max()
                 else:
                     metric_plot = df_filtered.loc[:,metric]
-                #axs[idx,kdx].plot(df_filtered.loc[:,'epoch'], metric_plot, label=model_name)
+                    best_metric = metric_plot.min()
+
                 axs[idx,kdx].plot(df_filtered.loc[:,'iter'], metric_plot, label=model_name,
                                   linewidth=lwidth)
 
@@ -111,6 +114,15 @@ def plot_model(model_root_dir, dirnames, instances,
                     axs[idx,kdx].set_title(NAMES_DICT[metric])
                 elif idx == nrows - 1:
                     axs[idx,kdx].set_xlabel('Steps')
+
+                print_metrics[metric] = [best_metric, metric_plot.iloc[-1]]  # best + final
+
+            # ----- Messages -----            
+            print('-'*15)    
+            print(f'{model_name} on {dataset}')
+            for kdx, metric in enumerate(metrics):
+                print(f'best and final {metric}: {print_metrics[metric]}')
+            print('-'*15 + '\n')                    
 
         axs[idx,0].set_ylabel(NAMES_DICT[dataset])
     #axs[0,0].legend(loc=7)

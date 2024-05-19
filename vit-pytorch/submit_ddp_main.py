@@ -2,7 +2,7 @@ import os
 from os.path import isfile, isdir
 from time import sleep
 from constants import *
-from mutils import njoin, get_instance
+from mutils import njoin, get_instance, structural_model_root
 from qsub_parser import command_setup_ddp, qsub, job_divider
 
 def add_common_kwargs(kwargss, common_kwargs):
@@ -81,20 +81,29 @@ if __name__ == '__main__':
         for didx, dataset_name in enumerate(dataset_names):
             if not debug_mode:
                 select = 1; ngpus, ncpus = 0, 1            
-                walltime, mem = '23:59:59', '6GB'                             
+                walltime, mem = '23:59:59', '16GB'                             
 
                 kwargss = [{'model_name':'fnsvit', 'beta': 1.5}, {'model_name':'fnsvit', 'beta': 2}, 
                            {'model_name':'dpvit'}]                                        
-                common_kwargs = {'n_layers':          3,
-                                 'n_attn_heads':      2,    
-                                 'max_iters':         25000,
+                common_kwargs = {'n_layers':          5,
+                                 'n_attn_heads':      8,   
+                                 'hidden_size':       48,
+                                 'max_iters':         2500,
                                  'eval_interval':     50,
                                  'eval_iters':        50,                     
-                                 'train_bs':          8,                                                                          
-                                 'weight_decay':      0
+                                 'train_bs':          16,                                                                          
+                                 'weight_decay':      0,
+                                 'max_lr':            5e-5,
+                                 'min_lr':            1e-6,
                                  }  
 
-                model_root = njoin(DROOT, 'formers_trained')
+                qk_share = False if 'qk_share' not in common_kwargs.keys() else common_kwargs['qk_share']
+                use_custom_optim = False if 'use_custom_optim' not in common_kwargs.keys() else common_kwargs['use_custom_optim']                                 
+
+                model_root_dirname = structural_model_root(qk_share=qk_share, n_layers=common_kwargs['n_layers'],
+                                                           n_attn_heads=common_kwargs['n_attn_heads'], hidden_size=common_kwargs['hidden_size']
+                                                           )       
+                model_root = njoin(DROOT, 'formers_trained', model_root_dirname)
 
             else:                         
                 ngpus, ncpus = 0, 8

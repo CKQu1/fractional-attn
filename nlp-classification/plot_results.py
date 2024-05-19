@@ -25,8 +25,7 @@ python -i plot_results.py plot_model .droot/trained_models_v6\
 def plot_model(model_root_dir, dirnames, instances, 
                datasets, metrics, display=False):
     global df, df_setting, df_filtered, fig_file, axs
-    global model_dir
-    global config_dict
+    global model_dir, config_dict, metric_plot    
     # for local_keys in ['dirnames', 'datasets', 'metrics']:
     #     locals()[local_keys] = str_to_ls(locals()[local_keys])
 
@@ -38,7 +37,7 @@ def plot_model(model_root_dir, dirnames, instances,
 
     model_root_dir = model_root_dir.replace('\\','')
     print(f'model_root_dir = {model_root_dir}')
-    print(metrics)
+    print(f'{metrics} \n')
 
     nrows, ncols = len(datasets), len(metrics)
     figsize = (10,2.5*nrows)
@@ -63,7 +62,8 @@ def plot_model(model_root_dir, dirnames, instances,
             model_dir = njoin(model_root_dir, dirname, f'model={instances[jdx]}')
             model_dir = model_dir.replace('\\','')
             df = pd.read_csv(njoin(model_dir, 'run_performance.csv'))    
-            df_setting = pd.read_csv(njoin(model_dir,'final_performance.csv'))        
+            df_setting = pd.read_csv(njoin(model_dir,'final_performance.csv'))   
+            print_metrics = {}     
             for kdx, metric in enumerate(metrics):
                 df_filtered = df[df[metric].notna()]
 
@@ -79,14 +79,25 @@ def plot_model(model_root_dir, dirnames, instances,
                     model_name += f' ({model_settings})'
                 if 'acc' in metric or 'f1' in metric:
                     metric_plot = df_filtered.loc[:,metric] * 100
+                    best_metric = metric_plot.max()
                 else:
                     metric_plot = df_filtered.loc[:,metric]
+                    best_metric = metric_plot.min()
                 axs[idx,kdx].plot(df_filtered.loc[:,'epoch'], metric_plot, label=model_name)
 
                 if idx == 0:
                     axs[idx,kdx].set_title(NAMES_DICT[metric])
                 elif idx == nrows - 1:
                     axs[idx,kdx].set_xlabel('Epoch')
+
+                print_metrics[metric] = [best_metric, metric_plot.iloc[-1]]  # best + final
+
+            # ----- Messages -----            
+            print('-'*15)    
+            print(f'{model_name} on {dataset}')
+            for kdx, metric in enumerate(metrics):
+                print(f'best and final {metric}: {print_metrics[metric]}')
+            print('-'*15 + '\n')                    
 
         axs[idx,0].set_ylabel(NAMES_DICT[dataset])
     #axs[0,0].legend(loc=7)

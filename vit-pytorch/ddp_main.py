@@ -68,7 +68,7 @@ if __name__ == '__main__':
     parser.add_argument('--max_lr', default=6e-4, type=float, help='max learning rate')
     parser.add_argument('--min_lr', default=6e-5, type=float, help='min learning rate')
     parser.add_argument('--train_bs', default=2, type=int)
-    parser.add_argument('--eval_bs', default=10, type=int)
+    #parser.add_argument('--eval_bs', default=10, type=int)
     parser.add_argument('--weight_decay', default=0.01, type=float)
     parser.add_argument('--beta1', default=0.9, type=float)
     parser.add_argument('--beta2', default=0.95, type=float)        
@@ -239,25 +239,7 @@ if __name__ == '__main__':
         # if not ddp, we are running on a single gpu, and one process
         master_process = True
         seed_offset = 0
-        ddp_world_size = 1
-
-    if master_process:
-        # save config
-        with open("config.json", "w") as ofile: 
-            json.dump(config, ofile)   
-        # save attn_setup
-        with open("attn_setup.json", "w") as ofile: 
-            json.dump(attn_setup, ofile)                 
-
-        print('-'*25)
-        print(f'ddp = {ddp}')
-        if ddp and args.train_with_ddp:        
-            print(f'ddp_rank = {ddp_rank}')
-            print(f'ddp_local_rank = {ddp_local_rank}')
-        print(f'ddp_world_size = {ddp_world_size}')
-        print(f'device = {device}')
-        print(f'backend = {backend}')
-        print('-'*25 + '\n')              
+        ddp_world_size = 1           
 
     # tokens_per_iter = gradient_accumulation_steps * ddp_world_size * batch_size * block_size
     # print(f"tokens per iteration will be: {tokens_per_iter:,}")
@@ -274,7 +256,37 @@ if __name__ == '__main__':
     models_dir, out_dir = create_model_dir(model_root, **attn_setup)   
 
     if master_process:
+        # makedir of out_dir
         os.makedirs(out_dir, exist_ok=True)
+
+        # save config
+        with open(njoin(out_dir,"config.json"), "w") as ofile: 
+            json.dump(config, ofile)   
+        # save attn_setup
+        with open(njoin(out_dir,"attn_setup.json"), "w") as ofile: 
+            json.dump(attn_setup, ofile)                 
+        # save train settings
+        train_settings = pd.DataFrame(columns=["max_lr", "min_lr", "batch_size", "beta1", "beta2",
+                                               "max_iters", "weight_decay", "grad_clip", "decay_lr",
+                                               "eval_interval", "log_interval", "eval_iters", "eval_only", "always_save_checkpoint",                         
+                                               "warmup_iters",  "grad_accum_step"], index=range(1))
+        train_settings.iloc[0] = [args.max_lr, args.min_lr, args.train_bs, args.beta1, args.beta2,
+                                  args.max_iters, args.weight_decay, args.grad_clip, args.decay_lr,
+                                  args.eval_interval, args.log_interval, args.eval_iters, args.eval_only, args.always_save_checkpoint,
+                                  args.warmup_iters, args.grad_accum_step
+                                  ]
+        train_settings.to_csv(njoin(out_dir, "train_setting.csv"))        
+
+
+        print('-'*25)
+        print(f'ddp = {ddp}')
+        if ddp and args.train_with_ddp:        
+            print(f'ddp_rank = {ddp_rank}')
+            print(f'ddp_local_rank = {ddp_local_rank}')
+        print(f'ddp_world_size = {ddp_world_size}')
+        print(f'device = {device}')
+        print(f'backend = {backend}')
+        print('-'*25 + '\n')           
 
     torch.manual_seed(1337 + seed_offset)
     if torch.cuda.is_available():
@@ -569,10 +581,12 @@ if __name__ == '__main__':
 
         # termination conditions
         if iter_num > max_iters:
-            #if master_process:
-            if not wandb_log:
-                df = pd.DataFrame(metrics_ls, columns=['iter', 'lr', 'train_loss', 'val_loss', 'train_acc', 'val_acc'])
-                df.to_csv(njoin(out_dir, 'run_performance.csv'))
+            if master_process:
+                if not wandb_log:
+                    df = pd.DataFrame(metrics_ls, columns=['iter', 'lr', 'train_loss', 'val_loss', 'train_acc', 'val_acc'])
+                    df.to_csv(njoin(out_dir, 'run_performance.csv'))
+                print(f'Add data saved under {out_dir}')
+            
             break
 
     if ddp:

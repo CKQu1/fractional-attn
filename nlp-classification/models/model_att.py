@@ -11,6 +11,7 @@ from dijkstra import DijkstraPQ
 from torch import nn
 from torch.nn import functional as F
 from torch.nn.functional import normalize
+from torch.nn.utils.parametrizations import orthogonal
 
 #torch.autograd.detect_anomaly(True)
 
@@ -170,7 +171,44 @@ class V3FNSAttention(nn.Module):
         )
         attn_output = self.output(self_outputs[0], hidden_states)
         outputs = (attn_output,) + self_outputs[1:]
-        return outputs          
+        return outputs        
+
+
+class OPFNSAttention(nn.Module):
+    def __init__(self, config, layer_id=0, **kwargs):
+        super().__init__()
+        error_message = f"beta = {kwargs.get('beta')} with type {type(kwargs.get('beta'))} is ill-defined!"
+        beta = kwargs.get('beta')
+        bandwidth = kwargs.get('bandwidth')
+        #print(f'V3FNSAttention beta = {beta}')
+        assert 0 < beta, error_message                           
+        self.self = OPFNSSelfAttention(config, layer_id, beta, bandwidth)
+     
+        self.output = ModelSelfOutput(config)
+
+    def forward(
+        self,
+        hidden_states,
+        attention_mask=None,
+        layer_head_mask=None,
+        is_index_masked=None,
+        is_index_global_attn=None,
+        is_global_attn=None,
+        output_attentions=False,
+    ):
+
+        self_outputs = self.self(
+            hidden_states,
+            attention_mask=attention_mask,
+            layer_head_mask=layer_head_mask,
+            is_index_masked=is_index_masked,
+            is_index_global_attn=is_index_global_attn,
+            is_global_attn=is_global_attn,
+            output_attentions=output_attentions,
+        )
+        attn_output = self.output(self_outputs[0], hidden_states)
+        outputs = (attn_output,) + self_outputs[1:]
+        return outputs            
 
 # -------------------- Original Self-Attention --------------------
 
@@ -605,6 +643,157 @@ class V3FNSSelfAttention(nn.Module):
             self.query = nn.Linear(config.hidden_size, self.embed_dim)
             if not self.qk_share:
                 self.key = nn.Linear(config.hidden_size, self.embed_dim)
+        self.value = nn.Linear(config.hidden_size, self.embed_dim)
+
+        self.dropout = config.attention_probs_dropout_prob
+
+        self.layer_id = layer_id
+        attention_window = config.attention_window[self.layer_id]
+        assert (
+            attention_window % 2 == 0
+        ), f"`attention_window` for layer {self.layer_id} has to be an even value. Given {attention_window}"
+        assert (
+            attention_window > 0
+        ), f"`attention_window` for layer {self.layer_id} has to be positive. Given {attention_window}"
+
+    def forward(
+        self,
+        hidden_states,
+        attention_mask=None,
+        layer_head_mask=None,
+        is_index_masked=None,
+        is_index_global_attn=None,
+        is_global_attn=None,
+        output_attentions=False,
+    ):
+
+        beta = self.beta
+        if beta < 2:
+            d_intrinsic = self.d_intrinsic
+
+        query_vectors = self.query(hidden_states)
+        value_vectors = self.value(hidden_states)   # (N,B,HD)
+
+        #seq_len, batch_size, embed_dim = hidden_states.size()
+        batch_size, seq_len, embed_dim = hidden_states.size()
+        num_heads, head_dim = self.num_heads, self.head_dim                
+        assert (
+            embed_dim == self.embed_dim
+        ), f"hidden_states should have embed_dim = {self.embed_dim}, but has {embed_dim}"
+
+        """
+        Embed the queries into a D-sphere via normalization, set the bandwidth as the diamter of an D-sphere
+        """   
+        # (B, N, H, D) = (batch_size, seq_len, num_heads, head_dim)        
+        if beta < 2:
+            query_vectors = F.normalize(query_vectors.view(batch_size, seq_len, num_heads, d_intrinsic).transpose(1, 2), p=2, dim=-1)
+        else:
+            query_vectors = F.normalize(query_vectors.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2), p=2, dim=-1)  # (B,N,H,D)
+        #query_vectors = query_vectors.view(batch_size, seq_len, num_heads, head_dim)                                            # (B,N,H,D)        
+        value_vectors = value_vectors.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2)                            # (B,H,N,D)                 
+
+        # pairwise Euclidean distance (H,BN,D) @ (H,D,BN)
+        eps = 1e-7  # for limiting the divergence from acos
+        if not self.qk_share:
+            key_vectors = self.key(hidden_states)
+            if beta < 2:
+                key_vectors = F.normalize(key_vectors.view(batch_size, seq_len, num_heads, d_intrinsic).transpose(1, 2), p=2, dim=-1)
+            else:      
+                key_vectors = F.normalize(key_vectors.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2), p=2, dim=-1)      # (B,H,N,D)  
+            #g_dist = torch.cdist(query_vectors, key_vectors, p=2)  # (H,B,N,N)
+            # directly get geodesic distance
+            g_dist = torch.acos(torch.clamp(query_vectors @ key_vectors.transpose(-2, -1), -1+eps, 1-eps)) * self.sphere_radius
+        else:
+            #g_dist = torch.cdist(query_vectors, query_vectors, p=2)  # (H,B,N,N)      
+            # directly get geodesic distance
+            pass
+            g_dist = torch.acos(torch.clamp(query_vectors @ query_vectors.transpose(-2, -1), -1+eps, 1-eps)) * self.sphere_radius                        
+        #print(f'Min and max distance: {g_dist.min()}, {g_dist.max()}')  
+        #q = torch.tensor([0, 0.2, 0.4, 0.6, 0.8, 1])
+        #print(f'Distance percentiles: {torch.quantile(g_dist.flatten(), q)}')
+
+        # obtained from class Model in models/model.py
+        bool_mask = (attention_mask>=0).long()
+        attention_mask_expanded = (bool_mask.unsqueeze(-1)@bool_mask.unsqueeze(1)).view(batch_size, 1, seq_len, seq_len).expand(-1, num_heads, -1, -1)      
+
+        g_dist = g_dist.masked_fill(attention_mask_expanded==0, self.mask_val)  # 1e9
+
+        if beta < 2:
+            attn_score = (1 + g_dist/self.bandwidth**0.5)**(-d_intrinsic-beta)
+        else:
+            attn_score = torch.exp((-g_dist/self.bandwidth**0.5)**(beta/(beta-1)))
+
+        attn_score_shape = attn_score.shape
+        #attn_score = attn_score.view(-1, attn_score_shape[2], attn_score_shape[3])
+        D_inv = torch.diag_embed(attn_score.sum(-1)**(-1))  # inverse of degree matrix of attn_score
+        K_tilde = D_inv @ attn_score @ D_inv
+        attn_weights = F.normalize(K_tilde,p=1,dim=3)  # can do this as the attn weights are always positive
+        attn_weights = F.dropout(attn_weights, p=self.dropout, training=self.training)   
+
+        # ---------- \begin{delete} ----------
+        # print('-'*10)
+        # print(f'batch_size: {batch_size}, seq_len: {seq_len}, embed_dim: {embed_dim}')
+        # if not self.qk_share:
+        #     print(f'key_vectors shape: {key_vectors.shape}')
+        # print(f'query_vectors shape: {query_vectors.shape}')
+        # print(f'value_vectors shape: {value_vectors.shape}')
+        # print(f'g_dist shape: {g_dist.shape}')
+        # #print(g_dist)
+        # print(f'g_dist nans: {torch.isnan(g_dist.view(-1)).sum()}')
+        # print(f'attention_mask shape: {attention_mask.shape}')        
+        # print(f'attention_mask_expanded shape: {attention_mask_expanded.shape}')        
+        # print(f'attn_score shape: {attn_score.shape}')
+        # print(f'attn_weights shape: {attn_weights.shape}')
+        # #print(attn_weights.sum(-1))
+        # print('-'*10)
+        # ---------- \end{delete} ----------  
+
+        #quit()  # delete
+
+        # -----------------------------------------------------
+        attn_output = attn_weights @ value_vectors        
+
+        attn_output = F.dropout(attn_output, p=self.dropout, training=self.training)
+        attn_output = attn_output.reshape(batch_size, seq_len,  num_heads, head_dim) # B,N,H,D        
+        assert attn_output.size() == (batch_size, seq_len, num_heads, head_dim), "Unexpected size"
+        attn_output = attn_output.transpose(0, 1).reshape(seq_len, batch_size, embed_dim).contiguous()
+        outputs = (attn_output.transpose(0, 1),) # Seq,B,D
+
+        return outputs + (global_attn_probs,) if (is_global_attn and output_attentions) else outputs      
+
+
+# -------------------- V3: OPFNS Self-Attention  --------------------
+# Orthogonal Projection: same as V3FNSSelfAttention but with orthogonal projections for QK, not for V
+
+class OPFNSSelfAttention(nn.Module):
+    def __init__(self, config, layer_id, beta, bandwidth):
+        super().__init__()
+        if config.hidden_size % config.num_attention_heads != 0:
+            raise ValueError(
+                f"The hidden size ({config.hidden_size}) is not a multiple of the number of attention "
+                f"heads ({config.num_attention_heads})"
+            )
+        self.num_heads = config.num_attention_heads
+        self.head_dim = int(config.hidden_size / config.num_attention_heads)
+        self.embed_dim = config.hidden_size
+
+        self.beta = beta
+        self.bandwidth = bandwidth
+        self.qk_share = config.qk_share
+        self.sphere_radius = config.sphere_radius
+        self.mask_val = config.mask_val
+
+        # embed query/key into lower dim
+        if self.beta < 2:
+            self.d_intrinsic = config.d_intrinsic  # should still be self.head_dim
+            #self.d_intrinsic = self.head_dim
+            self.query = orthogonal(nn.Linear(config.hidden_size, self.d_intrinsic * self.num_heads))
+            if not self.qk_share:
+                self.key = orthogonal(nn.Linear(config.hidden_size, self.d_intrinsic * self.num_heads))            
+        else:
+            self.query = orthogonal(nn.Linear(config.hidden_size, self.embed_dim))
+            if not self.qk_share:
+                self.key = orthogonal(nn.Linear(config.hidden_size, self.embed_dim))
         self.value = nn.Linear(config.hidden_size, self.embed_dim)
 
         self.dropout = config.attention_probs_dropout_prob

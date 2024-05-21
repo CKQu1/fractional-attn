@@ -37,7 +37,7 @@ python -i main.py --n_layers=1 --n_attn_heads=2 --model_name=dpformer\
 """
 
 """
-python -i main.py --n_layers=1 --n_attn_heads=2 --model_name=v3fnsformer --beta=1.5\
+python -i main.py --n_layers=1 --n_attn_heads=2 --model_name=opfnsformer --beta=1.5\
  --max_len=256 --max_steps=2 --logging_steps=2 --save_steps=2 --eval_steps=2\
  --divider=1 --warmup_steps=0 --grad_accum_step=1 --dataset_name=rotten_tomatoes\
  --model_root=.droot/speedtest
@@ -106,6 +106,7 @@ if __name__ == '__main__':
     parser.add_argument('--lr_scheduler_type', default=None, type=str or type(None))
     parser.add_argument('--do_train', default=True, type=bool)
     parser.add_argument('--do_eval', default=True, type=bool)
+    parser.add_argument('--wandb_log', default=False, type=bool)
 
     parser.add_argument('--milestones', default='', type=str or list) # Epoch units
     parser.add_argument('--gamma', default=None, type=float or type(None)) # Decay factor
@@ -128,6 +129,9 @@ if __name__ == '__main__':
     parser.add_argument('--model_root', default='', type=str, help='root dir of storing the model')
 
     args = parser.parse_args()    
+
+    if not args.wandb_log:
+        os.environ["WANDB_DISABLED"] = "true"
 
     repo_dir = os.getcwd()  # main dir 
     dev = torch.device(f"cuda:{torch.cuda.device_count()}"
@@ -252,14 +256,14 @@ if __name__ == '__main__':
     if 'fnsformer' in args.model_name:
         attn_setup['beta'] = args.beta      
         attn_setup['bandwidth'] = args.bandwidth   
-        if (args.model_name=='v2fnsformer' or args.model_name=='v3fnsformer') and args.beta < 2:
+        if args.model_name in ['v2fnsformer', 'v3fnsformer', 'opfnsformer'] and args.beta < 2:
 
             config.d_intrinsic = int(args.hidden_size/args.n_attn_heads)  # head_dim
             config.sphere_radius = ((np.pi**(1/config.d_intrinsic)-1)/np.pi)   
             #config.sphere_radius = 1
             attn_setup['d_intrinsic'] = args.hidden_size
 
-        elif (args.model_name=='v2fnsformer' or args.model_name=='v3fnsformer') and args.beta >= 2:
+        elif args.model_name in ['v2fnsformer', 'v3fnsformer', 'opfnsformer'] and args.beta >= 2:
             config.sphere_radius = 1
 
         config.mask_val = config.sphere_radius * np.pi
@@ -284,6 +288,8 @@ if __name__ == '__main__':
             warmup_steps = 100   
         else:
             warmup_steps = args.warmup_steps
+    else:
+        warmup_steps = args.warmup_steps
 
     training_args_dict = {"output_dir": model_dir,                         
                           "per_device_train_batch_size": args.train_bs,

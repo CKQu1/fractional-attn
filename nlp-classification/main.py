@@ -34,51 +34,23 @@ python -i main.py --n_layers=1 --n_attn_heads=2 --model_name=dpformer\
  --max_len=256 --max_steps=2 --logging_steps=2 --save_steps=2 --eval_steps=2\
  --divider=1 --warmup_steps=0 --grad_accum_step=1 --dataset_name=rotten_tomatoes\
  --model_root=.droot/speedtest
-"""
 
-"""
 python -i main.py --n_layers=1 --n_attn_heads=2 --model_name=opfnsformer --beta=1.5\
  --max_len=256 --max_steps=2 --logging_steps=2 --save_steps=2 --eval_steps=2\
  --divider=1 --warmup_steps=0 --grad_accum_step=1 --dataset_name=rotten_tomatoes\
  --model_root=.droot/speedtest
 
+python -i main.py --n_layers=1 --n_attn_heads=2 --model_name=sinkformer --n_it=1\
+ --max_len=256 --max_steps=2 --logging_steps=2 --save_steps=2 --eval_steps=2\
+ --divider=1 --warmup_steps=0 --grad_accum_step=1 --dataset_name=rotten_tomatoes\
+ --model_root=.droot/speedtest  
+"""
+
+"""
 torchrun --nnodes=1 --nproc_per_node=4 main.py --n_layers=1 --n_attn_heads=2 --model_name=v3fnsformer --beta=1.5\
  --max_len=256 --max_steps=2 --logging_steps=2 --save_steps=2 --eval_steps=2\
  --divider=1 --warmup_steps=0 --grad_accum_step=1 --dataset_name=rotten_tomatoes\
  --model_root=.droot/speedtest
-"""
-
-"""
-python -i main.py --n_layers=1 --n_attn_heads=2 --model_name=v3fnsformer --beta=1.5 --bandwidth=2\
- --milestones=3,10 --max_len=256 --max_steps=2 --logging_steps=2 --save_steps=2 --eval_steps=2\
- --divider=1 --warmup_steps=0 --grad_accum_step=1 --dataset_name=rotten_tomatoes\
- --model_root=.droot/speedtest
-"""
-
-"""
-python -i main.py --n_layers=1 --n_attn_heads=2 --model_name=dpformer\
- --max_len=256 --epochs=1\
- --divider=1 --warmup_steps=0 --grad_accum_step=1 --dataset_name=rotten_tomatoes\
- --model_root=.droot/speedtest
-"""
-
-# quick torchrun (multi-unit)
-"""
-PBS_O_WORKDIR="/project/frac_attn/fractional-attn/fnsformer-module-default-trainer"
-cpath="/project/frac_attn/fractional-attn/built_containers/FaContainer_v3.sif"
-
-singularity exec --home ${PBS_O_WORKDIR} ${cpath} torchrun --nnodes=1 --nproc_per_node=4 main.py\
- --n_layers=1 --n_attn_heads=2 --model_name=v3fnsformer --beta=1.5\
- --max_len=128 --max_steps=10 --logging_steps=10 --save_steps=10 --eval_steps=10\
- --divider=1 --warmup_steps=0 --grad_accum_step=4 --dataset_name=imdb\
- --model_root=.droot/speedtest    
-
-# this setting is 4m25s per step
-torchrun --rdzv-backend=c10d --rdzv-endpoint=localhost:0 --nnodes=1 --nproc_per_node=4 main.py\
- --n_layers=1 --n_attn_heads=2 --model_name=fnsformer --beta=0.5 --train_bs=2 --eval_bs=2\
- --max_len=128 --max_steps=10 --logging_steps=10 --save_steps=10 --eval_steps=10\
- --divider=1 --warmup_steps=0 --grad_accum_step=1 --dataset_name=imdb\
- --model_root=.droot/speedtest     
 """
 
 #torch.autograd.set_detect_anomaly(True)  # delete
@@ -110,19 +82,24 @@ if __name__ == '__main__':
 
     parser.add_argument('--milestones', default='', type=str or list) # Epoch units
     parser.add_argument('--gamma', default=None, type=float or type(None)) # Decay factor
+
     # Model settings    
+    # General
     #parser.add_argument('--sparsify_type', default=None, type=str)
     parser.add_argument('--qk_share', default=False, type=bool)
     #parser.add_argument('--d_intrinsic', default=3, type=int)
     parser.add_argument('--n_layers', default=1, type=int)
     parser.add_argument('--n_attn_heads', default=2, type=int)
     parser.add_argument('--hidden_size', default=768, type=int)    
-
-    parser.add_argument('--model_name', default='fnsformer', type=str)    
+    parser.add_argument('--model_name', default='fnsformer', type=str, help='v3fnsformer | sinkformer | dpformer') 
+    # FNSformer
     parser.add_argument('--beta', default=1, type=float)
-    parser.add_argument('--bandwidth', default=1, type=float)
-    parser.add_argument('--max_len', default=1024, type=int)    
+    parser.add_argument('--bandwidth', default=1, type=float) 
+    # Sinkformer      
+    parser.add_argument('--n_it', default=1, type=int)
+
     # Dataset settings
+    parser.add_argument('--max_len', default=1024, type=int)
     parser.add_argument('--dataset_name', default='imdb', type=str)
     parser.add_argument('--divider', default=1, type=int)  # downsizing the test dataset
     # Path settings
@@ -266,9 +243,18 @@ if __name__ == '__main__':
         elif args.model_name in ['v2fnsformer', 'v3fnsformer', 'opfnsformer'] and args.beta >= 2:
             config.sphere_radius = 1
 
+        # mask for distance
         config.mask_val = config.sphere_radius * np.pi
         attn_setup['sphere_radius'] = config.sphere_radius       
-        attn_setup['mask_val'] = np.pi * config.sphere_radius            
+        attn_setup['mask_val'] = np.pi * config.sphere_radius   
+
+    elif args.model_name == 'sinkformer':
+        n_it = args.n_it
+        attn_setup['n_it'] = n_it
+        attn_setup['bandwidth'] = args.bandwidth
+        # mask for DP
+        config.mask_val = -1e-9
+        attn_setup['mask_val'] = config.mask_val
 
     config.num_hidden_layers = args.n_layers
     config.num_attention_heads = args.n_attn_heads

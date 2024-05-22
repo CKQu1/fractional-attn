@@ -83,7 +83,8 @@ def plot_model(model_root_dir, dirnames, instances,
                 else:
                     metric_plot = df_filtered.loc[:,metric]
                     best_metric = metric_plot.min()
-                axs[idx,kdx].plot(df_filtered.loc[:,'epoch'], metric_plot, label=model_name)
+                axs[idx,kdx].plot(df_filtered.loc[:,'epoch'], metric_plot,
+                                  linestyle='-.', label=model_name)
 
                 if idx == 0:
                     axs[idx,kdx].set_title(NAMES_DICT[metric])
@@ -94,9 +95,14 @@ def plot_model(model_root_dir, dirnames, instances,
 
             # ----- Messages -----            
             print('-'*15)    
+            avg_eval_runtime = df[df['eval_runtime'].notna()].loc[:,'eval_runtime'].mean()
+            train_runtime, total_flos = df_setting.loc[0,['train_runtime', 'total_flos']]
             print(f'{model_name} on {dataset}')
             for kdx, metric in enumerate(metrics):
                 print(f'best and final {metric}: {print_metrics[metric]}')
+            print(f'Total train_runtime: {train_runtime}')
+            print(f'total_flos: ' + '{:.5e}'.format(total_flos))
+            print(f'Average eval_runtime: {avg_eval_runtime}')
             print('-'*15 + '\n')                    
 
         axs[idx,0].set_ylabel(NAMES_DICT[dataset])

@@ -60,34 +60,50 @@ if __name__ == '__main__':
     dataset_names = ['rotten_tomatoes','imdb']
     max_lens = [256, 512]    
     
-    debug_mode = True
+    ##### DOUBLE-CHECK #####
+    debug_mode = False      
     print(f'---------- debug_mode = {debug_mode} ---------- \n')
     
     kwargss_all = []
     #for didx, dataset_name in enumerate(dataset_names):
     for didx, dataset_name in enumerate(dataset_names[1:]):
         if not debug_mode:
-            select = 1; ngpus, ncpus = 0, 18
+            select = 1; ngpus, ncpus = 0, 20
             #select = 2; ngpus, ncpus = 0, 12            
             walltime = '23:59:59'
-            mem = '16GB'            
+            mem = '20GB'            
 
-            kwargss = [{'model_name':'dpformer'},
-                       {'model_name':'v3fnsformer','beta':1.5},
-                       {'model_name':'v3fnsformer','beta':2}]           
+            # LIST:
+            # {'model_name':'dpformer'}
+            # {'model_name':'v3fnsformer','beta':1.5}
+            # {'model_name':'v3fnsformer','beta':2}
+            # {'model_name':'opfnsformer','beta':1.5}
+            # {'model_name':'opfnsformer','beta':2}
+            # {'model_name':'sinkformer','n_it':1}
+
+            # kwargss = [{'model_name':'v3fnsformer','beta':1.5},
+            #            {'model_name':'v3fnsformer','beta':2}]          
+
+            # kwargss = [{'model_name':'dpformer'},
+            #            {'model_name':'opfnsformer','beta':1.5},
+            #            {'model_name':'opfnsformer','beta':2}]     
+             
+            kwargss = [{'model_name':'sinkformer', 'n_it':1},
+                       {'model_name':'sinkformer', 'n_it':3}]                          
                              
             common_kwargs = {'seed':              0,
-                             'n_layers':          4,
-                             'n_attn_heads':      4,
+                             'n_layers':          2,
+                             'n_attn_heads':      8,
                              'hidden_size':       768,
                              'divider':           1,
                              'warmup_steps':      0, 
                              'grad_accum_step':   2,                            
-                             'train_bs':          4,
-                             'eval_bs':           4,
+                             'train_bs':          16,
+                             'eval_bs':           16,
                              'max_len':           max_lens[didx],                             
-                             'epochs':            15,
-                             'lr_scheduler_type': 'constant',
+                             'epochs':            5,
+                             #'lr_scheduler_type': 'linear',
+                             'lr_scheduler_type': 'cosine',
                              'lr':                5e-5,
                              #'use_custom_optim':  True,
                              #'gamma':             0.1,
@@ -110,14 +126,25 @@ if __name__ == '__main__':
 
         else:     
                    
-            ngpus, ncpus = 0, 8  
+            ngpus, ncpus = 0, 20  
             select = 1  
             walltime = '23:59:59'
-            mem = '12GB'                 
+            mem = '12GB'            
+
+            # LIST:
+            # {'model_name':'dpformer'}
+            # {'model_name':'v3fnsformer','beta':1.5}
+            # {'model_name':'v3fnsformer','beta':2}
+            # {'model_name':'opfnsformer','beta':1.5}
+            # {'model_name':'opfnsformer','beta':2}
+            # {'model_name':'sinkformer','n_it':1}
          
-            kwargss = [{'model_name':'dpformer'},
-                       {'model_name':'v3fnsformer','beta':1.5},
-                       {'model_name':'v3fnsformer','beta':2}]           
+            # kwargss = [{'model_name':'dpformer'},
+            #            {'model_name':'v3fnsformer','beta':1.5},
+            #            {'model_name':'v3fnsformer','beta':2}]                     
+             
+            kwargss = [{'model_name':'sinkformer', 'n_it':1},
+                       {'model_name':'sinkformer', 'n_it':3}]                           
                              
             common_kwargs = {'seed':              0,
                              'n_layers':          1,
@@ -129,7 +156,7 @@ if __name__ == '__main__':
                              'train_bs':          4,
                              'eval_bs':           4,
                              'max_len':           max_lens[didx],                             
-                             'epochs':            15,
+                             'epochs':            1,
                              'lr_scheduler_type': 'cosine',
                              'lr':                5e-5,
                              #'use_custom_optim':  True,
@@ -152,7 +179,9 @@ if __name__ == '__main__':
         kwargss = add_common_kwargs(kwargss, common_kwargs)
         kwargss_all += kwargss
 
-    #print(kwargss_all)  
+    for xx in kwargss_all:
+        print(xx)  
+        print('\n')
     #quit()  # delete      
     train_submit(script_name, kwargss_all,
                  ncpus=ncpus,

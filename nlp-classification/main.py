@@ -87,7 +87,6 @@ if __name__ == '__main__':
     # General
     #parser.add_argument('--sparsify_type', default=None, type=str)
     parser.add_argument('--qk_share', default=False, type=bool)
-    #parser.add_argument('--d_intrinsic', default=3, type=int)
     parser.add_argument('--n_layers', default=1, type=int)
     parser.add_argument('--n_attn_heads', default=2, type=int)
     parser.add_argument('--hidden_size', default=768, type=int)    
@@ -238,7 +237,7 @@ if __name__ == '__main__':
             config.d_intrinsic = int(args.hidden_size/args.n_attn_heads)  # head_dim
             config.sphere_radius = ((np.pi**(1/config.d_intrinsic)-1)/np.pi)   
             #config.sphere_radius = 1
-            attn_setup['d_intrinsic'] = args.hidden_size
+            attn_setup['d_intrinsic'] = config.d_intrinsic
 
         elif args.model_name in ['v2fnsformer', 'v3fnsformer', 'opfnsformer'] and args.beta >= 2:
             config.sphere_radius = 1
@@ -360,8 +359,10 @@ if __name__ == '__main__':
 
     if training_args.num_train_epochs >= 1 and args.max_steps == None:
         training_args.eval_steps    = int(steps_per_train_epoch)        
-        training_args.logging_steps = int(steps_per_train_epoch/3)  # int(steps_per_train_epoch/5)
-        training_args.save_steps    = int(steps_per_train_epoch)
+        #training_args.logging_steps = int(steps_per_train_epoch/3)  # int(steps_per_train_epoch/5)
+        training_args.logging_steps = int(steps_per_train_epoch)        
+        #training_args.save_steps    = int(steps_per_train_epoch)
+        training_args.save_steps    = int(steps_per_train_epoch * args.epochs)
         
     trainer_kwargs = {'model': model,                      
                       'args': training_args,
@@ -459,14 +460,11 @@ if __name__ == '__main__':
                                                "seed", "warmup_steps",  "grad_accum_step", 
                                                "milestones", "gamma"], index=range(1))
         train_settings.iloc[0] = [args.lr, args.lr_scheduler_type, args.train_bs, args.eval_bs,
-                                args.epochs, args.weight_decay, args.eval_strat, args.eval_steps,
-                                args.log_strat, args.logging_steps, args.save_steps, 
-                                args.seed, args.warmup_steps, args.grad_accum_step, args.milestones,
-                                args.gamma]
+                                  args.epochs, args.weight_decay, args.eval_strat, args.eval_steps,
+                                  args.log_strat, args.logging_steps, args.save_steps, 
+                                  args.seed, args.warmup_steps, args.grad_accum_step, args.milestones,
+                                  args.gamma]
         train_settings.to_csv(njoin(model_dir, "train_setting.csv"))
-
-        # save final model
-        trainer.save_model(njoin(model_dir, "final_model"))
 
         print('\n')
         print('---------- Model trained and saved! ----------')

@@ -66,9 +66,9 @@ def create_model_dir(model_root_dir, **kwargs):
         beta = kwargs.get("beta", 1)
         bandwidth = kwargs.get("bandwidth", 1)             
         dirname += f'-beta={beta}-eps={bandwidth}'
-        if (model_name=='v2fnsformer' or model_name=='v3fnsformer') and beta < 2:
-            d_intrinsic = kwargs.get('d_intrinsic')
-            dirname += f'-dman={d_intrinsic}'
+        # if (model_name=='v2fnsformer' or model_name=='v3fnsformer') and beta < 2:
+        #     d_intrinsic = kwargs.get('d_intrinsic')
+        #     dirname += f'-dman={d_intrinsic}'
     elif model_name == 'sinkformer':
         bandwidth = kwargs.get("bandwidth", 1)     
         n_it = kwargs.get("n_it", 1)        

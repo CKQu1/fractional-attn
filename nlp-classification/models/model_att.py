@@ -671,9 +671,12 @@ class V3FNSSelfAttention(nn.Module):
         if self.beta < 2:
             self.d_intrinsic = config.d_intrinsic  # should still be self.head_dim
             #self.d_intrinsic = self.head_dim
-            self.query = nn.Linear(config.hidden_size, self.d_intrinsic * self.num_heads)
+            assert config.hidden_size == self.d_intrinsic * self.num_heads, 'Incorrect d_intrinsic in V3FNSSelfAttention'
+            #self.query = nn.Linear(config.hidden_size, self.d_intrinsic * self.num_heads)
+            self.query = nn.Linear(config.hidden_size, self.embed_dim)
             if not self.qk_share:
-                self.key = nn.Linear(config.hidden_size, self.d_intrinsic * self.num_heads)            
+                #self.key = nn.Linear(config.hidden_size, self.d_intrinsic * self.num_heads)            
+                self.key = nn.Linear(config.hidden_size, self.embed_dim)
         else:
             self.query = nn.Linear(config.hidden_size, self.embed_dim)
             if not self.qk_share:
@@ -822,9 +825,12 @@ class OPFNSSelfAttention(nn.Module):
         if self.beta < 2:
             self.d_intrinsic = config.d_intrinsic  # should still be self.head_dim
             #self.d_intrinsic = self.head_dim
-            self.query = orthogonal(nn.Linear(config.hidden_size, self.d_intrinsic * self.num_heads))
+            assert config.hidden_size == self.d_intrinsic * self.num_heads, 'Incorrect d_intrinsic in OPFNSSelfAttention'
+            #self.query = orthogonal(nn.Linear(config.hidden_size, self.d_intrinsic * self.num_heads))
+            self.query = orthogonal(nn.Linear(config.hidden_size, self.embed_dim))
             if not self.qk_share:
-                self.key = orthogonal(nn.Linear(config.hidden_size, self.d_intrinsic * self.num_heads))            
+                #self.key = orthogonal(nn.Linear(config.hidden_size, self.d_intrinsic * self.num_heads))            
+                self.key = orthogonal(nn.Linear(config.hidden_size, self.embed_dim))
         else:
             self.query = orthogonal(nn.Linear(config.hidden_size, self.embed_dim))
             if not self.qk_share:

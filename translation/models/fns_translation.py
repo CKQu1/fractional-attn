@@ -39,7 +39,7 @@ class FNSAttentionHead(nn.Module):
         
         self.is_cross_attention = is_cross_attention
 
-    def forward(self, x, encoder_output_states=None):
+    def forward(self, x, encoder_output_states=None, attention_mask=None):
         if encoder_output_states is not None:
             assert self.is_cross_attention, "Please make sure to instantiate class with `Attention(..., is_cross_attention=True)`."
             query = F.normalize(self.query(x), p=2, dim=-1)
@@ -56,10 +56,18 @@ class FNSAttentionHead(nn.Module):
         beta, bandwidth = self.beta, self.bandwidth
         sphere_radius = self.sphere_radius
         d_intrinsic = self.attention_head_size
+        
+        batch_size, sequence_length, _ = query.size()
 
         # geodesic distance on sphere
         eps = 1e-7  # for limiting the divergence from acos
         g_dist = torch.acos(torch.clamp(query @ key.transpose(-2, -1), -1+eps, 1-eps)) * sphere_radius
+        
+        # Mask
+        if attention_mask is not None:
+            bool_mask = (attention_mask>=0).long()
+            attention_mask_expanded = (bool_mask.unsqueeze(-1)@bool_mask.unsqueeze(1)).view(batch_size, 1, sequence_length, sequence_length)
+            g_dist = g_dist.masked_fill(attention_mask_expanded==0, 1e9)
         
         # Calculate the attention scores
         if beta < 2:
@@ -119,9 +127,9 @@ class FNSMultiHeadAttention(nn.Module):
         self.output_projection = nn.Linear(self.all_head_size, self.hidden_size)
         self.output_dropout = nn.Dropout(config["hidden_dropout_prob"])
 
-    def forward(self, x, output_attentions=False, encoder_output_states=None):
+    def forward(self, x, attention_mask=None, output_attentions=False, encoder_output_states=None):
         # Calculate the attention output for each attention head
-        attention_outputs = [head(x, encoder_output_states) for head in self.heads]
+        attention_outputs = [head(x, encoder_output_states, attention_mask) for head in self.heads]
         # Concatenate the attention outputs from each attention head
         attention_output = torch.cat([attention_output for attention_output, _ in attention_outputs], dim=-1)
         # Project the concatenated attention output back to the hidden size
@@ -202,6 +210,12 @@ class FasterFNSMultiHeadAttention(nn.Module):
         eps = 1e-7  # for limiting the divergence from acos
         g_dist = torch.acos(torch.clamp(query @ key.transpose(-2, -1), -1+eps, 1-eps)) * sphere_radius
         
+        # Mask
+        if attention_mask is not None:
+            bool_mask = (attention_mask>=0).long()
+            attention_mask_expanded = (bool_mask.unsqueeze(-1)@bool_mask.unsqueeze(1)).view(batch_size, 1, sequence_length, sequence_length).expand(-1, num_attention_heads, -1, -1)      
+            g_dist = g_dist.masked_fill(attention_mask_expanded==0, 1e9)
+        
         # Calculate the attention scores
         if beta < 2:
             attn_score = (1 + g_dist/bandwidth**0.5)**(-d_intrinsic-beta)
@@ -209,7 +223,6 @@ class FasterFNSMultiHeadAttention(nn.Module):
             attn_score = torch.exp((-g_dist/bandwidth**0.5)**(beta/(beta-1)))
         D_inv = torch.diag_embed(attn_score.sum(-1)**(-1))  # inverse of degree matrix of attn_score
         K_tilde = D_inv @ attn_score @ D_inv
-        K_tilde = K_tilde.masked_fill(attention_mask.expand(-1,self.num_attention_heads,-1,-1)==0, -1e9) # Mask
         attention_probs = F.normalize(K_tilde,p=1,dim=3)  # can do this as the attn weights are always positive
         attention_probs = self.attn_dropout(attention_probs)
 

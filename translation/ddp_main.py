@@ -19,13 +19,21 @@ from torch.distributed import init_process_group, destroy_process_group
 
 from constants import *
 from mutils import njoin, create_model_dir, convert_train_history, structural_model_root
-from data_utils import prepare_data
+from data_utils import prepare_data, BilingualDataset
 
 from torch.optim import AdamW
 
 from transformers import AutoTokenizer
 
-import torchmetrics
+# import torchmetrics
+
+from datasets import load_dataset
+from tokenizers import Tokenizer
+from tokenizers.models import WordLevel
+from tokenizers.trainers import WordLevelTrainer
+from tokenizers.pre_tokenizers import Whitespace
+
+from pathlib import Path
 
 """
 This training script can be run both on a single gpu in debug mode,
@@ -86,7 +94,7 @@ if __name__ == '__main__':
     parser.add_argument('--model_root', default=njoin(DROOT, 'trained_models'), type=str, help='root dir of storing the model')
     
     parser.add_argument("--save_model_every", default=0, type=int)
-    parser.add_argument("--exp_name", default='image-task', type=str)
+    parser.add_argument("--exp_name", default='translation-task', type=str)
     parser.add_argument("--init_from", default='scratch', type=str, help='scratch | resume | gpt2')
     parser.add_argument('--wandb_log', default=False, type=bool)
     parser.add_argument("--wandb_project", default='translation-task', type=str)    
@@ -101,13 +109,13 @@ if __name__ == '__main__':
     parser.add_argument('--beta', default=1, type=float)
     parser.add_argument('--qk_share', default=False, type=bool)
     parser.add_argument('--model_name', default='dptranslation', type=str)    
-    parser.add_argument('--beta', default=1, type=float)
     parser.add_argument('--bandwidth', default=1, type=float)  
     parser.add_argument('--sphere_radius', default=1, type=float)  
 
     # Dataset settings
     parser.add_argument('--dataset_name', default='iwslt14', type=str)
     parser.add_argument('--divider', default=1, type=int)  # downsizing the test dataset    
+    parser.add_argument('--tokenizer_path', default=None, type=str)  # tokenizer file path
 
     # Config settings
     parser.add_argument('--hidden_size', default=48, type=int)
@@ -154,7 +162,6 @@ if __name__ == '__main__':
     #block_size = 1024  # max sequence length (https://stackoverflow.com/questions/66294076/how-to-determine-the-block-size-in-training-a-dataset)
 
     # model
-    n_layer = args.n_layers; n_head = args.n_attn_heads; n_embd = args.hidden_size    
     dropout = 0.0 # for pretraining 0 is good, for finetuning try 0.1+
     bias = False # do we use bias inside LayerNorm and Linear layers?
     
@@ -165,7 +172,7 @@ if __name__ == '__main__':
         "hidden_size": args.hidden_size,
         "num_encoder_layers": args.num_encoder_layers,
         "num_decoder_layers": args.num_decoder_layers,
-        "num_attention_heads": args.n_attn_heads,
+        "num_attention_heads": args.num_attention_heads,
         "intermediate_size": 4 * args.hidden_size, # 4 * hidden_size
         "hidden_dropout_prob": args.hidden_dropout_prob,
         "encoder_dropout_prob": args.encoder_dropout_prob,
@@ -179,11 +186,11 @@ if __name__ == '__main__':
         "trg_vocab_size": args.trg_vocab_size,
         "trg_pad_token_id": args.trg_pad_token_id,
         "max_length": args.max_length,
+        "tokenizer_path": args.tokenizer_path,
     }
     # These are not hard constraints, but are used to prevent misconfigurations
     assert config["hidden_size"] % config["num_attention_heads"] == 0
     assert config['intermediate_size'] == 4 * config['hidden_size']
-    assert config['image_size'] % config['patch_size'] == 0
 
     attn_setup = {'qk_share': False}
     attn_setup['model_name'] = args.model_name
@@ -275,11 +282,6 @@ if __name__ == '__main__':
         print(f'device = {device}')
         print(f'backend = {backend}')
         print('-'*25 + '\n')              
-
-    # tokens_per_iter = gradient_accumulation_steps * ddp_world_size * batch_size * block_size
-    # print(f"tokens per iteration will be: {tokens_per_iter:,}")
-    images_per_iter = gradient_accumulation_steps * ddp_world_size * batch_size
-    print(f"images per iteration will be: {images_per_iter:,}")    
     
     if args.model_root == '':
         model_root = structural_model_root(qk_share=args.qk_share, num_encoder_layers=args.num_encoder_layers,
@@ -310,18 +312,72 @@ if __name__ == '__main__':
     ptdtype = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torch.float16}[dtype]
     ctx = nullcontext() if device_type == 'cpu' else torch.amp.autocast(device_type=device_type, dtype=ptdtype)
 
-    # poor man's data loader
+    def get_all_sentences(ds, lang):
+        for item in ds:
+            yield item['translation'][lang]
+            
+    def get_or_build_tokenizer(config, ds, lang):
+        if config['tokenizer_path'] is None:
+            # Most code taken from: https://huggingface.co/docs/tokenizers/quicktour
+            tokenizer = Tokenizer(WordLevel(unk_token="[UNK]"))
+            tokenizer.pre_tokenizer = Whitespace()
+            trainer = WordLevelTrainer(special_tokens=["[UNK]", "[PAD]", "[SOS]", "[EOS]"], min_frequency=2)
+            tokenizer.train_from_iterator(get_all_sentences(ds, lang), trainer=trainer)
+            # tokenizer.save(str(tokenizer_path))
+        else:
+            tokenizer_path = Path(config['tokenizer_path'].format(lang))
+            assert Path.exists(tokenizer_path), "Tokenizer path does not exist"
+            tokenizer = Tokenizer.from_file(str(tokenizer_path))
+        return tokenizer
+    
+    # def preprocess_function(examples, tokenizer, language, max_length):
+    #     inputs = [example[language] for example in examples["translation"]]
+    #     pad_id = tokenizer.token_to_id("[PAD]")
+    #     encodings = tokenizer.encode_batch(inputs)
+    #     for encoding in encodings:
+    #         encoding.truncate(max_length=max_length)
+    #         encoding.pad(length=max_length, pad_id=pad_id, pad_token="[PAD]")
+    #     return [encoding.ids for encoding in encodings]
+    
+    # def preprocess_function(examples, tokenizer_src, src_language, tokenizer_trg, trg_language, max_length):
+    #     inputs = [example[src_language] for example in examples["translation"]]
+    #     targets = [example[trg_language] for example in examples["translation"]]
+        
+    #     model_inputs = tokenizer_src(inputs, text_target=targets, max_length=128, truncation=True)
+    #     return model_inputs
+        
+        
+    #     pad_id = tokenizer_src.token_to_id("[PAD]")
+    #     model_inputs = tokenizer_src.encode_batch(inputs)
+    #     for model_input in model_inputs:
+    #         model_input.truncate(max_length=max_length)
+    #         model_input.pad(length=max_length, pad_id=pad_id, pad_token="[PAD]")
+    #     model_inputs = [model_input.ids for model_input in model_inputs]
+    #     labels = tokenizer_trg.encode_batch(targets)
+    #     for label in labels:
+    #         label.truncate(max_length=max_length)
+    #         label.pad(length=max_length, pad_id=pad_id, pad_token="[PAD]")
+    #     labels = [label.ids for label in labels]
+    #     return model_inputs, labels
+
     if dataset == 'iwslt14': 
-        # Define tokenizers (using these for now...)
-        tokenizer_src = AutoTokenizer.from_pretrained('dbmdz/german-gpt2')  # German tokenizer
-        tokenizer_trg = AutoTokenizer.from_pretrained('openai-community/gpt2')  # English tokenizer
+        src_language, trg_language = 'de', 'en'
+        dataset = load_dataset("ted_talks_iwslt", language_pair=(src_language, trg_language), year="2014", split="train")
+        tokenizer_src = get_or_build_tokenizer(config, dataset, src_language)
+        tokenizer_trg = get_or_build_tokenizer(config, dataset, trg_language)
+        # Split dataset
+        dataset = dataset.train_test_split(test_size=0.2, shuffle=True) #20% test set
+        trainset, testset = dataset
+        trainset = BilingualDataset(trainset, tokenizer_src, tokenizer_trg, src_language, trg_language, config["max_length"])
+        testset = BilingualDataset(testset, tokenizer_src, tokenizer_trg, src_language, trg_language, config["max_length"])
+        # Create dataloaders
+        trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True, num_workers=ddp_world_size)
+        testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size, shuffle=False, num_workers=ddp_world_size)
         # Get pad token ids and vocab sizes
-        config["src_vocab_size"] = tokenizer_src.vocab_size
-        config["src_pad_token_id"] = tokenizer_src.pad_token_id
-        config["trg_vocab_size"] = tokenizer_trg.vocab_size
-        config["trg_pad_token_id"] = tokenizer_trg.pad_token_id
-        # Load data
-        trainloader, testloader = prepare_data(tokenizer_src, tokenizer_trg, batch_size=batch_size, num_workers=ddp_world_size, max_length=config["max_length"]) 
+        config["src_vocab_size"] = tokenizer_src.get_vocab_size()
+        config["src_pad_token_id"] = tokenizer_src.token_to_id("[PAD]")
+        config["trg_vocab_size"] = tokenizer_trg.get_vocab_size()
+        config["trg_pad_token_id"] = tokenizer_trg.token_to_id("[PAD]")
 
     # only for large datasets
     # def get_batch(split):

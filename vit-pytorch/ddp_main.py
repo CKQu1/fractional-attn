@@ -95,8 +95,9 @@ if __name__ == '__main__':
 
     # Model settings
     parser.add_argument('--model_name', default='dpvit', type=str)    
-    parser.add_argument('--beta', default=1, type=float)
+    parser.add_argument('--beta', default=1, type=float)  # for fnsvit
     parser.add_argument('--bandwidth', default=1, type=float)  
+    parser.add_argument('--n_it', default=1, type=int)
 
     # Dataset settings
     parser.add_argument('--dataset_name', default='cifar10', type=str)
@@ -181,7 +182,11 @@ if __name__ == '__main__':
             config['sphere_radius'] = 1
 
         attn_setup['sphere_radius'] = config['sphere_radius']       
-        attn_setup['mask_val'] = np.pi * config['sphere_radius']      
+        attn_setup['mask_val'] = np.pi * config['sphere_radius']   
+
+    elif args.model_name == 'sinkvit':
+        config['n_it'] = attn_setup['n_it'] = args.n_it
+        config['bandwidth'] = attn_setup['bandwidth'] = args.bandwidth
 
     # adamw optimizer
     learning_rate = args.max_lr  # max learning rate
@@ -369,6 +374,9 @@ if __name__ == '__main__':
         elif args.model_name == 'fnsvit':
             from vit_pytorch.fns_vit import FNSViTForClassfication
             model = FNSViTForClassfication(config)    
+        elif args.model_name == 'sinkvit':
+            from vit_pytorch.sink_vit import SINKViTForClassfication
+            model = SINKViTForClassfication(config)               
 
     """
     elif init_from == 'resume':

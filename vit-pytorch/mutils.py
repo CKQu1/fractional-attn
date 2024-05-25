@@ -69,6 +69,11 @@ def create_model_dir(model_root_dir, **kwargs):
         # if beta < 2:
         #     d_intrinsic = kwargs.get('d_intrinsic')
         #     dirname += f'-dman={d_intrinsic}'
+    elif model_name == 'sinkvit':
+        bandwidth = kwargs.get("bandwidth", 1)     
+        n_it = kwargs.get("n_it", 1)        
+        dirname += f'-n_it={n_it}-eps={bandwidth}'
+
     models_dir = njoin(model_root_dir, dirname)
     instance = get_instance(models_dir, 'model=')
     model_dir = njoin(models_dir, f'model={instance}')        
@@ -81,7 +86,7 @@ def structural_model_root(**kwargs):
     PATH_CONFIG_DICT = {'layers': 'n_layers', 'heads': 'n_attn_heads', 'hidden': 'hidden_size'}
 
     qk_share = kwargs.get('qk_share', False)
-    affix = 'qqv' if qk_share==True else 'qkv'
+    affix = 'qqv' if qk_share==True else 'qkv'    
 
     # lr = kwargs.get('lr'); bs = kwargs.get('bs'); epochs = kwargs.get('epochs')
     
@@ -92,6 +97,10 @@ def structural_model_root(**kwargs):
             metric_val = kwargs.get(metric)
             model_root += f'{metric_name}={metric_val}-'
     model_root += affix
+
+    if 'max_iters' in kwargs:
+        max_iters = kwargs.get('max_iters')
+        model_root += f'-max_iters={max_iters}'
     #model_root = njoin(model_root, f'lr={lr}-bs={bs}-epochs={epochs}')            
 
     return model_root       

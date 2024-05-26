@@ -12,6 +12,6 @@ SPATH = njoin('/project/frac_attn/built_containers/FaContainer_v3.sif')  # singu
 
 MODEL_NAMES = ['fnsvit', 'sinkvit', 'dpvit']  # model str names
 NAMES_DICT = {'fnsvit': 'FNS', 'sinkvit': 'SINK', 'dpvit': 'DP', 
-              'cifar10': 'Cifar10',
+              'cifar10': 'CIFAR10',
               'val_loss': 'Eval Loss', 'val_acc': 'Eval Acc.', 'train_loss': 'Train Loss', 'train_acc': 'Train Acc.'
               }

@@ -157,7 +157,7 @@ class FasterFNSMultiHeadAttention(nn.Module):
             self.kv_projection = nn.Linear(self.hidden_size, self.all_head_size * 2, bias=self.qkv_bias)
             self.q_projection = nn.Linear(self.hidden_size, self.all_head_size, bias=self.qkv_bias)
         else:
-            self.qkv_projection = nn.Linear(self.hidden_size, self.all_head_size * 3, bias=self.qkv_bias)
+            self.qkv_projection = nn.Linear(self.hidden_size, self.all_head_size * 3, bias=self.qkv_bias)         
         self.attn_dropout = nn.Dropout(config["attention_probs_dropout_prob"])
         # Create a linear layer to project the attention output back to the hidden size
         # In most cases, all_head_size and hidden_size are the same
@@ -169,6 +169,10 @@ class FasterFNSMultiHeadAttention(nn.Module):
         self.sphere_radius = config['sphere_radius']
 
     def forward(self, x, attention_mask=None, output_attentions=False, encoder_hidden_states=None):
+
+        ##### CHANGES HERE #####
+        print(f'is_cross_attention = {self.is_cross_attention}')
+
         # Project the query, key, and value
         if encoder_hidden_states is not None:
             assert hasattr(
@@ -177,12 +181,28 @@ class FasterFNSMultiHeadAttention(nn.Module):
             query = self.q_projection(x)
             kv = self.kv_projection(encoder_hidden_states)
             key, value = torch.chunk(kv, 2, dim=-1)
+
+            ##### CHANGES HERE #####            
+            print('encoder_hidden_states is NOT None')
+            print(f'x shape: {x.shape}')
+            print(f'encoder_hidden_states shape: {encoder_hidden_states.shape}')
+            print(f'query shape: {query.shape}')
+            print(f'key shape: {key.shape}')
+            print(f'value shape: {value.shape}')
         else:
             # (batch_size, sequence_length, hidden_size) -> (batch_size, sequence_length, all_head_size * 3)
             qkv = self.qkv_projection(x)
             # Split the projected query, key, and value into query, key, and value
             # (batch_size, sequence_length, all_head_size * 3) -> (batch_size, sequence_length, all_head_size)
             query, key, value = torch.chunk(qkv, 3, dim=-1)
+
+            ##### CHANGES HERE #####
+            print('encoder_hidden_states is None')
+            print(f'x shape: {x.shape}')
+            print(f'query shape: {query.shape}')
+            print(f'key shape: {key.shape}')
+            print(f'value shape: {value.shape}')
+
         # Resize the query, key, and value to (batch_size, num_attention_heads, sequence_length, attention_head_size)
         batch_size, sequence_length, _ = query.size()
         num_attention_heads, attention_head_size = self.num_attention_heads, self.attention_head_size
@@ -213,8 +233,16 @@ class FasterFNSMultiHeadAttention(nn.Module):
         attention_probs = F.normalize(K_tilde,p=1,dim=3)  # can do this as the attn weights are always positive
         attention_probs = self.attn_dropout(attention_probs)
 
+        ##### CHANGES HERE #####        
+        print(f'attention_probs shape: {attention_probs.shape}')        
+
         # Calculate the attention output
         attention_output = attention_probs @ value
+
+        ##### CHANGES HERE #####
+        print(f'attention_output shape: {attention_output.shape}')  
+        print('\n')
+
         # Resize the attention output
         # from (batch_size, num_attention_heads, sequence_length, attention_head_size)
         # To (batch_size, sequence_length, all_head_size)
@@ -310,8 +338,11 @@ class FNSDecoderBlock(nn.Module):
         # Skip connection
         x = self.layernorm_1(x + attention_output)
         # Cross-attention
+        ##### CHANGES HERE #####
         attention_output, cross_attention_probs = \
-            self.cross_attention(x, attention_mask=trg_mask, output_attentions=output_attentions, encoder_output_states=encoder_output_states)
+            self.cross_attention(x, attention_mask=trg_mask, output_attentions=output_attentions, encoder_hidden_states=encoder_output_states)
+            #self.cross_attention(x, attention_mask=trg_mask, output_attentions=output_attentions, encoder_output_states=encoder_output_states)            
+            
         # Skip connection
         x = self.layernorm_2(x + attention_output)
         # Feed-forward network
@@ -394,8 +425,12 @@ class FNSDecoder(nn.Module):
             block = FNSDecoderBlock(config)
             self.blocks.append(block)
         # Tie output linear weights to input embedding matrix
+
+        ##### CHANGES HERE #####
         self.fc = nn.Linear(config["hidden_size"], config["trg_vocab_size"], bias=bias)
-        self.fc.weight = self.token_embedding.weight 
+        self.fc.weight = self.token_embedding.weight
+        #self.fc = nn.Linear(config["hidden_size"], config["max_length"], bias=bias)
+         
         
     def forward(self, x, embedding_output_states, src_mask=None, trg_mask=None, output_attentions=False):
         # Create the position ids from the input token ids. Any padded tokens remain padded.
@@ -407,11 +442,15 @@ class FNSDecoder(nn.Module):
         # Calculate the transformer block's output for each block
         all_self_attentions = []
         all_cross_attentions = []
-        for block in self.blocks:
-            x, self_attention_probs, cross_attention_probs = block(x, embedding_output_states, src_mask=src_mask, trg_mask=trg_mask, output_attentions=output_attentions)
+        for block in self.blocks:         
+            ##### CHANGES HERE #####   
             if output_attentions:
+                x, self_attention_probs, cross_attention_probs = block(x, embedding_output_states, src_mask=src_mask, trg_mask=trg_mask, output_attentions=output_attentions)
                 all_self_attentions.append(self_attention_probs)
                 all_cross_attentions.append(cross_attention_probs)
+            ##### CHANGES HERE #####
+            else:
+                x, _ = block(x, embedding_output_states, src_mask=src_mask, trg_mask=trg_mask, output_attentions=output_attentions)              
         # Linear layer
         x = self.fc(x)
         # Softmax
@@ -440,12 +479,21 @@ class FNSForTranslation(nn.Module):
     def forward(self, x, encoder_mask, decoder_mask, output_attentions=False):
         # Calculate the encoder's output
         encoder_output, encoder_self_attentions = self.encoder(x, attention_mask = encoder_mask, output_attentions=output_attentions)
-        # Calculate the decoder's output
-        decoder_output, decoder_self_attentions, decoder_cross_attentions = self.decoder(x, encoder_output, src_mask=encoder_mask, trg_mask=decoder_mask, output_attentions=output_attentions)
+        ##### CHANGES HERE #####
+        print(f'encoder_output shape: {encoder_output.shape}')
+        print('\n')
+
         # Return the logits and the attention probabilities (optional)
         if not output_attentions:
+            # Calculate the decoder's output
+            decoder_output, _ = self.decoder(x, encoder_output, src_mask=encoder_mask, trg_mask=decoder_mask, output_attentions=output_attentions)            
+
             return (decoder_output, None, None, None)
         else:
+            ##### CHANGES HERE #####
+            # Calculate the decoder's output
+            decoder_output, decoder_self_attentions, decoder_cross_attentions = self.decoder(x, encoder_output, src_mask=encoder_mask, trg_mask=decoder_mask, output_attentions=output_attentions)            
+
             return (decoder_output, encoder_self_attentions, decoder_self_attentions, decoder_cross_attentions)
 
     def _init_weights(self, module):

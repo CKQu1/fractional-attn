@@ -4,6 +4,7 @@ import os
 import pandas as pd
 import time
 import torch.nn as nn
+import torch.nn.functional as F
 import math
 import pickle
 from contextlib import nullcontext
@@ -19,13 +20,21 @@ from torch.distributed import init_process_group, destroy_process_group
 
 from constants import *
 from mutils import njoin, create_model_dir, convert_train_history, structural_model_root
-from data_utils import prepare_data
+from data_utils import prepare_data, BilingualDataset
 
 from torch.optim import AdamW
 
 from transformers import AutoTokenizer
 
-import torchmetrics
+# import torchmetrics
+
+from datasets import load_dataset
+from tokenizers import Tokenizer
+from tokenizers.models import WordLevel
+from tokenizers.trainers import WordLevelTrainer
+from tokenizers.pre_tokenizers import Whitespace
+
+from pathlib import Path
 
 """
 This training script can be run both on a single gpu in debug mode,
@@ -47,8 +56,8 @@ $ torchrun --nproc_per_node=8 --nnodes=2 --node_rank=1 --master_addr=123.456.123
 
 # single-core
 """
-python ddp_main.py --model_name=fnsvit --beta=1.5 --max_iters=100 --eval_interval=5\
- --eval_iters=200 --weight_decay=0 --n_layers=1 --n_attn_heads=2 --model_root=.droot/single-core 
+python -i ddp_main.py --model_name=fnstranslation --beta=1.5\
+ --max_iters=100 --eval_interval=5 --eval_iters=200 --weight_decay=0 --model_root=.droot/single-core 
 """
 
 # multi-core
@@ -86,7 +95,7 @@ if __name__ == '__main__':
     parser.add_argument('--model_root', default=njoin(DROOT, 'trained_models'), type=str, help='root dir of storing the model')
     
     parser.add_argument("--save_model_every", default=0, type=int)
-    parser.add_argument("--exp_name", default='image-task', type=str)
+    parser.add_argument("--exp_name", default='translation-task', type=str)
     parser.add_argument("--init_from", default='scratch', type=str, help='scratch | resume | gpt2')
     parser.add_argument('--wandb_log', default=False, type=bool)
     parser.add_argument("--wandb_project", default='translation-task', type=str)    
@@ -101,13 +110,13 @@ if __name__ == '__main__':
     parser.add_argument('--beta', default=1, type=float)
     parser.add_argument('--qk_share', default=False, type=bool)
     parser.add_argument('--model_name', default='dptranslation', type=str)    
-    parser.add_argument('--beta', default=1, type=float)
     parser.add_argument('--bandwidth', default=1, type=float)  
     parser.add_argument('--sphere_radius', default=1, type=float)  
 
     # Dataset settings
     parser.add_argument('--dataset_name', default='iwslt14', type=str)
     parser.add_argument('--divider', default=1, type=int)  # downsizing the test dataset    
+    parser.add_argument('--tokenizer_path', default=None, type=str)  # tokenizer file path
 
     # Config settings
     parser.add_argument('--hidden_size', default=48, type=int)
@@ -154,7 +163,6 @@ if __name__ == '__main__':
     #block_size = 1024  # max sequence length (https://stackoverflow.com/questions/66294076/how-to-determine-the-block-size-in-training-a-dataset)
 
     # model
-    n_layer = args.n_layers; n_head = args.n_attn_heads; n_embd = args.hidden_size    
     dropout = 0.0 # for pretraining 0 is good, for finetuning try 0.1+
     bias = False # do we use bias inside LayerNorm and Linear layers?
     
@@ -165,7 +173,7 @@ if __name__ == '__main__':
         "hidden_size": args.hidden_size,
         "num_encoder_layers": args.num_encoder_layers,
         "num_decoder_layers": args.num_decoder_layers,
-        "num_attention_heads": args.n_attn_heads,
+        "num_attention_heads": args.num_attention_heads,
         "intermediate_size": 4 * args.hidden_size, # 4 * hidden_size
         "hidden_dropout_prob": args.hidden_dropout_prob,
         "encoder_dropout_prob": args.encoder_dropout_prob,
@@ -179,11 +187,11 @@ if __name__ == '__main__':
         "trg_vocab_size": args.trg_vocab_size,
         "trg_pad_token_id": args.trg_pad_token_id,
         "max_length": args.max_length,
+        "tokenizer_path": args.tokenizer_path,
     }
     # These are not hard constraints, but are used to prevent misconfigurations
     assert config["hidden_size"] % config["num_attention_heads"] == 0
     assert config['intermediate_size'] == 4 * config['hidden_size']
-    assert config['image_size'] % config['patch_size'] == 0
 
     attn_setup = {'qk_share': False}
     attn_setup['model_name'] = args.model_name
@@ -275,11 +283,6 @@ if __name__ == '__main__':
         print(f'device = {device}')
         print(f'backend = {backend}')
         print('-'*25 + '\n')              
-
-    # tokens_per_iter = gradient_accumulation_steps * ddp_world_size * batch_size * block_size
-    # print(f"tokens per iteration will be: {tokens_per_iter:,}")
-    images_per_iter = gradient_accumulation_steps * ddp_world_size * batch_size
-    print(f"images per iteration will be: {images_per_iter:,}")    
     
     if args.model_root == '':
         model_root = structural_model_root(qk_share=args.qk_share, num_encoder_layers=args.num_encoder_layers,
@@ -310,18 +313,73 @@ if __name__ == '__main__':
     ptdtype = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torch.float16}[dtype]
     ctx = nullcontext() if device_type == 'cpu' else torch.amp.autocast(device_type=device_type, dtype=ptdtype)
 
-    # poor man's data loader
+    def get_all_sentences(ds, lang):
+        for item in ds:
+            yield item['translation'][lang]
+            
+    def get_or_build_tokenizer(config, ds, lang):
+        if config['tokenizer_path'] is None:
+            # Most code taken from: https://huggingface.co/docs/tokenizers/quicktour
+            tokenizer = Tokenizer(WordLevel(unk_token="[UNK]"))
+            tokenizer.pre_tokenizer = Whitespace()
+            trainer = WordLevelTrainer(special_tokens=["[UNK]", "[PAD]", "[SOS]", "[EOS]"], min_frequency=2)
+            tokenizer.train_from_iterator(get_all_sentences(ds, lang), trainer=trainer)
+            # tokenizer.save(str(tokenizer_path))
+        else:
+            tokenizer_path = Path(config['tokenizer_path'].format(lang))
+            assert Path.exists(tokenizer_path), "Tokenizer path does not exist"
+            tokenizer = Tokenizer.from_file(str(tokenizer_path))
+        return tokenizer
+    
+    # def preprocess_function(examples, tokenizer, language, max_length):
+    #     inputs = [example[language] for example in examples["translation"]]
+    #     pad_id = tokenizer.token_to_id("[PAD]")
+    #     encodings = tokenizer.encode_batch(inputs)
+    #     for encoding in encodings:
+    #         encoding.truncate(max_length=max_length)
+    #         encoding.pad(length=max_length, pad_id=pad_id, pad_token="[PAD]")
+    #     return [encoding.ids for encoding in encodings]
+    
+    # def preprocess_function(examples, tokenizer_src, src_language, tokenizer_trg, trg_language, max_length):
+    #     inputs = [example[src_language] for example in examples["translation"]]
+    #     targets = [example[trg_language] for example in examples["translation"]]
+        
+    #     model_inputs = tokenizer_src(inputs, text_target=targets, max_length=128, truncation=True)
+    #     return model_inputs
+        
+        
+    #     pad_id = tokenizer_src.token_to_id("[PAD]")
+    #     model_inputs = tokenizer_src.encode_batch(inputs)
+    #     for model_input in model_inputs:
+    #         model_input.truncate(max_length=max_length)
+    #         model_input.pad(length=max_length, pad_id=pad_id, pad_token="[PAD]")
+    #     model_inputs = [model_input.ids for model_input in model_inputs]
+    #     labels = tokenizer_trg.encode_batch(targets)
+    #     for label in labels:
+    #         label.truncate(max_length=max_length)
+    #         label.pad(length=max_length, pad_id=pad_id, pad_token="[PAD]")
+    #     labels = [label.ids for label in labels]
+    #     return model_inputs, labels
+
     if dataset == 'iwslt14': 
-        # Define tokenizers (using these for now...)
-        tokenizer_src = AutoTokenizer.from_pretrained('dbmdz/german-gpt2')  # German tokenizer
-        tokenizer_trg = AutoTokenizer.from_pretrained('openai-community/gpt2')  # English tokenizer
+        src_language, trg_language = 'de', 'en'
+        dataset = load_dataset("ted_talks_iwslt", language_pair=(src_language, trg_language), year="2014", split="train")
+        tokenizer_src = get_or_build_tokenizer(config, dataset, src_language)
+        tokenizer_trg = get_or_build_tokenizer(config, dataset, trg_language)
+        # Split dataset
+        dataset = dataset.train_test_split(test_size=0.2, shuffle=True) #20% test set
+        #trainset, testset = dataset
+        trainset = dataset['train']; testset = dataset['test']
+        trainset = BilingualDataset(trainset, tokenizer_src, tokenizer_trg, src_language, trg_language, config["max_length"])
+        testset = BilingualDataset(testset, tokenizer_src, tokenizer_trg, src_language, trg_language, config["max_length"])
+        # Create dataloaders
+        trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True, num_workers=ddp_world_size)
+        testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size, shuffle=False, num_workers=ddp_world_size)
         # Get pad token ids and vocab sizes
-        config["src_vocab_size"] = tokenizer_src.vocab_size
-        config["src_pad_token_id"] = tokenizer_src.pad_token_id
-        config["trg_vocab_size"] = tokenizer_trg.vocab_size
-        config["trg_pad_token_id"] = tokenizer_trg.pad_token_id
-        # Load data
-        trainloader, testloader = prepare_data(tokenizer_src, tokenizer_trg, batch_size=batch_size, num_workers=ddp_world_size, max_length=config["max_length"]) 
+        config["src_vocab_size"] = tokenizer_src.get_vocab_size()
+        config["src_pad_token_id"] = tokenizer_src.token_to_id("[PAD]")
+        config["trg_vocab_size"] = tokenizer_trg.get_vocab_size()
+        config["trg_pad_token_id"] = tokenizer_trg.token_to_id("[PAD]")
 
     # only for large datasets
     # def get_batch(split):
@@ -351,11 +409,21 @@ if __name__ == '__main__':
         else:
             data = testloader
         ix = torch.randint(len(data), (batch_size,))
-        x = torch.tensor([testloader.dataset["input_ids"][i] for i in ix]) # (B, N) 
-        y = torch.tensor([testloader.dataset["labels"][i] for i in ix]) # (B, N) 
-        encoder_mask = torch.tensor([testloader.dataset["attention_mask"][i] for i in ix]) # (B, N) 
-        encoder_mask = (encoder_mask.unsqueeze(-1)@encoder_mask.unsqueeze(1)).view(batch_size, 1, config["max_length"], config["max_length"]) # (B,1,N,N)
-        decoder_mask = torch.stack([(torch.tensor(testloader.dataset["attention_mask"][i] != 0)).unsqueeze(0).int() & causal_mask(config["max_length"]) for i in ix]) # (B,1,N,N)
+        # x = torch.tensor([data.dataset["encoder_input"][i] for i in ix]) # (B, N) 
+        # y = torch.tensor([data.dataset["decoder_input"][i] for i in ix]) # (B, N) 
+        # encoder_mask = torch.tensor([data.dataset["attention_mask"][i] for i in ix]) # (B, N) 
+        # encoder_mask = (encoder_mask.unsqueeze(-1)@encoder_mask.unsqueeze(1)).view(batch_size, 1, config["max_length"], config["max_length"]) # (B,1,N,N)
+        # decoder_mask = torch.stack([(torch.tensor(data.dataset["attention_mask"][i] != 0)).unsqueeze(0).int() & causal_mask(config["max_length"]) for i in ix]) # (B,1,N,N)
+
+        ##### CHAGNES HERE #####
+        # this seems slow
+        data_points = [data.dataset.__getitem__(i.item()) for i in ix]        
+        x = torch.stack([data_points[i]['encoder_input'] for i in range(batch_size)])
+        y = torch.stack([data_points[i]['decoder_input'] for i in range(batch_size)])
+        pre_encoder_mask = torch.stack([data_points[i]['encoder_mask'].squeeze() for i in range(batch_size)])
+        encoder_mask = (pre_encoder_mask.unsqueeze(-1)@pre_encoder_mask.unsqueeze(1)).view(batch_size, 1, config["max_length"], config["max_length"]) # (B,1,N,N)
+        decoder_mask = torch.stack([data_points[i]['decoder_mask'] for i in range(batch_size)]) # (B,1,N,N)
+
         if device_type == 'cuda':
             # pin arrays x,y, which allows us to move them to GPU asynchronously (non_blocking=True)
             x, y = x.pin_memory().to(device, non_blocking=True), y.pin_memory().to(device, non_blocking=True)
@@ -395,6 +463,9 @@ if __name__ == '__main__':
         elif args.model_name == 'fnstranslation':
             from models.fns_translation import FNSForTranslation
             model = FNSForTranslation(config)    
+        else:
+            print(f'{args.model_name} does not exist!')
+            quit()
 
     """
     elif init_from == 'resume':
@@ -443,8 +514,10 @@ if __name__ == '__main__':
     # else:
     #     scaler = torch.GradScaler('cpu', enabled=(dtype == 'float16'))
 
-    # loss function
-    loss_fn = nn.CrossEntropyLoss(ignore_index=config["src_pad_token_id"])
+    ##### CHANGES HERE #####
+    # loss function    
+    #loss_fn = nn.CrossEntropyLoss(ignore_index=config["src_pad_token_id"])
+    loss_fn = nn.CrossEntropyLoss()
 
     # optimizer
     #optimizer = model.configure_optimizers(weight_decay, learning_rate, (beta1, beta2), device_type)    
@@ -470,9 +543,12 @@ if __name__ == '__main__':
         #model = DDP(model, device_ids=[ddp_local_rank], output_device=ddp_local_rank)    
 
     # helps estimate an arbitrarily accurate loss over either split using many batches
-    def greedy_decode(model, source, source_mask, tokenizer_trg, max_len, device):
-        sos_idx = tokenizer_trg.bos_token_id
-        eos_idx = tokenizer_trg.eos_token_id
+    def greedy_decode(model, source, source_mask, tokenizer_trg, max_len, device):        
+        # sos_idx = tokenizer_trg.bos_token_id
+        # eos_idx = tokenizer_trg.eos_token_id
+        ##### CHANGES HERE #####
+        sos_idx = tokenizer_trg.get_vocab()['[SOS]']
+        eos_idx = tokenizer_trg.get_vocab()['[EOS]']
 
         # Precompute the encoder output and reuse it for every step
         encoder_output = model.encoder(source, source_mask)
@@ -486,8 +562,9 @@ if __name__ == '__main__':
             decoder_mask = torch.stack([(source_mask[i,0,0,:] != 0).unsqueeze(0).int() & causal_mask(config["max_length"]) for i in range(source_mask.shape[0])]) # (B,1,N,N)
             decoder_mask = decoder_mask.type_as(source_mask).to(device)
 
+            ##### CHANGES HERE #####
             # calculate output
-            out = model.decode(decoder_input, encoder_output, source_mask, decoder_mask)
+            out = model.decoder(decoder_input, encoder_output, source_mask, decoder_mask)
             # get next token
             prob = model.project(out[:, -1])
             _, next_word = torch.max(prob, dim=1)
@@ -501,7 +578,7 @@ if __name__ == '__main__':
         return decoder_input.squeeze(0)
 
     @torch.no_grad()
-    def estimate_loss(): # CHANGE
+    def estimate_loss():
         out_loss = {}
         out_bleu = {}
         model.eval()
@@ -512,9 +589,10 @@ if __name__ == '__main__':
             for k in range(eval_iters):
                 X, Y, encoder_mask, decoder_mask = get_batch(split)
                 with ctx:
-                    #logits, loss = model(X, Y)
+                    ##### CHANGES HERE #####
                     logits, _, _, _ = model(X, encoder_mask, decoder_mask)
-                    loss = loss_fn(logits, Y)
+                    loss = loss_fn(logits, F.one_hot(Y, num_classes=config['trg_vocab_size']).float())                
+
                     # Generate sentence
                     model_out = greedy_decode(model, X, encoder_mask, tokenizer_trg, config["max_length"], device)
                     model_out_text = tokenizer_trg.decode(model_out.detach().cpu().numpy())
@@ -607,9 +685,10 @@ if __name__ == '__main__':
                 # looking at the source of that context manager, it just toggles this variable
                 model.require_backward_grad_sync = (micro_step == gradient_accumulation_steps - 1)
             with ctx:
-                #logits, loss = model(X, Y)
+                ##### CHANGES HERE #####
                 logits, _, _, _ = model(X, encoder_mask, decoder_mask)
-                loss = loss_fn(logits, Y) 
+                # logits (bs, seq_len, tgt_vocab_size)
+                loss = loss_fn(logits, torch.F.one_hot(Y, num_classes=config['trg_vocab_size']).float())  # logits.argmax(-1)                
                 # loss = loss_fn(logits.view(-1, config["trg_vocab_size"]), Y.view(-1)) 
                 loss = loss / gradient_accumulation_steps # scale the loss to account for gradient accumulation
             # immediately async prefetch next batch while model is doing the forward pass on the GPU

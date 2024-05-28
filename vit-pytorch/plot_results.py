@@ -56,7 +56,8 @@ def plot_ensembles(model_root_dir, datasets=['cifar10'],
     print(f'{metrics} \n')
 
     nrows, ncols = len(datasets), len(metrics)
-    figsize = (7.5,2.5*nrows)
+    #figsize = (9.5,2.5*nrows)
+    figsize = (12,2.5*nrows)
     fig, axs = plt.subplots(nrows,ncols,figsize=figsize,
                             sharex=True,sharey=False)
     if axs.ndim == 1:
@@ -174,11 +175,11 @@ def plot_ensembles(model_root_dir, datasets=['cifar10'],
 
                 if idx == 0:
                     axs[idx,kdx].set_title(NAMES_DICT[metric])
-                elif idx == nrows - 1:
-                    axs[idx,kdx].set_xlabel('Epoch')
+                #if idx == nrows - 1:
+                axs[0,kdx].set_xlabel('Steps')
 
-                axs[idx,0].set_ylabel(NAMES_DICT[dataset])
-                axs[0,0].legend(loc='upper left', #bbox_to_anchor=(0.5, 1.05),
+                #axs[idx,0].set_ylabel(NAMES_DICT[dataset])
+                axs[0,0].legend(loc='upper right', #bbox_to_anchor=(0.5, 1.05),
                                 ncol=1, frameon=False)    
 
                 # ----- Messages -----
@@ -302,7 +303,7 @@ def plot_model(model_root_dir, dirnames, instances,
 
                 if idx == 0:
                     axs[idx,kdx].set_title(NAMES_DICT[metric])
-                elif idx == nrows - 1:
+                if idx == nrows - 1:
                     axs[idx,kdx].set_xlabel('Steps')
 
                 print_metrics[metric] = [best_metric, metric_plot.iloc[-1]]  # best + final

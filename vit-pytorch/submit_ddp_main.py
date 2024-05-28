@@ -75,26 +75,29 @@ if __name__ == '__main__':
     debug_mode = False
     print(f'---------- debug_mode = {debug_mode} ---------- \n')
     
-    seeds = [0]    
+    seeds = [0,1,2,3,4]    
     kwargss_all = []    
     for seed in seeds:
         for didx, dataset_name in enumerate(dataset_names):
             if not debug_mode:
                 select = 1; ngpus, ncpus = 0, 1            
-                walltime, mem = '23:59:59', '16GB'                             
+                walltime, mem = '23:59:59', '8GB'                             
 
-                kwargss = [{'model_name':'fnsvit', 'beta': 1.5}, {'model_name':'fnsvit', 'beta': 2}, 
+                kwargss = [{'model_name':'fnsvit', 'beta': 1.2}, {'model_name':'fnsvit', 'beta': 1.8}, {'model_name':'fnsvit', 'beta': 2}, 
+                           {'model_name':'opfnsvit', 'beta': 1.2}, {'model_name':'opfnsvit', 'beta': 1.8}, {'model_name':'opfnsvit', 'beta': 2},
+                           {'model_name':'sinkvit', 'n_it': 1}, {'model_name':'sinkvit', 'n_it': 3},
                            {'model_name':'dpvit'}]                                        
-                common_kwargs = {'n_layers':          5,
+                common_kwargs = {'n_layers':          4,
                                  'n_attn_heads':      8,   
                                  'hidden_size':       48,
-                                 'max_iters':         2500,
+                                 'max_iters':         15000,
                                  'eval_interval':     50,
                                  'eval_iters':        50,                     
                                  'train_bs':          16,                                                                          
                                  'weight_decay':      0,
+                                 'lr_scheduler_type': 'binary',
                                  'max_lr':            5e-5,
-                                 'min_lr':            1e-6,
+                                 'min_lr':            5e-6,
                                  }  
 
                 qk_share = False if 'qk_share' not in common_kwargs.keys() else common_kwargs['qk_share']
@@ -132,7 +135,10 @@ if __name__ == '__main__':
             kwargss = add_common_kwargs(kwargss, common_kwargs)
             kwargss_all += kwargss
 
-    #print(kwargss_all)  
+    print(f'Total jobs: {len(kwargss_all)} \n')
+    for xx in kwargss_all:
+        print(xx)  
+        print('\n')
     #quit()  # delete      
     train_submit(script_name, kwargss_all,
                  ncpus=ncpus,

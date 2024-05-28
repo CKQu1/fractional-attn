@@ -45,6 +45,10 @@ $ torchrun --nproc_per_node=8 --nnodes=2 --node_rank=1 --master_addr=123.456.123
 """
 python ddp_main.py --model_name=fnsvit --beta=1.5 --max_iters=100 --eval_interval=5\
  --eval_iters=200 --weight_decay=0 --n_layers=1 --n_attn_heads=2 --model_root=.droot/single-core 
+
+python ddp_main.py --model_name=opfnsvit --beta=1.5 --max_iters=100 --eval_interval=5\
+ --lr_scheduler_type=binary --max_lr=5e-5 --max_lr=5e-6\
+ --eval_iters=200 --weight_decay=0 --n_layers=1 --n_attn_heads=2 --model_root=.droot/single-core  
 """
 
 # multi-core
@@ -71,7 +75,9 @@ if __name__ == '__main__':
     #parser.add_argument('--eval_bs', default=10, type=int)
     parser.add_argument('--weight_decay', default=0.01, type=float)
     parser.add_argument('--beta1', default=0.9, type=float)
-    parser.add_argument('--beta2', default=0.95, type=float)        
+    parser.add_argument('--beta2', default=0.95, type=float)       
+
+    parser.add_argument('--lr_scheduler_type', default='cosine', type=str, help='cosine | binary') 
     
     # log settings
     parser.add_argument('--eval_interval', default=5, type=int)
@@ -172,7 +178,7 @@ if __name__ == '__main__':
     attn_setup = {'qk_share': args.qk_share}
     attn_setup['model_name'] = args.model_name
     attn_setup['dataset_name'] = args.dataset_name    
-    if args.model_name == 'fnsvit':
+    if 'fns' in args.model_name:
         config['beta'] = attn_setup['beta'] = args.beta      
         config['bandwidth'] = attn_setup['bandwidth'] = args.bandwidth   
         if args.beta < 2:            
@@ -273,10 +279,12 @@ if __name__ == '__main__':
         # save train settings
         train_settings = pd.DataFrame(columns=["max_lr", "min_lr", "batch_size", "beta1", "beta2",
                                                "max_iters", "weight_decay", "grad_clip", "decay_lr",
+                                               "lr_scheduler_type",
                                                "eval_interval", "log_interval", "eval_iters", "eval_only", "always_save_checkpoint",                         
                                                "warmup_iters",  "grad_accum_step"], index=range(1))
         train_settings.iloc[0] = [args.max_lr, args.min_lr, args.train_bs, args.beta1, args.beta2,
                                   args.max_iters, args.weight_decay, args.grad_clip, args.decay_lr,
+                                  args.lr_scheduler_type,
                                   args.eval_interval, args.log_interval, args.eval_iters, args.eval_only, args.always_save_checkpoint,
                                   args.warmup_iters, args.grad_accum_step
                                   ]
@@ -374,6 +382,9 @@ if __name__ == '__main__':
         elif args.model_name == 'fnsvit':
             from vit_pytorch.fns_vit import FNSViTForClassfication
             model = FNSViTForClassfication(config)    
+        elif args.model_name == 'opfnsvit':
+            from vit_pytorch.opfns_vit import OPFNSViTForClassfication
+            model = OPFNSViTForClassfication(config)               
         elif args.model_name == 'sinkvit':
             from vit_pytorch.sink_vit import SINKViTForClassfication
             model = SINKViTForClassfication(config)               
@@ -475,7 +486,7 @@ if __name__ == '__main__':
         model.train()
         return out_loss, out_acc
 
-    # learning rate decay scheduler (cosine with warmup)
+    # learning rate decay scheduler (cosine with warmup)    
     def get_lr(it):
         # 1) linear warmup for warmup_iters steps
         if it < warmup_iters:
@@ -488,7 +499,7 @@ if __name__ == '__main__':
         assert 0 <= decay_ratio <= 1
         coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio)) # coeff ranges 0..1
         return min_lr + coeff * (learning_rate - min_lr)
-
+    
     # logging
     if wandb_log and master_process:
         import wandb  # NOT IN CONTAINER
@@ -506,7 +517,14 @@ if __name__ == '__main__':
     while True:
 
         # determine and set the learning rate for this iteration
-        lr = get_lr(iter_num) if decay_lr else learning_rate
+        if args.lr_scheduler_type == 'cosine':
+            lr = get_lr(iter_num) if decay_lr else learning_rate
+        elif args.lr_scheduler_type == 'binary':
+            if iter_num < max_iters * 2/3:
+                lr = learning_rate
+            else:
+                lr = min_lr  
+
         for param_group in optimizer.param_groups:
             param_group['lr'] = lr
 

@@ -42,7 +42,10 @@ class BilingualDataset(Dataset):
 
         # Make sure the number of padding tokens is not negative. If it is, the sentence is too long
         if enc_num_padding_tokens < 0 or dec_num_padding_tokens < 0:
-            raise ValueError("Sentence is too long")
+            # Truncate sentence
+            trunc_length = max(-enc_num_padding_tokens, -dec_num_padding_tokens)
+            enc_input_tokens = enc_input_tokens[:-trunc_length]
+            dec_input_tokens = dec_input_tokens[:-trunc_length]
 
         # Add <s> and </s> token
         encoder_input = torch.cat(
@@ -90,6 +93,24 @@ class BilingualDataset(Dataset):
             "tgt_text": tgt_text,
         }
 
+        #return encoder_input, decoder_input, encoder_mask, decoder_mask, label, src_text, tgt_text
+
+        # data_dict = {
+        #     "encoder_input": encoder_input,  # (seq_len)
+        #     "decoder_input": decoder_input,  # (seq_len)
+        #     "encoder_mask": (encoder_input != self.pad_token).unsqueeze(0).unsqueeze(0).int(), # (1, 1, seq_len)
+        #     "decoder_mask": (decoder_input != self.pad_token).unsqueeze(0).int() & causal_mask(decoder_input.size(0)), # (1, seq_len) & (1, seq_len, seq_len),
+        #     "label": label,  # (seq_len)
+        #     "src_text": src_text,
+        #     "tgt_text": tgt_text,
+        # }
+
+        # return data_dict['encoder_input'][idx], data_dict['decoder_input'][idx], data_dict['encoder_mask'][idx], data_dict['decoder_mask'][idx], data_dict['label'][idx], data_dict['src_text'][idx], data_dict['tgt_text'][idx]
+
+
+def causal_mask(size):
+    mask = torch.triu(torch.ones((1, size, size)), diagonal=1).type(torch.int)
+    return mask == 0
 
 def preprocess_function(examples, tokenizer_src, src_language, tokenizer_trg, trg_language, max_length):
     inputs = [example[src_language] for example in examples["translation"]]

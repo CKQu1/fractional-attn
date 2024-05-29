@@ -49,34 +49,25 @@ class FNSAttentionHead(nn.Module):
             query = F.normalize(self.query(x), p=2, dim=-1)
             key = F.normalize(self.key(x), p=2, dim=-1)
             value = F.normalize(self.value(x), p=2, dim=-1)                
-        # print(f'query shape: {query.shape}')
-        # print(f'key shape: {key.shape}')
-        # print(f'value shape: {value.shape}')
 
         beta, bandwidth = self.beta, self.bandwidth
         sphere_radius = self.sphere_radius
         d_intrinsic = self.attention_head_size
-        
-        batch_size, sequence_length, _ = query.size()
 
         # geodesic distance on sphere
         eps = 1e-7  # for limiting the divergence from acos
         g_dist = torch.acos(torch.clamp(query @ key.transpose(-2, -1), -1+eps, 1-eps)) * sphere_radius
-        
-        # Mask
-        if attention_mask is not None:
-            bool_mask = (attention_mask>=0).long()
-            attention_mask_expanded = (bool_mask.unsqueeze(-1)@bool_mask.unsqueeze(1)).view(batch_size, 1, sequence_length, sequence_length)
-            g_dist = g_dist.masked_fill(attention_mask_expanded==0, 1e9)
         
         # Calculate the attention scores
         if beta < 2:
             attn_score = (1 + g_dist/bandwidth**0.5)**(-d_intrinsic-beta)
         else:
             attn_score = torch.exp((-g_dist/bandwidth**0.5)**(beta/(beta-1)))
-        attn_score_shape = attn_score.shape
-        D_inv = torch.diag_embed(attn_score.sum(-1)**(-1))  # inverse of degree matrix of attn_score
-        K_tilde = D_inv @ attn_score @ D_inv
+        D_inv_row = torch.diag_embed(attn_score.sum(-1)**(-1))  # inverse of degree matrix of attn_score
+        D_inv_col = torch.diag_embed(attn_score.sum(-2)**(-1))  # inverse of degree matrix of attn_score
+        K_tilde = D_inv_row @ attn_score @ D_inv_col
+        attention_mask = attention_mask[:,:,:query.size(1),:key.size(1)] # Feels like a dirty fix...
+        K_tilde = K_tilde.masked_fill(attention_mask==0, -1e9) # Mask
         attention_probs = F.normalize(K_tilde,p=1,dim=3)  # can do this as the attn weights are always positive
         attention_probs = self.attn_dropout(attention_probs)
 
@@ -165,7 +156,7 @@ class FasterFNSMultiHeadAttention(nn.Module):
             self.kv_projection = nn.Linear(self.hidden_size, self.all_head_size * 2, bias=self.qkv_bias)
             self.q_projection = nn.Linear(self.hidden_size, self.all_head_size, bias=self.qkv_bias)
         else:
-            self.qkv_projection = nn.Linear(self.hidden_size, self.all_head_size * 3, bias=self.qkv_bias)
+            self.qkv_projection = nn.Linear(self.hidden_size, self.all_head_size * 3, bias=self.qkv_bias)         
         self.attn_dropout = nn.Dropout(config["attention_probs_dropout_prob"])
         # Create a linear layer to project the attention output back to the hidden size
         # In most cases, all_head_size and hidden_size are the same
@@ -176,14 +167,15 @@ class FasterFNSMultiHeadAttention(nn.Module):
         self.bandwidth = config['bandwidth']
         self.sphere_radius = config['sphere_radius']
 
-    def forward(self, x, attention_mask=None, output_attentions=False, encoder_hidden_states=None):
+    def forward(self, x, attention_mask=None, output_attentions=False, encoder_output_states=None):
+
         # Project the query, key, and value
-        if encoder_hidden_states is not None:
+        if encoder_output_states is not None:
             assert hasattr(
                 self, "q_projection"
             ), "If class is used as cross attention, the weights `q_projection` have to be defined. Please make sure to instantiate class with `Attention(..., is_cross_attention=True)`."
             query = self.q_projection(x)
-            kv = self.kv_projection(encoder_hidden_states)
+            kv = self.kv_projection(encoder_output_states)
             key, value = torch.chunk(kv, 2, dim=-1)
         else:
             # (batch_size, sequence_length, hidden_size) -> (batch_size, sequence_length, all_head_size * 3)
@@ -191,49 +183,53 @@ class FasterFNSMultiHeadAttention(nn.Module):
             # Split the projected query, key, and value into query, key, and value
             # (batch_size, sequence_length, all_head_size * 3) -> (batch_size, sequence_length, all_head_size)
             query, key, value = torch.chunk(qkv, 3, dim=-1)
+
         # Resize the query, key, and value to (batch_size, num_attention_heads, sequence_length, attention_head_size)
-        batch_size, sequence_length, _ = query.size()
+        batch_size, src_sequence_length, _ = query.size()
+        trg_sequence_length = key.size(1)
         num_attention_heads, attention_head_size = self.num_attention_heads, self.attention_head_size
 
         beta, bandwidth = self.beta, self.bandwidth
         sphere_radius = self.sphere_radius
         d_intrinsic = attention_head_size
 
-        query = F.normalize(query.view(batch_size, sequence_length, num_attention_heads, attention_head_size).transpose(1, 2), p=2, dim=-1)
-        key = F.normalize(key.view(batch_size, sequence_length, num_attention_heads, attention_head_size).transpose(1, 2), p=2, dim=-1)
-        value = value.view(batch_size, sequence_length, num_attention_heads, attention_head_size).transpose(1, 2)
-        # print(f'query shape: {query.shape}')
-        # print(f'key shape: {key.shape}')
-        # print(f'value shape: {value.shape}')        
+        query = F.normalize(query.view(batch_size, src_sequence_length, num_attention_heads, attention_head_size).transpose(1, 2), p=2, dim=-1)
+        key = F.normalize(key.view(batch_size, trg_sequence_length, num_attention_heads, attention_head_size).transpose(1, 2), p=2, dim=-1)
+        value = value.view(batch_size, trg_sequence_length, num_attention_heads, attention_head_size).transpose(1, 2)      
 
         # geodesic distance on sphere
         eps = 1e-7  # for limiting the divergence from acos
         g_dist = torch.acos(torch.clamp(query @ key.transpose(-2, -1), -1+eps, 1-eps)) * sphere_radius
-        
-        # Mask
-        if attention_mask is not None:
-            bool_mask = (attention_mask>=0).long()
-            attention_mask_expanded = (bool_mask.unsqueeze(-1)@bool_mask.unsqueeze(1)).view(batch_size, 1, sequence_length, sequence_length).expand(-1, num_attention_heads, -1, -1)      
-            g_dist = g_dist.masked_fill(attention_mask_expanded==0, 1e9)
         
         # Calculate the attention scores
         if beta < 2:
             attn_score = (1 + g_dist/bandwidth**0.5)**(-d_intrinsic-beta)
         else:
             attn_score = torch.exp((-g_dist/bandwidth**0.5)**(beta/(beta-1)))
-        D_inv = torch.diag_embed(attn_score.sum(-1)**(-1))  # inverse of degree matrix of attn_score
-        K_tilde = D_inv @ attn_score @ D_inv
+        D_inv_row = torch.diag_embed(attn_score.sum(-1)**(-1))  # inverse of degree matrix of attn_score
+        D_inv_col = torch.diag_embed(attn_score.sum(-2)**(-1))  # inverse of degree matrix of attn_score
+        K_tilde = D_inv_row @ attn_score @ D_inv_col
+        attention_mask = attention_mask[:,:,:src_sequence_length,:trg_sequence_length] # Feels like a dirty fix...
+        K_tilde = K_tilde.masked_fill(attention_mask.expand(-1,self.num_attention_heads,-1,-1)==0, -1e9) # Mask
         attention_probs = F.normalize(K_tilde,p=1,dim=3)  # can do this as the attn weights are always positive
         attention_probs = self.attn_dropout(attention_probs)
 
+        # ##### CHANGES HERE #####        
+        # print(f'attention_probs shape: {attention_probs.shape}')        
+
         # Calculate the attention output
         attention_output = attention_probs @ value
+
+        # ##### CHANGES HERE #####
+        # print(f'attention_output shape: {attention_output.shape}')  
+        # print('\n')
+
         # Resize the attention output
         # from (batch_size, num_attention_heads, sequence_length, attention_head_size)
         # To (batch_size, sequence_length, all_head_size)
         attention_output = attention_output.transpose(1, 2) \
                                            .contiguous() \
-                                           .view(batch_size, sequence_length, self.all_head_size)
+                                           .view(batch_size, src_sequence_length, self.all_head_size)
         # Project the attention output back to the hidden size
         attention_output = self.output_projection(attention_output)
         attention_output = self.output_dropout(attention_output)
@@ -319,12 +315,15 @@ class FNSDecoderBlock(nn.Module):
     def forward(self, x, encoder_output_states, src_mask=None, trg_mask=None, output_attentions=False):
         # Self-attention
         attention_output, self_attention_probs = \
-            self.self_attention(x, attention_mask=src_mask, output_attentions=output_attentions)
+            self.self_attention(x, attention_mask=trg_mask, output_attentions=output_attentions)
         # Skip connection
         x = self.layernorm_1(x + attention_output)
         # Cross-attention
+        ##### CHANGES HERE #####
         attention_output, cross_attention_probs = \
-            self.cross_attention(x, attention_mask=trg_mask, output_attentions=output_attentions, encoder_output_states=encoder_output_states)
+            self.cross_attention(x, attention_mask=src_mask, output_attentions=output_attentions, encoder_output_states=encoder_output_states)
+            #self.cross_attention(x, attention_mask=trg_mask, output_attentions=output_attentions, encoder_output_states=encoder_output_states)            
+            
         # Skip connection
         x = self.layernorm_2(x + attention_output)
         # Feed-forward network
@@ -333,7 +332,7 @@ class FNSDecoderBlock(nn.Module):
         x = self.layernorm_3(x + mlp_output)
         # Return the transformer block's output and the attention probabilities (optional)
         if not output_attentions:
-            return (x, None)
+            return (x, None, None)
         else:
             return (x, self_attention_probs, cross_attention_probs)
 
@@ -407,8 +406,12 @@ class FNSDecoder(nn.Module):
             block = FNSDecoderBlock(config)
             self.blocks.append(block)
         # Tie output linear weights to input embedding matrix
+
+        ##### CHANGES HERE #####
         self.fc = nn.Linear(config["hidden_size"], config["trg_vocab_size"], bias=bias)
-        self.fc.weight = self.token_embedding.weight 
+        self.fc.weight = self.token_embedding.weight
+        #self.fc = nn.Linear(config["hidden_size"], config["max_length"], bias=bias)
+         
         
     def forward(self, x, embedding_output_states, src_mask=None, trg_mask=None, output_attentions=False):
         # Create the position ids from the input token ids. Any padded tokens remain padded.
@@ -420,18 +423,22 @@ class FNSDecoder(nn.Module):
         # Calculate the transformer block's output for each block
         all_self_attentions = []
         all_cross_attentions = []
-        for block in self.blocks:
-            x, self_attention_probs, cross_attention_probs = block(x, embedding_output_states, src_mask=src_mask, trg_mask=trg_mask, output_attentions=output_attentions)
+        for block in self.blocks:         
+            ##### CHANGES HERE #####   
             if output_attentions:
+                x, self_attention_probs, cross_attention_probs = block(x, embedding_output_states, src_mask=src_mask, trg_mask=trg_mask, output_attentions=output_attentions)
                 all_self_attentions.append(self_attention_probs)
                 all_cross_attentions.append(cross_attention_probs)
+            ##### CHANGES HERE #####
+            else:
+                x, _, _ = block(x, embedding_output_states, src_mask=src_mask, trg_mask=trg_mask, output_attentions=output_attentions)              
         # Linear layer
         x = self.fc(x)
         # Softmax
         x = nn.Softmax(dim=-1)(x)
         # Return logits and the attention probabilities (optional)
         if not output_attentions:
-            return (x, None)
+            return (x, None, None)
         else:
             return (x, all_self_attentions, all_cross_attentions)
 
@@ -450,15 +457,24 @@ class FNSForTranslation(nn.Module):
         # Initialize the weights
         self.apply(self._init_weights)
 
-    def forward(self, x, encoder_mask, decoder_mask, output_attentions=False):
+    def forward(self, src, trg, src_mask, trg_mask, output_attentions=False):
         # Calculate the encoder's output
-        encoder_output, encoder_self_attentions = self.encoder(x, attention_mask = encoder_mask, output_attentions=output_attentions)
-        # Calculate the decoder's output
-        decoder_output, decoder_self_attentions, decoder_cross_attentions = self.decoder(x, encoder_output, src_mask=encoder_mask, trg_mask=decoder_mask, output_attentions=output_attentions)
+        encoder_output, encoder_self_attentions = self.encoder(src, attention_mask = src_mask, output_attentions=output_attentions)
+        # ##### CHANGES HERE #####
+        # print(f'encoder_output shape: {encoder_output.shape}')
+        # print('\n')
+
         # Return the logits and the attention probabilities (optional)
         if not output_attentions:
+            # Calculate the decoder's output
+            decoder_output, _, _ = self.decoder(trg, encoder_output, src_mask=src_mask, trg_mask=trg_mask, output_attentions=output_attentions)            
+
             return (decoder_output, None, None, None)
         else:
+            ##### CHANGES HERE #####
+            # Calculate the decoder's output
+            decoder_output, decoder_self_attentions, decoder_cross_attentions = self.decoder(trg, encoder_output, src_mask=src_mask, trg_mask=trg_mask, output_attentions=output_attentions)            
+
             return (decoder_output, encoder_self_attentions, decoder_self_attentions, decoder_cross_attentions)
 
     def _init_weights(self, module):

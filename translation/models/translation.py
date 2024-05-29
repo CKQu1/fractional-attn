@@ -60,6 +60,7 @@ class AttentionHead(nn.Module):
         attention_scores = attention_scores / math.sqrt(self.attention_head_size)
         if attention_mask is not None:
             # Write a very low value (indicating -inf) to the positions where mask == 0
+            attention_mask = attention_mask[:,:,:query.size(1),:key.size(1)] # Feels like a dirty fix...
             attention_scores.masked_fill_(attention_mask == 0, -1e9)
         attention_probs = nn.functional.softmax(attention_scores, dim=-1)
         attention_probs = self.dropout(attention_probs)
@@ -146,14 +147,14 @@ class FasterMultiHeadAttention(nn.Module):
         self.output_projection = nn.Linear(self.all_head_size, self.hidden_size)
         self.output_dropout = nn.Dropout(config["hidden_dropout_prob"])
 
-    def forward(self, x, attention_mask=None, output_attentions=False, encoder_hidden_states=None):
+    def forward(self, x, attention_mask=None, output_attentions=False, encoder_output_states=None):
         # Project the query, key, and value
-        if encoder_hidden_states is not None:
+        if encoder_output_states is not None:
             assert hasattr(
                 self, "q_projection"
             ), "If class is used as cross attention, the weights `q_projection` have to be defined. Please make sure to instantiate class with `Attention(..., is_cross_attention=True)`."
             query = self.q_projection(x)
-            kv = self.kv_projection(encoder_hidden_states)
+            kv = self.kv_projection(encoder_output_states)
             key, value = torch.chunk(kv, 2, dim=-1)
         else:
             # (batch_size, sequence_length, hidden_size) -> (batch_size, sequence_length, all_head_size * 3)
@@ -162,16 +163,18 @@ class FasterMultiHeadAttention(nn.Module):
             # (batch_size, sequence_length, all_head_size * 3) -> (batch_size, sequence_length, all_head_size)
             query, key, value = torch.chunk(qkv, 3, dim=-1)
         # Resize the query, key, and value to (batch_size, num_attention_heads, sequence_length, attention_head_size)
-        batch_size, sequence_length, _ = query.size()
-        query = query.view(batch_size, sequence_length, self.num_attention_heads, self.attention_head_size).transpose(1, 2)
-        key = key.view(batch_size, sequence_length, self.num_attention_heads, self.attention_head_size).transpose(1, 2)
-        value = value.view(batch_size, sequence_length, self.num_attention_heads, self.attention_head_size).transpose(1, 2)
+        batch_size, src_sequence_length, _ = query.size()
+        trg_sequence_length = key.size(1)
+        query = query.view(batch_size, src_sequence_length, self.num_attention_heads, self.attention_head_size).transpose(1, 2)
+        key = key.view(batch_size, trg_sequence_length, self.num_attention_heads, self.attention_head_size).transpose(1, 2)
+        value = value.view(batch_size, trg_sequence_length, self.num_attention_heads, self.attention_head_size).transpose(1, 2)
         # Calculate the attention scores
         # softmax(Q*K.T/sqrt(head_size))*V
         attention_scores = torch.matmul(query, key.transpose(-1, -2))
         attention_scores = attention_scores / math.sqrt(self.attention_head_size)
         if attention_mask is not None:
             # Write a very low value (indicating -inf) to the positions where mask == 0
+            attention_mask = attention_mask[:,:,:src_sequence_length,:trg_sequence_length] # Feels like a dirty fix...
             attention_scores.masked_fill_(attention_mask == 0, -1e9)
         attention_probs = nn.functional.softmax(attention_scores, dim=-1)
         attention_probs = self.attn_dropout(attention_probs)
@@ -182,7 +185,7 @@ class FasterMultiHeadAttention(nn.Module):
         # To (batch_size, sequence_length, all_head_size)
         attention_output = attention_output.transpose(1, 2) \
                                            .contiguous() \
-                                           .view(batch_size, sequence_length, self.all_head_size)
+                                           .view(batch_size, src_sequence_length, self.all_head_size)
         # Project the attention output back to the hidden size
         attention_output = self.output_projection(attention_output)
         attention_output = self.output_dropout(attention_output)
@@ -268,12 +271,12 @@ class DecoderBlock(nn.Module):
     def forward(self, x, encoder_output_states, src_mask=None, trg_mask=None, output_attentions=False):
         # Self-attention
         attention_output, self_attention_probs = \
-            self.self_attention(x, attention_mask=src_mask, output_attentions=output_attentions)
+            self.self_attention(x, attention_mask=trg_mask, output_attentions=output_attentions)
         # Skip connection
         x = self.layernorm_1(x + attention_output)
         # Cross-attention
         attention_output, cross_attention_probs = \
-            self.cross_attention(x, attention_mask=trg_mask, output_attentions=output_attentions, encoder_output_states=encoder_output_states)
+            self.cross_attention(x, attention_mask=src_mask, output_attentions=output_attentions, encoder_output_states=encoder_output_states)
         # Skip connection
         x = self.layernorm_2(x + attention_output)
         # Feed-forward network
@@ -282,7 +285,7 @@ class DecoderBlock(nn.Module):
         x = self.layernorm_3(x + mlp_output)
         # Return the transformer block's output and the attention probabilities (optional)
         if not output_attentions:
-            return (x, None)
+            return (x, None, None)
         else:
             return (x, self_attention_probs, cross_attention_probs)
         
@@ -298,12 +301,12 @@ class Encoder(nn.Module):
         # Embeddings
         self.token_embedding = nn.Embedding(
             num_embeddings=config["src_vocab_size"],
-            embedding_dim=config["embed_dim"],
+            embedding_dim=config["hidden_size"],
             padding_idx=config["src_pad_token_id"],
         )
         self.positional_embedding = nn.Embedding(
             num_embeddings=config["max_length"],
-            embedding_dim=config["embed_dim"],
+            embedding_dim=config["hidden_size"],
         )
         self.dropout = nn.Dropout(p=config["encoder_dropout_prob"])
         # Create a list of transformer blocks
@@ -342,12 +345,12 @@ class Decoder(nn.Module):
         # Embeddings
         self.token_embedding = nn.Embedding(
             num_embeddings=config["trg_vocab_size"],
-            embedding_dim=config["embed_dim"],
+            embedding_dim=config["hidden_size"],
             padding_idx=config["trg_pad_token_id"],
         )
         self.positional_embedding = nn.Embedding(
             num_embeddings=config["max_length"],
-            embedding_dim=config["embed_dim"],
+            embedding_dim=config["hidden_size"],
         )
         self.dropout = nn.Dropout(p=config["decoder_dropout_prob"])
         # Create a list of transformer blocks
@@ -370,17 +373,19 @@ class Decoder(nn.Module):
         all_self_attentions = []
         all_cross_attentions = []
         for block in self.blocks:
-            x, self_attention_probs, cross_attention_probs = block(x, embedding_output_states, src_mask=src_mask, trg_mask=trg_mask, output_attentions=output_attentions)
             if output_attentions:
+                x, self_attention_probs, cross_attention_probs = block(x, embedding_output_states, src_mask=src_mask, trg_mask=trg_mask, output_attentions=output_attentions)
                 all_self_attentions.append(self_attention_probs)
                 all_cross_attentions.append(cross_attention_probs)
+            else: 
+                x, _, _ = block(x, embedding_output_states, src_mask=src_mask, trg_mask=trg_mask, output_attentions=output_attentions)              
         # Linear layer
         x = self.fc(x)
         # Softmax
         x = nn.Softmax(dim=-1)(x)
         # Return logits and the attention probabilities (optional)
         if not output_attentions:
-            return (x, None)
+            return (x, None, None)
         else:
             return (x, all_self_attentions, all_cross_attentions)
 
@@ -399,22 +404,26 @@ class DPForTranslation(nn.Module):
         # Initialize the weights
         self.apply(self._init_weights)
 
-    def forward(self, x, encoder_mask, decoder_mask, output_attentions=False):
+    def forward(self, src, trg, encoder_mask, decoder_mask, output_attentions=False):
         # Calculate the encoder's output
-        encoder_output, encoder_self_attentions = self.encoder(x, attention_mask = encoder_mask, output_attentions=output_attentions)
-        # Calculate the decoder's output
-        decoder_output, decoder_self_attentions, decoder_cross_attentions = self.decoder(x, encoder_output, src_mask=encoder_mask, trg_mask=decoder_mask, output_attentions=output_attentions)
+        encoder_output, encoder_self_attentions = self.encoder(src, attention_mask = encoder_mask, output_attentions=output_attentions)
         # Return the logits and the attention probabilities (optional)
         if not output_attentions:
+            # Calculate the decoder's output
+            decoder_output, _, _ = self.decoder(trg, encoder_output, src_mask=encoder_mask, trg_mask=decoder_mask, output_attentions=output_attentions)
             return (decoder_output, None, None, None)
         else:
+            # Calculate the decoder's output
+            decoder_output, decoder_self_attentions, decoder_cross_attentions = self.decoder(trg, encoder_output, src_mask=encoder_mask, trg_mask=decoder_mask, output_attentions=output_attentions)
             return (decoder_output, encoder_self_attentions, decoder_self_attentions, decoder_cross_attentions)
 
     def _init_weights(self, module):
-        if isinstance(module, (nn.Linear, nn.Embedding)):
+        if isinstance(module, nn.Linear):
             torch.nn.init.normal_(module.weight, mean=0.0, std=self.config["initializer_range"])
             if module.bias is not None:
                 torch.nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.Embedding):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=self.config["initializer_range"])
         elif isinstance(module, nn.LayerNorm):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)

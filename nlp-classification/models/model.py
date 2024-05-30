@@ -4,7 +4,7 @@ from torch import nn
 from transformers.modeling_utils import PreTrainedModel,apply_chunking_to_forward
 from transformers.models.roberta.configuration_roberta import RobertaConfig
 from typing import Optional, Tuple, Union, List
-from models.model_att import DPAttention, FNSAttention, V2FNSAttention, V3FNSAttention, OPFNSAttention, SINKAttention
+from models.model_att import DPAttention, FNSAttention, V2FNSAttention, V3FNSAttention, V4FNSAttention, OPFNSAttention, V2OPFNSAttention, SINKAttention
 from models.model_utils import *
 #from models.model_utils import BaseModelOutput
 
@@ -315,8 +315,12 @@ class Block(nn.Module):
             self.attention = V2FNSAttention(config, layer_id, **kwargs)
         elif model_name == 'v3fnsformer':
             self.attention = V3FNSAttention(config, layer_id, **kwargs)   
+        elif model_name == 'v4fnsformer':
+            self.attention = V4FNSAttention(config, layer_id, **kwargs)               
         elif model_name == 'opfnsformer':
             self.attention = OPFNSAttention(config, layer_id, **kwargs)
+        elif model_name == 'v2opfnsformer':
+            self.attention = V2OPFNSAttention(config, layer_id, **kwargs)            
         elif model_name == 'sinkformer':
             self.attention = SINKAttention(config, layer_id, **kwargs)            
         elif model_name == 'dpformer':

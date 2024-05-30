@@ -35,7 +35,7 @@ python -i main.py --n_layers=1 --n_attn_heads=2 --model_name=dpformer\
  --divider=1 --warmup_steps=0 --grad_accum_step=1 --dataset_name=rotten_tomatoes\
  --model_root=.droot/speedtest
 
-python -i main.py --n_layers=1 --n_attn_heads=2 --model_name=opfnsformer --beta=1.5\
+python -i main.py --n_layers=1 --n_attn_heads=2 --model_name=opfnsformer --alpha=1.5\
  --max_len=256 --max_steps=2 --logging_steps=2 --save_steps=2 --eval_steps=2\
  --divider=1 --warmup_steps=0 --grad_accum_step=1 --dataset_name=rotten_tomatoes\
  --model_root=.droot/speedtest
@@ -47,7 +47,7 @@ python -i main.py --n_layers=1 --n_attn_heads=2 --model_name=sinkformer --n_it=1
 """
 
 """
-torchrun --nnodes=1 --nproc_per_node=4 main.py --n_layers=1 --n_attn_heads=2 --model_name=v3fnsformer --beta=1.5\
+torchrun --nnodes=1 --nproc_per_node=4 main.py --n_layers=1 --n_attn_heads=2 --model_name=v3fnsformer --alpha=1.5\
  --max_len=256 --max_steps=2 --logging_steps=2 --save_steps=2 --eval_steps=2\
  --divider=1 --warmup_steps=0 --grad_accum_step=1 --dataset_name=rotten_tomatoes\
  --model_root=.droot/speedtest
@@ -92,8 +92,9 @@ if __name__ == '__main__':
     parser.add_argument('--hidden_size', default=768, type=int)    
     parser.add_argument('--model_name', default='fnsformer', type=str, help='v3fnsformer | sinkformer | dpformer') 
     # FNSformer
-    parser.add_argument('--beta', default=1, type=float)
+    parser.add_argument('--alpha', default=1, type=float)
     parser.add_argument('--bandwidth', default=1, type=float) 
+    parser.add_argument('--a', default=1, type=float, help='0 | 0.5 | 1')
     # Sinkformer      
     parser.add_argument('--n_it', default=1, type=int)
 
@@ -230,18 +231,23 @@ if __name__ == '__main__':
     attn_setup['model_name'] = args.model_name
     attn_setup['dataset_name'] = args.dataset_name
     if 'fnsformer' in args.model_name:
-        attn_setup['beta'] = args.beta      
-        attn_setup['bandwidth'] = args.bandwidth   
-        if args.model_name in ['v2fnsformer', 'v3fnsformer', 'opfnsformer'] and args.beta < 2:
+        attn_setup['alpha'] = args.alpha      
+        attn_setup['bandwidth'] = args.bandwidth          
 
-            config.d_intrinsic = int(args.hidden_size/args.n_attn_heads)  # head_dim
-            config.sphere_radius = ((np.pi**(1/config.d_intrinsic)-1)/np.pi)   
-            #config.sphere_radius = 1
-            attn_setup['d_intrinsic'] = config.d_intrinsic
+        if args.model_name in ['v2fnsformer', 'v3fnsformer', 'v4fnsformer', 'opfnsformer', 'v2opfnsformer']:
 
-        elif args.model_name in ['v2fnsformer', 'v3fnsformer', 'opfnsformer'] and args.beta >= 2:
-            config.sphere_radius = 1
+            if args.alpha < 2:
+                config.d_intrinsic = int(args.hidden_size/args.n_attn_heads)  # head_dim
+                config.sphere_radius = ((np.pi**(1/config.d_intrinsic)-1)/np.pi)   
+                #config.sphere_radius = 1
+                attn_setup['d_intrinsic'] = config.d_intrinsic
+            elif args.alpha >= 2:
+                config.sphere_radius = 1
 
+            # degree index
+            attn_setup['a'] = args.a      
+            config.a = args.a  
+        
         # mask for distance
         config.mask_val = config.sphere_radius * np.pi
         attn_setup['sphere_radius'] = config.sphere_radius       
@@ -344,7 +350,7 @@ if __name__ == '__main__':
         print('\n')
         print(f'model: {args.model_name}')
         if 'fnsformer' in args.model_name:
-            print(f'beta = {args.beta}, bandwidth = {args.bandwidth}')
+            print(f'alpha = {args.alpha}, bandwidth = {args.bandwidth}, a = {args.a}')
         print(f'dataset: {args.dataset_name}')
         print(attn_setup)           
         print(f'Model will be saved in {model_dir}')        

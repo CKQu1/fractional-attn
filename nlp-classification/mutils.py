@@ -63,10 +63,11 @@ def create_model_dir(model_root_dir, **kwargs):
     dirname = f'{model_name}-{dataset_code}'
     #dirname += '-qqv' if qk_share is True else '-qkv'  # qk weight-tying
     if 'fnsformer' in model_name:                 
-        beta = kwargs.get("beta", 1)
-        bandwidth = kwargs.get("bandwidth", 1)             
-        dirname += f'-beta={beta}-eps={bandwidth}'
-        # if (model_name=='v2fnsformer' or model_name=='v3fnsformer') and beta < 2:
+        alpha = kwargs.get("alpha", 1)
+        bandwidth = kwargs.get("bandwidth", 1)
+        a = kwargs.get("a", 1)             
+        dirname += f'-alpha={alpha}-eps={bandwidth}-a={a}'
+        # if (model_name=='v2fnsformer' or model_name=='v3fnsformer') and alpha < 2:
         #     d_intrinsic = kwargs.get('d_intrinsic')
         #     dirname += f'-dman={d_intrinsic}'
     elif model_name == 'sinkformer':

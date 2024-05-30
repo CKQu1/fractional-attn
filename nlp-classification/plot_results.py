@@ -16,28 +16,42 @@ font_type = {'family' : 'sans-serif'}
 plt.rc('font', **font_type)
 plt.rc('legend',fontsize=7)
 #linestyles = ['solid', 'densely dashed', 'dashed', 'densely dotted', 'dotted']
-#linestyles = ['-', '--', '-.', ':']
-linestyles = ['-', ':']
+linestyles = ['-', '--', '-.', ':']
+#linestyles = ['-', '--', ':']
+markers = ['s', 'D', 'd', 'v', '^', 'o', '.']
+markersize = '3'
 colors = list(mcl.TABLEAU_COLORS.keys())
 # ------------------------------------------
 
 # Plots average of metrics over ensembles
 """
-
+python -i plot_results.py plot_ensembles .droot/formers_trained/layers=2-heads=8-hidden=768-epochs=10-qkv/
+PROMPT input:
 """
 
-def plot_ensembles(model_root_dir, dirnames, datasets=['imdb'],  
+def plot_ensembles(model_root_dir, datasets=['imdb'],  
                    metrics=['eval_loss', 'eval_accuracy'], display=False):
     global df, df_setting, df_filtered, fig_file, axs
-    global model_dir, config_dict, final_metrics, ensemble_metrics, metric_plot    
+    global model_dir, config_dict, final_metrics, ensemble_metrics, metric_plot   
+    global model_dirs, subpath 
 
-    dirnames = str_to_ls(dirnames); datasets = str_to_ls(datasets)
+    datasets = str_to_ls(datasets)
     metrics = str_to_ls(metrics)
     display = str_to_bool(display)
 
     model_root_dir = model_root_dir.replace('\\','')
+    dirnames = sorted([dirname for dirname in os.listdir(model_root_dir) if 'former' in dirname])
+
     print(f'Datasets: {datasets}')
     print(f'model_root_dir = {model_root_dir}')
+    # prompt to reorder file names
+    for dirname_idx, dirname in enumerate(dirnames):
+        print(f'Index {dirname_idx}: {dirname}')
+    dirname_idxs = input('Order of dirnames:')
+    dirname_idxs = [int(dirname_idx) for dirname_idx in dirname_idxs.split(',')]
+    assert len(dirname_idxs) <= len(dirnames), 'dirname_idxs cannot exceed dirnames'
+    dirnames = [dirnames[dirname_idx] for dirname_idx in dirname_idxs]
+    print(f'{metrics} \n')    
     print(f'{metrics} \n')
 
     nrows, ncols = len(datasets), len(metrics)
@@ -62,6 +76,7 @@ def plot_ensembles(model_root_dir, dirnames, datasets=['imdb'],
         model_names = []
         model_types = {}
         model_linestyles = {}
+        model_markers = {}
         model_colors = {}
         N_model_types = 0        
         for jdx, dirname in enumerate(dirnames):             
@@ -83,10 +98,19 @@ def plot_ensembles(model_root_dir, dirnames, datasets=['imdb'],
             if model_name not in model_names:
                 model_names.append(model_name)
             if 'fnsformer' in dirname:
-                beta, bandwidth  = df_setting.loc[0,['beta','bandwidth']]      
-                #model_settings = rf'$\beta$ = {beta}, $\varepsilon$ = {bandwidth}'
-                model_settings = rf'$\beta$ = {beta}'
-                # if beta < 2:                        
+                #alpha, bandwidth  = df_setting.loc[0,['alpha','bandwidth']]      
+                bandwidth = df_setting.loc[0,'bandwidth']
+                if 'a' in df_setting.columns:
+                    a = df_setting.loc[0,'a']
+                else:
+                    a = 1
+                if 'alpha' in df_setting.columns:
+                    alpha = df_setting.loc[0,'alpha']
+                else:
+                    alpha = df_setting.loc[0,'beta']
+                #model_settings = rf'$\alpha$ = {alpha}, $\varepsilon$ = {bandwidth}'
+                model_settings = rf'$\alpha$ = {alpha}, $a$ = {a}'
+                # if alpha < 2:                        
                 #     d_intrinsic = df_setting.loc[0,'d_intrinsic']
                 #     model_settings += rf', $d$ = {d_intrinsic}'  #$d_{\mathcal{M}}$
                 model_name += f' ({model_settings})'
@@ -95,6 +119,8 @@ def plot_ensembles(model_root_dir, dirnames, datasets=['imdb'],
                 model_settings = rf'iter = {n_it}'
                 model_name += f' ({model_settings})'
             model_linestyles[model_name] = linestyles[model_types[model_type] - 1]
+            #model_linestyles[model_name] = ''
+            #model_markers[model_name] = markers[model_types[model_type] - 1]
             model_colors[model_name] = colors[N_model_types - 1]
 
             # ensemble of training instances for the same architecture
@@ -144,6 +170,7 @@ def plot_ensembles(model_root_dir, dirnames, datasets=['imdb'],
                 ensemble_std = ensemble_metrics[metric].std(0)
                 axs[idx,kdx].plot(df_filtered.loc[:,'epoch'], ensemble_mean,
                                   linestyle=model_linestyles[model_name], c=model_colors[model_name],
+                                  #marker=model_markers[model_name], markersize=markersize,
                                   label=model_name) 
 
                 # std
@@ -155,17 +182,21 @@ def plot_ensembles(model_root_dir, dirnames, datasets=['imdb'],
                     axs[idx,kdx].set_title(NAMES_DICT[metric])
                 elif idx == nrows - 1:
                     axs[idx,kdx].set_xlabel('Epoch')
-
-                axs[idx,0].set_ylabel(NAMES_DICT[dataset])
+                
                 axs[0,0].legend(loc='upper left', #bbox_to_anchor=(0.5, 1.05),
                                 ncol=1, frameon=False)    
+
+                axs[-1,kdx].set_ylabel(NAMES_DICT[dataset])
 
                 # ----- Messages -----
                 best = max(final_metrics[metric]) if 'acc' in metric or 'f1' in metric else min(final_metrics[metric])
                 worst = min(final_metrics[metric]) if 'acc' in metric or 'f1' in metric else max(final_metrics[metric])
                 median, mean = np.median(final_metrics[metric]), np.mean(final_metrics[metric])
-                print(f'best, median, mean, worst {metric}: {best}, {median}, {mean}, {worst}')
-            print('\n')
+                print(f'{metric.upper()} best, median, mean, worst: {best}, {median}, {mean}, {worst}')
+
+            #axs[idx,0].set_ylabel(NAMES_DICT[dataset])
+            print(f'Total ensembles: {ensemble_metrics[metric].shape[0]}')
+            print('\n')            
             for other_metric in ['epoch_eval_runtime', 'train_runtime', 'total_flos']:
                 print(f'Average total {other_metric}: {np.mean(final_metrics[other_metric])}')
             print('-'*15 + '\n')                    
@@ -175,9 +206,12 @@ def plot_ensembles(model_root_dir, dirnames, datasets=['imdb'],
         plt.show()
     else:
         if not isdir(FIGS_DIR): makedirs(FIGS_DIR)
-        layers, heads, hidden = int(config_dict['layers']), int(config_dict['heads']), int(config_dict['hidden'])
-        fig_file = f'layers={layers}-heads={heads}-hidden={hidden}-'
-        fig_file += '-'.join(model_names)+'_'+'-'.join(datasets)
+        if len(config_dict.keys()) != 0:
+            layers, heads, hidden = int(config_dict['layers']), int(config_dict['heads']), int(config_dict['hidden'])
+            fig_file = f'layers={layers}-heads={heads}-hidden={hidden}-'
+            fig_file += '-'.join(model_names)+'_'+'-'.join(datasets)
+        else:
+            fig_file = '-'.join(model_names)+'_'+'-'.join(datasets)
         if isfile(njoin(FIGS_DIR, fig_file)):
             version = len([fname for fname in os.listdir(FIGS_DIR) if fname==fig_file])
             fig_file += f'-v{version}'
@@ -189,7 +223,7 @@ def plot_ensembles(model_root_dir, dirnames, datasets=['imdb'],
 # Plots single instance of training
 """
 python -i plot_results.py plot_model .droot/formers_trained/layers\=2-heads\=8-hidden\=768-epochs\=5-qkv/\
- v3fnsformer-imdb-beta\=1.2-eps\=1-dman=768/,v3fnsformer-imdb-beta\=1.5-eps\=1-dman=768/,v3fnsformer-imdb-beta\=1.8-eps\=1-dman=768/,v3fnsformer-imdb-beta\=2.0-eps\=1/\
+ v3fnsformer-imdb-alpha\=1.2-eps\=1-dman=768/,v3fnsformer-imdb-alpha\=1.5-eps\=1-dman=768/,v3fnsformer-imdb-alpha\=1.8-eps\=1-dman=768/,v3fnsformer-imdb-alpha\=2.0-eps\=1/\
  0,0,0,0 imdb eval_loss,eval_accuracy  
 """
 def plot_model(model_root_dir, dirnames, instances, 
@@ -241,9 +275,9 @@ def plot_model(model_root_dir, dirnames, instances,
                 if model_name not in model_names:
                     model_names.append(model_name)
                 if 'fnsformer' in dirname:
-                    beta, bandwidth  = df_setting.loc[0,['beta','bandwidth']]      
-                    model_settings = rf'$\beta$ = {beta}, $\varepsilon$ = {bandwidth}'
-                    # if beta < 2:                        
+                    alpha, bandwidth  = df_setting.loc[0,['alpha','bandwidth']]      
+                    model_settings = rf'$\alpha$ = {alpha}, $\varepsilon$ = {bandwidth}'
+                    # if alpha < 2:                        
                     #     d_intrinsic = df_setting.loc[0,'d_intrinsic']
                     #     model_settings += rf', $d$ = {d_intrinsic}'  #$d_{\mathcal{M}}$
                     model_name += f' ({model_settings})'

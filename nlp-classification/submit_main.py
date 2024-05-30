@@ -61,7 +61,7 @@ if __name__ == '__main__':
     max_lens = [256, 512]    
     
     ##### DOUBLE-CHECK #####
-    debug_mode = False      
+    debug_mode = False    
     print(f'---------- debug_mode = {debug_mode} ---------- \n')
     
     kwargss_all = []        
@@ -79,20 +79,34 @@ if __name__ == '__main__':
 
             # LIST:
             # {'model_name':'dpformer'}
-            # {'model_name':'v3fnsformer','beta':1.5}
-            # {'model_name':'v3fnsformer','beta':2}
-            # {'model_name':'opfnsformer','beta':1.5}
-            # {'model_name':'opfnsformer','beta':2}
+            # {'model_name':'v3fnsformer','alpha':1.5}
+            # {'model_name':'v3fnsformer','alpha':2}
+            # {'model_name':'opfnsformer','alpha':1.5}
+            # {'model_name':'opfnsformer','alpha':2}
             # {'model_name':'sinkformer','n_it':1}
             # {'model_name':'sinkformer', 'n_it':3}
 
-            kwargss = [{'model_name':'v3fnsformer','beta':1.4},
-                       {'model_name':'v3fnsformer','beta':1.6},
-                       {'model_name':'v3fnsformer','beta':1.8},
-                       {'model_name':'opfnsformer','beta':1.4},
-                       {'model_name':'opfnsformer','beta':1.6},
-                       {'model_name':'opfnsformer','beta':1.8}
-                       ]    
+            # kwargss = [{'model_name':'v4fnsformer','alpha':1.4},
+            #            {'model_name':'v4fnsformer','alpha':1.6},
+            #            {'model_name':'v4fnsformer','alpha':1.8},
+            #            {'model_name':'v2opfnsformer','alpha':1.4},
+            #            {'model_name':'v2opfnsformer','alpha':1.6},
+            #            {'model_name':'v2opfnsformer','alpha':1.8}
+            #            ]    
+
+            kwargss = [{'model_name':'v4fnsformer','alpha':1.2,'a': 1},
+                       {'model_name':'v4fnsformer','alpha':2,'a':1},
+                       {'model_name':'v2opfnsformer','alpha':1.2,'a':1},
+                       {'model_name':'v2opfnsformer','alpha':2,'a':1},
+                       {'model_name':'v4fnsformer','alpha':1.2,'a': 0.5},
+                       {'model_name':'v4fnsformer','alpha':2,'a':0.5},
+                       {'model_name':'v2opfnsformer','alpha':1.2,'a':0.5},
+                       {'model_name':'v2opfnsformer','alpha':2,'a':0.5},
+                       {'model_name':'v4fnsformer','alpha':1.2,'a': 0},
+                       {'model_name':'v4fnsformer','alpha':2,'a':0},
+                       {'model_name':'v2opfnsformer','alpha':1.2,'a':0},
+                       {'model_name':'v2opfnsformer','alpha':2,'a':0}
+                       ]  
 
             for seed in seeds:                                 
                                 
@@ -146,8 +160,28 @@ if __name__ == '__main__':
             walltime = '23:59:59'
             mem = '12GB'            
 
-            kwargss = [{'model_name':'sinkformer', 'n_it':1},
-                       {'model_name':'sinkformer', 'n_it':3}]  
+            # kwargss = [{'model_name':'v4fnsformer','alpha':1.2,'a': 1},
+            #            {'model_name':'v4fnsformer','alpha':2,'a':1},
+            #            {'model_name':'v2opfnsformer','alpha':1.2,'a':1},
+            #            {'model_name':'v2opfnsformer','alpha':2,'a':1},
+            #            {'model_name':'v4fnsformer','alpha':1.2,'a': 0.5},
+            #            {'model_name':'v4fnsformer','alpha':2,'a':0.5},
+            #            {'model_name':'v2opfnsformer','alpha':1.2,'a':0.5},
+            #            {'model_name':'v2opfnsformer','alpha':2,'a':0.5},
+            #            {'model_name':'sinkformer', 'n_it':1},
+            #            {'model_name':'sinkformer', 'n_it':3},
+            #            {'model_name':'dpformer'}
+            #            ]   
+             
+            kwargss = [{'model_name':'v4fnsformer','alpha':1.2,'a': 0},
+                       {'model_name':'v4fnsformer','alpha':2,'a':0},
+                       {'model_name':'v2opfnsformer','alpha':1.2,'a':0},
+                       {'model_name':'v2opfnsformer','alpha':2,'a':0},
+                       {'model_name':'v4fnsformer','alpha':1.2,'a': 0},
+                       {'model_name':'v4fnsformer','alpha':2,'a':0},
+                       {'model_name':'v2opfnsformer','alpha':1.2,'a':0},
+                       {'model_name':'v2opfnsformer','alpha':2,'a':0},
+                       ]                                     
 
             for seed in seeds:                                                                  
                                 
@@ -162,7 +196,7 @@ if __name__ == '__main__':
                                  'eval_bs':           4,
                                  'max_len':           max_lens[didx],                             
                                  'epochs':            1,
-                                 'lr_scheduler_type': 'cosine',
+                                 'lr_scheduler_type': 'constant',
                                  'lr':                5e-5,
                                  #'use_custom_optim':  True,
                                  #'gamma':             0.1,
@@ -174,7 +208,8 @@ if __name__ == '__main__':
                 qk_share = False if 'qk_share' not in common_kwargs.keys() else common_kwargs['qk_share']
                 use_custom_optim = False if 'use_custom_optim' not in common_kwargs.keys() else common_kwargs['use_custom_optim'] 
 
-                model_root = njoin(DROOT, 'submit_main_check', f'ncpus={select*ncpus}-ngpus={select*ngpus}')                                                 
+                #model_root = njoin(DROOT, 'submit_main_check', f'ncpus={select*ncpus}-ngpus={select*ngpus}')                                                 
+                model_root = njoin(DROOT, 'v4_check')
         
                 for idx in range(len(kwargss)):
                     # function automatically creates dir

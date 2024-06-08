@@ -62,11 +62,14 @@ def create_model_dir(model_root_dir, **kwargs):
 
     dirname = f'{model_name}-{dataset_code}'
     dirname += '-qqv' if qk_share is True else '-qkv'  # qk weight-tying
-    if model_name == 'fnsvit':                 
-        beta = kwargs.get("beta", 1)
+    if 'fns' in model_name:                 
+        alpha = kwargs.get("alpha", 1)
         bandwidth = kwargs.get("bandwidth", 1)             
-        dirname += f'-beta={beta}-eps={bandwidth}'
-        # if beta < 2:
+        dirname += f'-alpha={alpha}-eps={bandwidth}'
+        if 'dm' in model_name:
+            a = kwargs.get('a', 1)
+            dirname += f'-a={a}'
+        # if alpha < 2:
         #     d_intrinsic = kwargs.get('d_intrinsic')
         #     dirname += f'-dman={d_intrinsic}'
     elif model_name == 'sinkvit':

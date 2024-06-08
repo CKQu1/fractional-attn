@@ -53,8 +53,8 @@ python ddp_main.py --model_name=opfnsvit --alpha=1.5 --max_iters=100 --eval_inte
 
 # multi-core
 """
-torchrun --nnodes=1 --nproc_per_node=4 ddp_main.py --model_name=fnsvit --alpha=1.5 --max_iters=100 --eval_interval=5\
- --eval_iters=200 --weight_decay=0 --n_layers=1 --n_attn_heads=2 --model_root=.droot/multi-core
+torchrun --nnodes=1 --nproc_per_node=4 ddp_main.py --model_name=dmfnsvit --alpha=1.5 --a=0 --max_iters=100 --eval_interval=5\
+ --eval_iters=50 --weight_decay=0 --n_layers=1 --n_attn_heads=2 --model_root=.droot/multi-core
 """
 
 if __name__ == '__main__':
@@ -93,7 +93,8 @@ if __name__ == '__main__':
     parser.add_argument('--wandb_log', default=False, type=bool)
     parser.add_argument("--wandb_project", default='image-task', type=str)    
 
-    # parser.add_argument('--seed', default=42, type=int)    
+    parser.add_argument('--instance', default=0, type=int)
+    # parser.add_argument('--seed', default=0, type=int)    
     # parser.add_argument('--debug', default=False, type=bool)  # for debuggin
     # parser.add_argument('--lr_scheduler_type', default='constant', type=str)
     # parser.add_argument('--do_train', default=True, type=bool)
@@ -178,7 +179,7 @@ if __name__ == '__main__':
     assert config['intermediate_size'] == 4 * config['hidden_size']
     assert config['image_size'] % config['patch_size'] == 0
 
-    attn_setup = {'qk_share': args.qk_share}
+    attn_setup = {'qk_share': args.qk_share, 'qkv_bias': args.qkv_bias, 'instance': args.instance}
     attn_setup['model_name'] = args.model_name
     attn_setup['dataset_name'] = args.dataset_name    
     if 'fns' in args.model_name:
@@ -260,7 +261,8 @@ if __name__ == '__main__':
     # tokens_per_iter = gradient_accumulation_steps * ddp_world_size * batch_size * block_size
     # print(f"tokens per iteration will be: {tokens_per_iter:,}")
     images_per_iter = gradient_accumulation_steps * ddp_world_size * batch_size
-    print(f"images per iteration will be: {images_per_iter:,}")    
+    if master_process:
+        print(f"images per iteration will be: {images_per_iter:,}")    
     
     if args.model_root == '':
         model_root = structural_model_root(qk_share=args.qk_share, n_layers=args.n_layers,
@@ -355,6 +357,7 @@ if __name__ == '__main__':
         else:
             x, y = x.to(device), y.to(device)
         return x, y        
+        #return x, y, ix
 
     # init these up here, can override if init_from='resume' (i.e. from a checkpoint)
     iter_num = 0
@@ -374,7 +377,8 @@ if __name__ == '__main__':
     #                   bias=bias, vocab_size=None, dropout=dropout) # start with model_args from command line
     if init_from == 'scratch':
         # init a new model from scratch
-        print(f'Initializing a new {args.model_name} from scratch \n')
+        if master_process:
+            print(f'Initializing a new {args.model_name} from scratch \n')
         # determine the vocab size we'll use for from-scratch training
         # if meta_vocab_size is None:
         #     print("defaulting to vocab_size of GPT-2 to 50304 (50257 rounded up for efficiency)")
@@ -484,6 +488,7 @@ if __name__ == '__main__':
             accs = torch.zeros(eval_iters)
             for k in range(eval_iters):
                 X, Y = get_batch(split)
+                #X, Y, _ = get_batch(split)
                 with ctx:
                     #logits, loss = model(X, Y)
                     logits, _ = model(X)
@@ -518,6 +523,8 @@ if __name__ == '__main__':
     
     # training loop
     X, Y = get_batch('train') # fetch the very first batch
+    #X, Y, IX = get_batch('train')
+    #IXs = IX
     t0 = time.time()
     local_iter_num = 0 # number of iterations in the lifetime of this process
     raw_model = model.module if ddp else model # unwrap DDP container if needed
@@ -535,6 +542,8 @@ if __name__ == '__main__':
                 lr = learning_rate
             else:
                 lr = min_lr  
+        elif args.lr_scheduler_type == 'constant':
+            lr = learning_rate
 
         for param_group in optimizer.param_groups:
             param_group['lr'] = lr
@@ -588,6 +597,8 @@ if __name__ == '__main__':
                 loss = loss / gradient_accumulation_steps # scale the loss to account for gradient accumulation
             # immediately async prefetch next batch while model is doing the forward pass on the GPU
             X, Y = get_batch('train')
+            #X, Y, IX = get_batch('train')
+            #IXs = torch.concat([IXs,IX])
             # backward pass, with gradient scaling if training in fp16
             scaler.scale(loss).backward()
         # clip the gradient

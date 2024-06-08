@@ -80,7 +80,7 @@ class FNSAttentionHead(nn.Module):
     This module is used in the FNSMultiHeadAttention module.
 
     """
-    def __init__(self, beta, bandwidth, sphere_radius, hidden_size, attention_head_size, dropout, bias=True):
+    def __init__(self, alpha, bandwidth, sphere_radius, hidden_size, attention_head_size, dropout, bias=True):
         super().__init__()
         self.hidden_size = hidden_size
         self.attention_head_size = attention_head_size
@@ -91,7 +91,7 @@ class FNSAttentionHead(nn.Module):
 
         self.dropout = nn.Dropout(dropout)
     
-        self.beta, self.bandwidth = beta, bandwidth
+        self.alpha, self.bandwidth = alpha, bandwidth
         self.sphere_radius = sphere_radius
 
     def forward(self, x):
@@ -106,7 +106,7 @@ class FNSAttentionHead(nn.Module):
         # print(f'key shape: {key.shape}')
         # print(f'value shape: {value.shape}')
 
-        beta, bandwidth = self.beta, self.bandwidth
+        alpha, bandwidth = self.alpha, self.bandwidth
         sphere_radius = self.sphere_radius
         d_intrinsic = attention_head_size
 
@@ -115,10 +115,10 @@ class FNSAttentionHead(nn.Module):
         g_dist = torch.acos(torch.clamp(query @ key.transpose(-2, -1), -1+eps, 1-eps)) * sphere_radius
         
         # Calculate the attention scores
-        if beta < 2:
-            attn_score = (1 + g_dist/bandwidth**0.5)**(-d_intrinsic-beta)
+        if alpha < 2:
+            attn_score = (1 + g_dist/bandwidth**0.5)**(-d_intrinsic-alpha)
         else:
-            attn_score = torch.exp((-g_dist/bandwidth**0.5)**(beta/(beta-1)))
+            attn_score = torch.exp((-g_dist/bandwidth**0.5)**(alpha/(alpha-1)))
         attn_score_shape = attn_score.shape
         D_inv = torch.diag_embed(attn_score.sum(-1)**(-1))  # inverse of degree matrix of attn_score
         K_tilde = D_inv @ attn_score @ D_inv
@@ -149,13 +149,13 @@ class FNSMultiHeadAttention(nn.Module):
         # Create a list of attention heads
         self.heads = nn.ModuleList([])
 
-        self.beta = config['beta']
+        self.alpha = config['alpha']
         self.bandwidth = config['bandwidth']
         self.sphere_radius = config['sphere_radius']     
 
         for _ in range(self.num_attention_heads):
             head = FNSAttentionHead(
-                self.beta,
+                self.alpha,
                 self.bandwidth,
                 self.sphere_radius,
                 self.hidden_size,
@@ -208,7 +208,7 @@ class FasterFNSMultiHeadAttention(nn.Module):
         self.output_projection = nn.Linear(self.all_head_size, self.hidden_size)
         self.output_dropout = nn.Dropout(config["hidden_dropout_prob"])
 
-        self.beta = config['beta']
+        self.alpha = config['alpha']
         self.bandwidth = config['bandwidth']
         self.sphere_radius = config['sphere_radius']
 
@@ -223,7 +223,7 @@ class FasterFNSMultiHeadAttention(nn.Module):
         batch_size, sequence_length, _ = query.size()
         num_attention_heads, attention_head_size = self.num_attention_heads, self.attention_head_size
 
-        beta, bandwidth = self.beta, self.bandwidth
+        alpha, bandwidth = self.alpha, self.bandwidth
         sphere_radius = self.sphere_radius
         d_intrinsic = attention_head_size
 
@@ -239,10 +239,10 @@ class FasterFNSMultiHeadAttention(nn.Module):
         g_dist = torch.acos(torch.clamp(query @ key.transpose(-2, -1), -1+eps, 1-eps)) * sphere_radius
         
         # Calculate the attention scores
-        if beta < 2:
-            attn_score = (1 + g_dist/bandwidth**0.5)**(-d_intrinsic-beta)
+        if alpha < 2:
+            attn_score = (1 + g_dist/bandwidth**0.5)**(-d_intrinsic-alpha)
         else:
-            attn_score = torch.exp((-g_dist/bandwidth**0.5)**(beta/(beta-1)))
+            attn_score = torch.exp((-g_dist/bandwidth**0.5)**(alpha/(alpha-1)))
         attn_score_shape = attn_score.shape
         D_inv = torch.diag_embed(attn_score.sum(-1)**(-1))  # inverse of degree matrix of attn_score
         K_tilde = D_inv @ attn_score @ D_inv
@@ -298,7 +298,7 @@ class FNSBlock(nn.Module):
         if self.use_faster_attention:
             self.attention = FasterFNSMultiHeadAttention(config)
         else:
-            self.attention = MultiHeadAttention(config)
+            self.attention = FNSMultiHeadAttention(config)
         self.layernorm_1 = nn.LayerNorm(config["hidden_size"])
         self.mlp = MLP(config)
         self.layernorm_2 = nn.LayerNorm(config["hidden_size"])

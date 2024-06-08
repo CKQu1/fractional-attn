@@ -43,17 +43,17 @@ $ torchrun --nproc_per_node=8 --nnodes=2 --node_rank=1 --master_addr=123.456.123
 
 # single-core
 """
-python ddp_main.py --model_name=fnsvit --beta=1.5 --max_iters=100 --eval_interval=5\
+python ddp_main.py --model_name=dmfnsvit --alpha=1.5 --a=0 --max_iters=100 --eval_interval=5\
  --eval_iters=200 --weight_decay=0 --n_layers=1 --n_attn_heads=2 --model_root=.droot/single-core 
 
-python ddp_main.py --model_name=opfnsvit --beta=1.5 --max_iters=100 --eval_interval=5\
+python ddp_main.py --model_name=opfnsvit --alpha=1.5 --max_iters=100 --eval_interval=5\
  --lr_scheduler_type=binary --max_lr=5e-5 --max_lr=5e-6\
  --eval_iters=200 --weight_decay=0 --n_layers=1 --n_attn_heads=2 --model_root=.droot/single-core  
 """
 
 # multi-core
 """
-torchrun --nnodes=1 --nproc_per_node=4 ddp_main.py --model_name=fnsvit --beta=1.5 --max_iters=100 --eval_interval=5\
+torchrun --nnodes=1 --nproc_per_node=4 ddp_main.py --model_name=fnsvit --alpha=1.5 --max_iters=100 --eval_interval=5\
  --eval_iters=200 --weight_decay=0 --n_layers=1 --n_attn_heads=2 --model_root=.droot/multi-core
 """
 
@@ -101,8 +101,11 @@ if __name__ == '__main__':
 
     # Model settings
     parser.add_argument('--model_name', default='dpvit', type=str)    
-    parser.add_argument('--beta', default=1, type=float)  # for fnsvit
+    # fnsvit type
+    parser.add_argument('--alpha', default=1, type=float)
     parser.add_argument('--bandwidth', default=1, type=float)  
+    parser.add_argument('--a', default=1, type=float)
+    # sinkvit type
     parser.add_argument('--n_it', default=1, type=int)
 
     # Dataset settings
@@ -122,8 +125,8 @@ if __name__ == '__main__':
     parser.add_argument('--image_size', default=32, type=int)
     parser.add_argument('--n_classes', default=10, type=int)
     parser.add_argument('--n_channels', default=3, type=int)
-    parser.add_argument('--qkv_bias', default=True, type=bool)
-    parser.add_argument('--use_faster_attn', default=True, type=bool)    
+    parser.add_argument('--qkv_bias', default=False, type=bool)
+    parser.add_argument('--use_faster_attn', default=False, type=bool)    
 
 
     args = parser.parse_args()    
@@ -179,9 +182,11 @@ if __name__ == '__main__':
     attn_setup['model_name'] = args.model_name
     attn_setup['dataset_name'] = args.dataset_name    
     if 'fns' in args.model_name:
-        config['beta'] = attn_setup['beta'] = args.beta      
-        config['bandwidth'] = attn_setup['bandwidth'] = args.bandwidth   
-        if args.beta < 2:            
+        config['alpha'] = attn_setup['alpha'] = args.alpha      
+        config['bandwidth'] = attn_setup['bandwidth'] = args.bandwidth
+        if 'dm' in args.model_name:
+            config['a'] = attn_setup['a'] = args.a   
+        if args.alpha < 2:            
             config['d_intrinsic'] = int(config["hidden_size"] / config["num_attention_heads"])  # head_dim
             config['sphere_radius'] = ((np.pi**(1/config['d_intrinsic'])-1)/np.pi)                            
         else:
@@ -384,7 +389,13 @@ if __name__ == '__main__':
             model = FNSViTForClassfication(config)    
         elif args.model_name == 'opfnsvit':
             from vit_pytorch.opfns_vit import OPFNSViTForClassfication
-            model = OPFNSViTForClassfication(config)               
+            model = OPFNSViTForClassfication(config)     
+        elif args.model_name == 'dmfnsvit':
+            from vit_pytorch.dmfns_vit import DMFNSViTForClassfication
+            model = DMFNSViTForClassfication(config)    
+        elif args.model_name == 'opdmfnsvit':
+            from vit_pytorch.opdmfns_vit import OPDMFNSViTForClassfication
+            model = OPDMFNSViTForClassfication(config)              
         elif args.model_name == 'sinkvit':
             from vit_pytorch.sink_vit import SINKViTForClassfication
             model = SINKViTForClassfication(config)               

@@ -87,6 +87,7 @@ if __name__ == '__main__':
     # General
     #parser.add_argument('--sparsify_type', default=None, type=str)
     parser.add_argument('--qk_share', default=False, type=bool)
+    parser.add_argument('--qkv_bias', default=False, type=bool)
     parser.add_argument('--n_layers', default=1, type=int)
     parser.add_argument('--n_attn_heads', default=2, type=int)
     parser.add_argument('--hidden_size', default=768, type=int)    
@@ -226,8 +227,9 @@ if __name__ == '__main__':
     config = ModelConfig.from_json_file(f"{repo_dir}/models/config_simple.json")
     config.num_labels = len(set(train_dataset['label']))   
     config.qk_share = args.qk_share
+    config.qkv_bias = args.qkv_bias
 
-    attn_setup = {'qk_share': args.qk_share}
+    attn_setup = {'qk_share': args.qk_share, 'qkv_bias': args.qkv_bias}
     attn_setup['model_name'] = args.model_name
     attn_setup['dataset_name'] = args.dataset_name
     if 'fnsformer' in args.model_name:

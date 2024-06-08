@@ -72,34 +72,55 @@ if __name__ == '__main__':
     script_name = "ddp_main.py"       # script for running
     dataset_names = ['cifar10']   # add or change datasets here
     
-    debug_mode = True
+    debug_mode = False
     print(f'---------- debug_mode = {debug_mode} ---------- \n')
     
-    #seeds = [0,1,2,3,4]    
-    seeds = [0]
+    instances = list(range(5))    
+    #instances = [0]
     kwargss_all = []    
-    for seed in seeds:
+    for instance in instances:
         for didx, dataset_name in enumerate(dataset_names):
             if not debug_mode:
-                select = 1; ngpus, ncpus = 0, 1            
+                select = 1; ngpus, ncpus = 0, 8                            
                 walltime, mem = '23:59:59', '8GB'                             
 
+                if ngpus > 1:
+                    num_proc = ngpus
+                else:
+                    num_proc = ncpus
+
+                # kwargss = [{'model_name':'dmfnsvit', 'alpha': 1.2, 'a': 0}, 
+                #            {'model_name':'dmfnsvit', 'alpha': 1.2, 'a': 0.5},
+                #            {'model_name':'dmfnsvit', 'alpha': 1.2, 'a': 1},
+                #            {'model_name':'dmfnsvit', 'alpha': 2, 'a': 0},                             
+                #            {'model_name':'dmfnsvit', 'alpha': 2, 'a': 0.5},
+                #            {'model_name':'dmfnsvit', 'alpha': 2, 'a': 1},
+                #            {'model_name':'opdmfnsvit', 'alpha': 1.2, 'a': 0}, 
+                #            {'model_name':'opdmfnsvit', 'alpha': 1.2, 'a': 0.5},
+                #            {'model_name':'opdmfnsvit', 'alpha': 1.2, 'a': 1},
+                #            {'model_name':'opdmfnsvit', 'alpha': 2, 'a': 0},                             
+                #            {'model_name':'opdmfnsvit', 'alpha': 2, 'a': 0.5},
+                #            {'model_name':'opdmfnsvit', 'alpha': 2, 'a': 1}
+                #            ]    
+
                 kwargss = [{'model_name':'dmfnsvit', 'alpha': 1.2, 'a': 0}, 
-                           {'model_name':'dmfnsvit', 'alpha': 1.2, 'a': 0.5},
-                           {'model_name':'dmfnsvit', 'alpha': 1.2, 'a': 1},
                            {'model_name':'dmfnsvit', 'alpha': 2, 'a': 0},                             
-                           {'model_name':'dmfnsvit', 'alpha': 2, 'a': 0.5},
-                           {'model_name':'dmfnsvit', 'alpha': 2, 'a': 1},
                            {'model_name':'opdmfnsvit', 'alpha': 1.2, 'a': 0}, 
-                           {'model_name':'opdmfnsvit', 'alpha': 1.2, 'a': 0.5},
-                           {'model_name':'opdmfnsvit', 'alpha': 1.2, 'a': 1},
-                           {'model_name':'opdmfnsvit', 'alpha': 2, 'a': 0},                             
-                           {'model_name':'opdmfnsvit', 'alpha': 2, 'a': 0.5},
-                           {'model_name':'opdmfnsvit', 'alpha': 2, 'a': 1}
-                           ]    
-                                                              
-                common_kwargs = {'n_layers':          4,
-                                 'n_attn_heads':      8,   
+                           {'model_name':'opdmfnsvit', 'alpha': 2, 'a': 0},
+                           {'model_name':'sinkvit', 'n_it': 1},                             
+                           {'model_name':'sinkvit', 'n_it': 3},
+                           {'model_name':'dpvit'}
+                           ] 
+
+                # test
+                # kwargss = [{'model_name':'dmfnsvit', 'alpha': 1.2, 'a': 0}, 
+                #            {'model_name':'dmfnsvit', 'alpha': 2, 'a': 0}
+                #            ] 
+
+                epochs = 50                                              
+                common_kwargs = {'instance':          instance,
+                                 'n_layers':          2,
+                                 'n_attn_heads':      4,   
                                  'hidden_size':       48,
                                  'max_iters':         15000,
                                  'eval_interval':     50,
@@ -111,6 +132,14 @@ if __name__ == '__main__':
                                  'min_lr':            5e-6,
                                  }  
 
+                if epochs is not None:                    
+                    train_data_size = 25000
+                    steps_per_epoch = train_data_size // (num_proc * common_kwargs['train_bs']) + 1  
+                    common_kwargs['max_iters'] = steps_per_epoch * epochs
+
+                if num_proc > 1:
+                    common_kwargs['grad_accum_step'] = num_proc
+
                 qk_share = False if 'qk_share' not in common_kwargs.keys() else common_kwargs['qk_share']
                 use_custom_optim = False if 'use_custom_optim' not in common_kwargs.keys() else common_kwargs['use_custom_optim']                                 
 
@@ -120,23 +149,25 @@ if __name__ == '__main__':
                 model_root = njoin(DROOT, 'formers_trained', model_root_dirname)
 
             else:                         
-                ngpus, ncpus = 0, 1
+                ngpus, ncpus = 0, 16
                 select = 1  
                 walltime, mem = '23:59:59', '6GB'                
         
-                kwargss = [{'model_name':'dmfnsvit', 'alpha': 1.2, 'a': 0}, 
-                           {'model_name':'dmfnsvit', 'alpha': 1.2, 'a': 0.5},
-                           {'model_name':'dmfnsvit', 'alpha': 1.2, 'a': 1},
-                           {'model_name':'dmfnsvit', 'alpha': 2, 'a': 0},                             
-                           {'model_name':'dmfnsvit', 'alpha': 2, 'a': 0.5},
-                           {'model_name':'dmfnsvit', 'alpha': 2, 'a': 1},
-                           {'model_name':'opdmfnsvit', 'alpha': 1.2, 'a': 0}, 
-                           {'model_name':'opdmfnsvit', 'alpha': 1.2, 'a': 0.5},
-                           {'model_name':'opdmfnsvit', 'alpha': 1.2, 'a': 1},
-                           {'model_name':'opdmfnsvit', 'alpha': 2, 'a': 0},                             
-                           {'model_name':'opdmfnsvit', 'alpha': 2, 'a': 0.5},
-                           {'model_name':'opdmfnsvit', 'alpha': 2, 'a': 1}
-                           ]         
+                # kwargss = [{'model_name':'dmfnsvit', 'alpha': 1.2, 'a': 0}, 
+                #            {'model_name':'dmfnsvit', 'alpha': 1.2, 'a': 0.5},
+                #            {'model_name':'dmfnsvit', 'alpha': 1.2, 'a': 1},
+                #            {'model_name':'dmfnsvit', 'alpha': 2, 'a': 0},                             
+                #            {'model_name':'dmfnsvit', 'alpha': 2, 'a': 0.5},
+                #            {'model_name':'dmfnsvit', 'alpha': 2, 'a': 1},
+                #            {'model_name':'opdmfnsvit', 'alpha': 1.2, 'a': 0}, 
+                #            {'model_name':'opdmfnsvit', 'alpha': 1.2, 'a': 0.5},
+                #            {'model_name':'opdmfnsvit', 'alpha': 1.2, 'a': 1},
+                #            {'model_name':'opdmfnsvit', 'alpha': 2, 'a': 0},                             
+                #            {'model_name':'opdmfnsvit', 'alpha': 2, 'a': 0.5},
+                #            {'model_name':'opdmfnsvit', 'alpha': 2, 'a': 1}
+                #            ] 
+                 
+                kwargss = [{'model_name':'dmfnsvit', 'alpha': 1.2, 'a': 0}]                         
 
                 common_kwargs = {'n_layers':          2,
                                  'n_attn_heads':      2,    
@@ -148,7 +179,7 @@ if __name__ == '__main__':
                                  }      
 
                 #model_root = njoin(DROOT, 'ddp_test_stage')                                                                                
-                model_root = njoin(DROOT, f'select={select}-ncpus={ncpus}-ngpus={ngpus}')
+                model_root = njoin(DROOT, 'ddp_test_stage', f'select={select}-ncpus={ncpus}-ngpus={ngpus}')
             
             for idx in range(len(kwargss)):
                 # function automatically creates dir

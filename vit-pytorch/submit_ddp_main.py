@@ -72,10 +72,11 @@ if __name__ == '__main__':
     script_name = "ddp_main.py"       # script for running
     dataset_names = ['cifar10']   # add or change datasets here
     
-    debug_mode = False
+    debug_mode = True
     print(f'---------- debug_mode = {debug_mode} ---------- \n')
     
-    seeds = [0,1,2,3,4]    
+    #seeds = [0,1,2,3,4]    
+    seeds = [0]
     kwargss_all = []    
     for seed in seeds:
         for didx, dataset_name in enumerate(dataset_names):
@@ -83,10 +84,20 @@ if __name__ == '__main__':
                 select = 1; ngpus, ncpus = 0, 1            
                 walltime, mem = '23:59:59', '8GB'                             
 
-                kwargss = [{'model_name':'fnsvit', 'beta': 1.2}, {'model_name':'fnsvit', 'beta': 1.8}, {'model_name':'fnsvit', 'beta': 2}, 
-                           {'model_name':'opfnsvit', 'beta': 1.2}, {'model_name':'opfnsvit', 'beta': 1.8}, {'model_name':'opfnsvit', 'beta': 2},
-                           {'model_name':'sinkvit', 'n_it': 1}, {'model_name':'sinkvit', 'n_it': 3},
-                           {'model_name':'dpvit'}]                                        
+                kwargss = [{'model_name':'dmfnsvit', 'alpha': 1.2, 'a': 0}, 
+                           {'model_name':'dmfnsvit', 'alpha': 1.2, 'a': 0.5},
+                           {'model_name':'dmfnsvit', 'alpha': 1.2, 'a': 1},
+                           {'model_name':'dmfnsvit', 'alpha': 2, 'a': 0},                             
+                           {'model_name':'dmfnsvit', 'alpha': 2, 'a': 0.5},
+                           {'model_name':'dmfnsvit', 'alpha': 2, 'a': 1},
+                           {'model_name':'opdmfnsvit', 'alpha': 1.2, 'a': 0}, 
+                           {'model_name':'opdmfnsvit', 'alpha': 1.2, 'a': 0.5},
+                           {'model_name':'opdmfnsvit', 'alpha': 1.2, 'a': 1},
+                           {'model_name':'opdmfnsvit', 'alpha': 2, 'a': 0},                             
+                           {'model_name':'opdmfnsvit', 'alpha': 2, 'a': 0.5},
+                           {'model_name':'opdmfnsvit', 'alpha': 2, 'a': 1}
+                           ]    
+                                                              
                 common_kwargs = {'n_layers':          4,
                                  'n_attn_heads':      8,   
                                  'hidden_size':       48,
@@ -109,12 +120,24 @@ if __name__ == '__main__':
                 model_root = njoin(DROOT, 'formers_trained', model_root_dirname)
 
             else:                         
-                ngpus, ncpus = 0, 8
+                ngpus, ncpus = 0, 1
                 select = 1  
-                walltime, mem = '23:59:59', '8GB'                
+                walltime, mem = '23:59:59', '6GB'                
         
-                kwargss = [{'model_name':'fnsvit', 'beta': 1.5}, {'model_name':'fnsvit', 'beta': 2}, 
-                           {'model_name':'dpvit'}]            
+                kwargss = [{'model_name':'dmfnsvit', 'alpha': 1.2, 'a': 0}, 
+                           {'model_name':'dmfnsvit', 'alpha': 1.2, 'a': 0.5},
+                           {'model_name':'dmfnsvit', 'alpha': 1.2, 'a': 1},
+                           {'model_name':'dmfnsvit', 'alpha': 2, 'a': 0},                             
+                           {'model_name':'dmfnsvit', 'alpha': 2, 'a': 0.5},
+                           {'model_name':'dmfnsvit', 'alpha': 2, 'a': 1},
+                           {'model_name':'opdmfnsvit', 'alpha': 1.2, 'a': 0}, 
+                           {'model_name':'opdmfnsvit', 'alpha': 1.2, 'a': 0.5},
+                           {'model_name':'opdmfnsvit', 'alpha': 1.2, 'a': 1},
+                           {'model_name':'opdmfnsvit', 'alpha': 2, 'a': 0},                             
+                           {'model_name':'opdmfnsvit', 'alpha': 2, 'a': 0.5},
+                           {'model_name':'opdmfnsvit', 'alpha': 2, 'a': 1}
+                           ]         
+
                 common_kwargs = {'n_layers':          2,
                                  'n_attn_heads':      2,    
                                  'max_iters':         1000,

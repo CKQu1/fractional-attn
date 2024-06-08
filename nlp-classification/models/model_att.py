@@ -337,11 +337,12 @@ class DPSelfAttention(nn.Module):
         self.head_dim = int(config.hidden_size / config.num_attention_heads)
         self.embed_dim = config.hidden_size
         self.qk_share = config.qk_share
+        self.bias = config.qkv_bias
 
-        self.query = nn.Linear(config.hidden_size, self.embed_dim)
+        self.query = nn.Linear(config.hidden_size, self.embed_dim, bias=self.bias)
         if not self.qk_share:
-            self.key = nn.Linear(config.hidden_size, self.embed_dim)
-        self.value = nn.Linear(config.hidden_size, self.embed_dim)
+            self.key = nn.Linear(config.hidden_size, self.embed_dim, bias=self.bias)
+        self.value = nn.Linear(config.hidden_size, self.embed_dim, bias=self.bias)
 
         self.dropout = config.attention_probs_dropout_prob
 
@@ -449,11 +450,12 @@ class FNSSelfAttention(nn.Module):
         self.head_dim = int(config.hidden_size / config.num_attention_heads)
         self.embed_dim = config.hidden_size
         self.qk_share = config.qk_share
+        self.bias = config.qkv_bias
 
-        self.query = nn.Linear(config.hidden_size, self.embed_dim)
+        self.query = nn.Linear(config.hidden_size, self.embed_dim, bias=self.bias)
         if not self.qk_share:
-            self.key = nn.Linear(config.hidden_size, self.embed_dim)
-        self.value = nn.Linear(config.hidden_size, self.embed_dim)
+            self.key = nn.Linear(config.hidden_size, self.embed_dim, bias=self.bias)
+        self.value = nn.Linear(config.hidden_size, self.embed_dim, bias=self.bias)
 
         self.dropout = config.attention_probs_dropout_prob
         self.alpha = alpha
@@ -595,10 +597,12 @@ class V2FNSSelfAttention(nn.Module):
         if self.alpha < 2:
             self.d_intrinsic = config.d_intrinsic
 
-        self.query = nn.Linear(config.hidden_size, self.embed_dim)
+        self.bias = config.qkv_bias
+
+        self.query = nn.Linear(config.hidden_size, self.embed_dim, bias=self.bias)
         if not self.qk_share:
-            self.key = nn.Linear(config.hidden_size, self.embed_dim)
-        self.value = nn.Linear(config.hidden_size, self.embed_dim)
+            self.key = nn.Linear(config.hidden_size, self.embed_dim, bias=self.bias)
+        self.value = nn.Linear(config.hidden_size, self.embed_dim, bias=self.bias)
 
         self.dropout = config.attention_probs_dropout_prob
 
@@ -753,21 +757,23 @@ class V3FNSSelfAttention(nn.Module):
         self.sphere_radius = config.sphere_radius
         self.mask_val = config.mask_val
 
+        self.bias = config.qkv_bias
+
         # embed query/key into lower dim
         if self.alpha < 2:
             self.d_intrinsic = config.d_intrinsic  # should still be self.head_dim
             #self.d_intrinsic = self.head_dim
             assert config.hidden_size == self.d_intrinsic * self.num_heads, 'Incorrect d_intrinsic in V3FNSSelfAttention'
             #self.query = nn.Linear(config.hidden_size, self.d_intrinsic * self.num_heads)
-            self.query = nn.Linear(config.hidden_size, self.embed_dim)
+            self.query = nn.Linear(config.hidden_size, self.embed_dim, bias=self.bias)
             if not self.qk_share:
                 #self.key = nn.Linear(config.hidden_size, self.d_intrinsic * self.num_heads)            
-                self.key = nn.Linear(config.hidden_size, self.embed_dim)
+                self.key = nn.Linear(config.hidden_size, self.embed_dim, bias=self.bias)
         else:
-            self.query = nn.Linear(config.hidden_size, self.embed_dim)
+            self.query = nn.Linear(config.hidden_size, self.embed_dim, bias=self.bias)
             if not self.qk_share:
-                self.key = nn.Linear(config.hidden_size, self.embed_dim)
-        self.value = nn.Linear(config.hidden_size, self.embed_dim)
+                self.key = nn.Linear(config.hidden_size, self.embed_dim, bias=self.bias)
+        self.value = nn.Linear(config.hidden_size, self.embed_dim, bias=self.bias)
 
         self.dropout = config.attention_probs_dropout_prob
 
@@ -911,6 +917,7 @@ class OPFNSSelfAttention(nn.Module):
         self.qk_share = config.qk_share
         self.sphere_radius = config.sphere_radius
         self.mask_val = config.mask_val
+        self.bias = config.qkv_bias
 
         # embed query/key into lower dim
         if self.alpha < 2:
@@ -918,15 +925,15 @@ class OPFNSSelfAttention(nn.Module):
             #self.d_intrinsic = self.head_dim
             assert config.hidden_size == self.d_intrinsic * self.num_heads, 'Incorrect d_intrinsic in OPFNSSelfAttention'
             #self.query = orthogonal(nn.Linear(config.hidden_size, self.d_intrinsic * self.num_heads))
-            self.query = orthogonal(nn.Linear(config.hidden_size, self.embed_dim))
+            self.query = orthogonal(nn.Linear(config.hidden_size, self.embed_dim, bias=self.bias))
             if not self.qk_share:
                 #self.key = orthogonal(nn.Linear(config.hidden_size, self.d_intrinsic * self.num_heads))            
-                self.key = orthogonal(nn.Linear(config.hidden_size, self.embed_dim))
+                self.key = orthogonal(nn.Linear(config.hidden_size, self.embed_dim, bias=self.bias))
         else:
-            self.query = orthogonal(nn.Linear(config.hidden_size, self.embed_dim))
+            self.query = orthogonal(nn.Linear(config.hidden_size, self.embed_dim, bias=self.bias))
             if not self.qk_share:
-                self.key = orthogonal(nn.Linear(config.hidden_size, self.embed_dim))
-        self.value = nn.Linear(config.hidden_size, self.embed_dim)
+                self.key = orthogonal(nn.Linear(config.hidden_size, self.embed_dim, bias=self.bias))
+        self.value = nn.Linear(config.hidden_size, self.embed_dim, bias=self.bias)
 
         self.dropout = config.attention_probs_dropout_prob
 
@@ -1069,6 +1076,7 @@ class V4FNSSelfAttention(nn.Module):
         self.qk_share = config.qk_share
         self.sphere_radius = config.sphere_radius
         self.mask_val = config.mask_val
+        self.bias = config.qkv_bias
 
         # embed query/key into lower dim
         if self.alpha < 2:
@@ -1076,15 +1084,15 @@ class V4FNSSelfAttention(nn.Module):
             #self.d_intrinsic = self.head_dim
             assert config.hidden_size == self.d_intrinsic * self.num_heads, 'Incorrect d_intrinsic in V4FNSSelfAttention'
             #self.query = nn.Linear(config.hidden_size, self.d_intrinsic * self.num_heads)
-            self.query = nn.Linear(config.hidden_size, self.embed_dim)
+            self.query = nn.Linear(config.hidden_size, self.embed_dim, bias=self.bias)
             if not self.qk_share:
                 #self.key = nn.Linear(config.hidden_size, self.d_intrinsic * self.num_heads)            
-                self.key = nn.Linear(config.hidden_size, self.embed_dim)
+                self.key = nn.Linear(config.hidden_size, self.embed_dim, bias=self.bias)
         else:
-            self.query = nn.Linear(config.hidden_size, self.embed_dim)
+            self.query = nn.Linear(config.hidden_size, self.embed_dim, bias=self.bias)
             if not self.qk_share:
-                self.key = nn.Linear(config.hidden_size, self.embed_dim)
-        self.value = nn.Linear(config.hidden_size, self.embed_dim)
+                self.key = nn.Linear(config.hidden_size, self.embed_dim, bias=self.bias)
+        self.value = nn.Linear(config.hidden_size, self.embed_dim, bias=self.bias)
 
         self.dropout = config.attention_probs_dropout_prob
 
@@ -1235,6 +1243,7 @@ class V2OPFNSSelfAttention(nn.Module):
         self.qk_share = config.qk_share
         self.sphere_radius = config.sphere_radius
         self.mask_val = config.mask_val
+        self.bias = config.qkv_bias
 
         # embed query/key into lower dim
         if self.alpha < 2:
@@ -1242,15 +1251,15 @@ class V2OPFNSSelfAttention(nn.Module):
             #self.d_intrinsic = self.head_dim
             assert config.hidden_size == self.d_intrinsic * self.num_heads, 'Incorrect d_intrinsic in V2OPFNSSelfAttention'
             #self.query = orthogonal(nn.Linear(config.hidden_size, self.d_intrinsic * self.num_heads))
-            self.query = orthogonal(nn.Linear(config.hidden_size, self.embed_dim))
+            self.query = orthogonal(nn.Linear(config.hidden_size, self.embed_dim, bias=self.bias))
             if not self.qk_share:
                 #self.key = orthogonal(nn.Linear(config.hidden_size, self.d_intrinsic * self.num_heads))            
-                self.key = orthogonal(nn.Linear(config.hidden_size, self.embed_dim))
+                self.key = orthogonal(nn.Linear(config.hidden_size, self.embed_dim, bias=self.bias))
         else:
-            self.query = orthogonal(nn.Linear(config.hidden_size, self.embed_dim))
+            self.query = orthogonal(nn.Linear(config.hidden_size, self.embed_dim, bias=self.bias))
             if not self.qk_share:
-                self.key = orthogonal(nn.Linear(config.hidden_size, self.embed_dim))
-        self.value = nn.Linear(config.hidden_size, self.embed_dim)
+                self.key = orthogonal(nn.Linear(config.hidden_size, self.embed_dim, bias=self.bias))
+        self.value = nn.Linear(config.hidden_size, self.embed_dim, bias=self.bias)
 
         self.dropout = config.attention_probs_dropout_prob
 
@@ -1397,11 +1406,12 @@ class SINKSelfAttention(nn.Module):
         self.bandwidth = bandwidth
         self.qk_share = config.qk_share
         self.mask_val = config.mask_val
+        self.bias = config.qkv_bias
 
-        self.query = nn.Linear(config.hidden_size, self.embed_dim)
+        self.query = nn.Linear(config.hidden_size, self.embed_dim, bias=self.bias)
         if not self.qk_share:
-            self.key = nn.Linear(config.hidden_size, self.embed_dim)
-        self.value = nn.Linear(config.hidden_size, self.embed_dim)
+            self.key = nn.Linear(config.hidden_size, self.embed_dim, bias=self.bias)
+        self.value = nn.Linear(config.hidden_size, self.embed_dim, bias=self.bias)
 
         self.dropout = config.attention_probs_dropout_prob
 

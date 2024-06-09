@@ -58,20 +58,24 @@ $ torchrun --nproc_per_node=8 --nnodes=2 --node_rank=1 --master_addr=123.456.123
 
 # single-core
 """
-python -i ddp_main.py --model_name=fnstranslation --beta=1.5\
- --max_iters=100 --eval_interval=5 --eval_iters=200 --weight_decay=0 --model_root=.droot/single-core 
+python -i ddp_main.py --model_name=fnsnmt --alpha=1.2 --n_attn_heads=1\
+ --max_iters=10 --eval_interval=5 --eval_iters=200 --weight_decay=0 --model_root=.droot/single-core 
+
+python -i ddp_main.py --model_name=fnsnmt --alpha=1.2\
+ --num_encoder_layers=2 --num_decoder_layers=2\
+ --max_iters=10 --eval_interval=5 --eval_iters=200 --weight_decay=0 --model_root=.droot/single-core  
 """
 
 # multi-core
 """
-torchrun --nnodes=1 --nproc_per_node=4 ddp_main.py --model_name=fnsvit --beta=1.5 --max_iters=100 --eval_interval=5\
- --eval_iters=200 --weight_decay=0 --n_layers=1 --n_attn_heads=2 --model_root=.droot/multi-core
+torchrun --nnodes=1 --nproc_per_node=4 ddp_main.py --model_name=fnsnmt --alpha=1.5\
+ --max_iters=10 --eval_interval=5 --eval_iters=200 --weight_decay=0 --model_root=.droot/multi-core 
 """
 
 if __name__ == '__main__':
 
     # Training options
-    parser = argparse.ArgumentParser(description='translation/main.py training arguments')   
+    parser = argparse.ArgumentParser(description='translation/ddp_main.py training arguments')   
     # training settings 
     parser.add_argument('--train_with_ddp', default=True, type=bool, help='to use DDP or not')
     parser.add_argument('--max_iters', default=10, type=int)
@@ -102,17 +106,23 @@ if __name__ == '__main__':
     parser.add_argument('--wandb_log', default=False, type=bool)
     parser.add_argument("--wandb_project", default='translation-task', type=str)    
 
+    parser.add_argument('--instance', default=None, type=int)
     # parser.add_argument('--seed', default=42, type=int)    
     # parser.add_argument('--debug', default=False, type=bool)  # for debuggin
-    # parser.add_argument('--lr_scheduler_type', default='constant', type=str)
+    parser.add_argument('--lr_scheduler_type', default='constant', type=str)
     # parser.add_argument('--do_train', default=True, type=bool)
     # parser.add_argument('--do_eval', default=True, type=bool)
 
     # Model settings
-    parser.add_argument('--beta', default=1, type=float)
-    parser.add_argument('--qk_share', default=False, type=bool)
-    parser.add_argument('--model_name', default='dptranslation', type=str)    
-    parser.add_argument('--bandwidth', default=1, type=float)  
+    parser.add_argument('--model_name', default='fnsnmt', type=str)
+    # FNS
+    parser.add_argument('--alpha', default=1, type=float)
+    parser.add_argument('--a', default=0, type=float)
+    # SINK
+    parser.add_argument('--n_it', default=1, type=int)
+    # general
+    parser.add_argument('--bandwidth', default=1, type=float)
+    parser.add_argument('--qk_share', default=False, type=bool)              
     parser.add_argument('--sphere_radius', default=1, type=float)  
 
     # Dataset settings
@@ -121,11 +131,11 @@ if __name__ == '__main__':
     parser.add_argument('--tokenizer_path', default=None, type=str)  # tokenizer file path
 
     # Config settings
-    parser.add_argument('--hidden_size', default=48, type=int)
+    parser.add_argument('--hidden_size', default=128, type=int)
     # parser.add_argument('--intermediate_size', default=4 * 48, type=int)    
     parser.add_argument('--num_encoder_layers', default=1, type=int)
     parser.add_argument('--num_decoder_layers', default=1, type=int)
-    parser.add_argument('--num_attention_heads', default=2, type=int)
+    parser.add_argument('--n_attn_heads', default=2, type=int)
     parser.add_argument('--hidden_dropout_prob', default=0.0, type=float)
     parser.add_argument('--encoder_dropout_prob', default=0.0, type=float)
     parser.add_argument('--decoder_dropout_prob', default=0.0, type=float)
@@ -170,14 +180,16 @@ if __name__ == '__main__':
     bias = False # do we use bias inside LayerNorm and Linear layers?
     
     config = {
-        "beta": args.beta,
+        "alpha": args.alpha,
+        "a": args.a,
         "bandwidth": args.bandwidth,
         "sphere_radius": args.sphere_radius,
         "hidden_size": args.hidden_size,
         "num_encoder_layers": args.num_encoder_layers,
         "num_decoder_layers": args.num_decoder_layers,
-        "num_attention_heads": args.num_attention_heads,
-        "intermediate_size": 4 * args.hidden_size, # 4 * hidden_size
+        "num_attention_heads": args.n_attn_heads,
+        #"intermediate_size": 4 * args.hidden_size, # 4 * hidden_size,
+        "intermediate_size": args.hidden_size,
         "hidden_dropout_prob": args.hidden_dropout_prob,
         "encoder_dropout_prob": args.encoder_dropout_prob,
         "decoder_dropout_prob": args.decoder_dropout_prob,
@@ -194,22 +206,26 @@ if __name__ == '__main__':
     }
     # These are not hard constraints, but are used to prevent misconfigurations
     assert config["hidden_size"] % config["num_attention_heads"] == 0
-    assert config['intermediate_size'] == 4 * config['hidden_size']
+    #assert config['intermediate_size'] == 4 * config['hidden_size']
 
-    attn_setup = {'qk_share': False}
+    attn_setup = {'qk_share': args.qk_share, 'qkv_bias': args.qkv_bias, 'instance': args.instance}
     attn_setup['model_name'] = args.model_name
     attn_setup['dataset_name'] = args.dataset_name    
-    if args.model_name == 'fnstranslation':
-        config['beta'] = attn_setup['beta'] = args.beta      
+    if args.model_name == 'fnsnmt':
+        config['alpha'] = attn_setup['alpha'] = args.alpha      
+        config['a'] = attn_setup['a'] = args.a
         config['bandwidth'] = attn_setup['bandwidth'] = args.bandwidth   
-        if args.beta < 2:            
+        if args.alpha < 2:            
             config['d_intrinsic'] = int(config["hidden_size"] / config["num_attention_heads"])  # head_dim
             config['sphere_radius'] = ((np.pi**(1/config['d_intrinsic'])-1)/np.pi)                            
         else:
             config['sphere_radius'] = 1
 
         attn_setup['sphere_radius'] = config['sphere_radius']       
-        attn_setup['mask_val'] = np.pi * config['sphere_radius']      
+        attn_setup['mask_val'] = np.pi * config['sphere_radius']   
+    elif args.model_name == 'sinknmt':
+        config['n_it'] = attn_setup['n_it'] = args.n_it
+        config['bandwidth'] = attn_setup['bandwidth'] = args.bandwidth           
 
     # adamw optimizer
     learning_rate = args.max_lr  # max learning rate
@@ -267,29 +283,11 @@ if __name__ == '__main__':
         # if not ddp, we are running on a single gpu, and one process
         master_process = True
         seed_offset = 0
-        ddp_world_size = 1
-
-    if master_process:
-        # save config
-        with open("config.json", "w") as ofile: 
-            json.dump(config, ofile)   
-        # save attn_setup
-        with open("attn_setup.json", "w") as ofile: 
-            json.dump(attn_setup, ofile)                 
-
-        print('-'*25)
-        print(f'ddp = {ddp}')
-        if ddp and args.train_with_ddp:        
-            print(f'ddp_rank = {ddp_rank}')
-            print(f'ddp_local_rank = {ddp_local_rank}')
-        print(f'ddp_world_size = {ddp_world_size}')
-        print(f'device = {device}')
-        print(f'backend = {backend}')
-        print('-'*25 + '\n')              
+        ddp_world_size = 1            
     
     if args.model_root == '':
         model_root = structural_model_root(qk_share=args.qk_share, num_encoder_layers=args.num_encoder_layers,
-                                           num_decoder_layers=args.num_decoder_layers, num_attention_heads=args.num_attention_heads,
+                                           num_decoder_layers=args.num_decoder_layers, num_attention_heads=args.n_attn_heads,
                                            hidden_size=args.hidden_size,
                                            lr=args.lr, bs=args.train_bs, 
                                            use_custom_optim=args.use_custom_optim,
@@ -302,7 +300,39 @@ if __name__ == '__main__':
     models_dir, out_dir = create_model_dir(model_root, **attn_setup)   
 
     if master_process:
+        # makedir of out_dir
         os.makedirs(out_dir, exist_ok=True)
+
+        # save config
+        with open(njoin(out_dir,"config.json"), "w") as ofile: 
+            json.dump(config, ofile)   
+        # save attn_setup
+        with open(njoin(out_dir,"attn_setup.json"), "w") as ofile: 
+            json.dump(attn_setup, ofile)                 
+        # save train settings
+        train_settings = pd.DataFrame(columns=["max_lr", "min_lr", "batch_size", "beta1", "beta2",
+                                               "max_iters", "weight_decay", "grad_clip", "decay_lr",
+                                               "lr_scheduler_type",
+                                               "eval_interval", "log_interval", "eval_iters", "eval_only", "always_save_checkpoint",                         
+                                               "warmup_iters",  "grad_accum_step"], index=range(1))
+        train_settings.iloc[0] = [args.max_lr, args.min_lr, args.train_bs, args.beta1, args.beta2,
+                                  args.max_iters, args.weight_decay, args.grad_clip, args.decay_lr,
+                                  args.lr_scheduler_type,
+                                  args.eval_interval, args.log_interval, args.eval_iters, args.eval_only, args.always_save_checkpoint,
+                                  args.warmup_iters, args.grad_accum_step
+                                  ]
+        train_settings.to_csv(njoin(out_dir, "train_setting.csv"))        
+
+
+        print('-'*25)
+        print(f'ddp = {ddp}')
+        if ddp and args.train_with_ddp:        
+            print(f'ddp_rank = {ddp_rank}')
+            print(f'ddp_local_rank = {ddp_local_rank}')
+        print(f'ddp_world_size = {ddp_world_size}')
+        print(f'device = {device}')
+        print(f'backend = {backend}')
+        print('-'*25 + '\n')    
 
     torch.manual_seed(1337 + seed_offset)
     if torch.cuda.is_available():
@@ -455,19 +485,26 @@ if __name__ == '__main__':
     #                   bias=bias, vocab_size=None, dropout=dropout) # start with model_args from command line
     if init_from == 'scratch':
         # init a new model from scratch
-        print(f'Initializing a new {args.model_name} from scratch \n')
+        if master_process:
+            print(f'Initializing a new {args.model_name} from scratch \n')
         # determine the vocab size we'll use for from-scratch training
         # if meta_vocab_size is None:
         #     print("defaulting to vocab_size of GPT-2 to 50304 (50257 rounded up for efficiency)")
         # model_args['vocab_size'] = meta_vocab_size if meta_vocab_size is not None else 50304
         # gptconf = GPTConfig(**model_args)
         # model = GPT(gptconf)
-        if args.model_name == 'dptranslation':
-            from models.translation import DPForTranslation
-            model = DPForTranslation(config)
-        elif args.model_name == 'fnstranslation':
-            from models.fns_translation import FNSForTranslation
-            model = FNSForTranslation(config)    
+        if args.model_name == 'dpnmt':
+            from models.translation import DPForNMT
+            model = DPForNMT(config)
+        elif args.model_name == 'sinknmt':
+            from models.sink_translation import SINKForNMT
+            model = SINKForNMT(config)            
+        elif args.model_name == 'fnsnmt':
+            from models.fns_translation import FNSForNMT
+            model = FNSForNMT(config)    
+        elif args.model_name == 'opfnsnmt':
+            from models.opfns_translation import OPFNSForNMT
+            model = OPFNSForNMT(config)              
         else:
             print(f'{args.model_name} does not exist!')
             quit()
@@ -547,6 +584,17 @@ if __name__ == '__main__':
             model = DDP(model, device_ids=[], output_device=[])
         #model = DDP(model, device_ids=[ddp_local_rank], output_device=ddp_local_rank)    
 
+    # ----- DEBUG -----
+    # if master_process:
+    #     print('-'*20)
+    #     print(f'model type: {type(model)}')   
+    #     print(model)
+    #     print(dir(model)) 
+    #     print(model.encoder)    
+    #     print('-'*20)
+    # quit()
+    
+
     # helps estimate an arbitrarily accurate loss over either split using many batches
     def greedy_decode(model, source, source_mask, tokenizer_trg, max_len, device):        
         # sos_idx = tokenizer_trg.bos_token_id
@@ -556,7 +604,10 @@ if __name__ == '__main__':
         eos_idx = tokenizer_trg.get_vocab()['[EOS]']
 
         # Precompute the encoder output and reuse it for every step
-        encoder_output, _ = model.encoder(source, source_mask)
+        if ddp:
+            encoder_output, _ = model.module.encoder(source, source_mask)
+        else:
+            encoder_output, _ = model.encoder(source, source_mask)
         # Initialize the decoder input with the sos token
         decoder_input = torch.empty(1, 1).fill_(sos_idx).type_as(source).to(device)
         while True:
@@ -570,7 +621,10 @@ if __name__ == '__main__':
 
             ##### CHANGES HERE #####
             # calculate output
-            out, _, _ = model.decoder(decoder_input, encoder_output, src_mask=source_mask, trg_mask=trg_mask)
+            if ddp:
+                out, _, _ = model.module.decoder(decoder_input, encoder_output, src_mask=source_mask, trg_mask=trg_mask)
+            else:
+                out, _, _ = model.decoder(decoder_input, encoder_output, src_mask=source_mask, trg_mask=trg_mask)
             # get next token
             _, next_word = torch.max(out[0,-1,:], dim=-1)
             decoder_input = torch.cat(
@@ -644,9 +698,15 @@ if __name__ == '__main__':
     while True:
 
         # determine and set the learning rate for this iteration
-        lr = get_lr(iter_num) if decay_lr else learning_rate
-        for param_group in optimizer.param_groups:
-            param_group['lr'] = lr
+        if args.lr_scheduler_type == 'cosine':
+            lr = get_lr(iter_num) if decay_lr else learning_rate
+        elif args.lr_scheduler_type == 'binary':
+            if iter_num < max_iters * 2/3:
+                lr = learning_rate
+            else:
+                lr = min_lr  
+        elif args.lr_scheduler_type == 'constant':
+            lr = learning_rate        
 
         # evaluate the loss on train/val sets and write checkpoints
         if iter_num % eval_interval == 0 and master_process:
@@ -657,7 +717,7 @@ if __name__ == '__main__':
                     "iter": iter_num,
                     "train/loss": losses['train'],
                     "val/loss": losses['val'],
-                    "train/bleu": bleu['train'],
+                    #"train/bleu": bleu['train'],
                     "val/bleu": bleu['val'],
                     "lr": lr
                     #"mfu": running_mfu*100, # convert to percentage
@@ -729,10 +789,12 @@ if __name__ == '__main__':
 
         # termination conditions
         if iter_num > max_iters:
-            #if master_process:
-            if not wandb_log:
-                df = pd.DataFrame(metrics_ls, columns=['iter', 'lr', 'train_loss', 'val_loss', 'val_bleu'])
-                df.to_csv(njoin(out_dir, 'run_performance.csv'))
+            if master_process:
+                if not wandb_log:
+                    df = pd.DataFrame(metrics_ls, columns=['iter', 'lr', 'train_loss', 'val_loss', 'val_bleu'])
+                    df.to_csv(njoin(out_dir, 'run_performance.csv'))
+                print(f'Add data saved under {out_dir}')
+                
             break
 
     if ddp:

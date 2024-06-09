@@ -153,22 +153,21 @@ def command_setup_ddp(singularity_path, **kwargs):
             # command += f" torchrun --rdzv-backend=c10d --rdzv-endpoint=localhost:{HOST_NODE_ADDR}"
             # command += f" --nnodes={select} --nproc_per_node={ngpus}"        
 
-            command += f" torchrun --standalone"
-            command += f" --nnodes={select} --nproc_per_node={ngpus}"                  
+            command += f" torchrun --standalone --nnodes={select} --nproc_per_node={ngpus}"                              
                           
-        else:            
-            # command += f" torchrun --nnodes={select} --nproc_per_node={ngpus}"
-            # command += f" --max-restarts=3 --rdzv-id=$JOB_ID"
-            # command += f" --rdzv-backend=c10d --rdzv-endpoint=$HOST_NODE_ADDR"
+        # else:            
+        #     # command += f" torchrun --nnodes={select} --nproc_per_node={ngpus}"
+        #     # command += f" --max-restarts=3 --rdzv-id=$JOB_ID"
+        #     # command += f" --rdzv-backend=c10d --rdzv-endpoint=$HOST_NODE_ADDR"
 
-            command += f" torchrun --rdzv-backend=c10d --rdzv-endpoint=localhost:{HOST_NODE_ADDR}"
-            command += f" --nnodes={select} --nproc_per_node={ngpus}"            
+        #     command += f" torchrun --rdzv-backend=c10d --rdzv-endpoint=localhost:{HOST_NODE_ADDR}"
+        #     command += f" --nnodes={select} --nproc_per_node={ngpus}"            
 
-            # command += f" torchrun --rdzv-backend=c10d --rdzv-endpoint=localhost:0"
-            # command += f" --nnodes=1 --nproc_per_node={ngpus} --max-restarts=3"
-            command += f" torchrun --standalone --nnodes=1 --nproc_per_node={ncpus}"
-            #if 'master_port' in kwargs:
-            #    command += f" --master_port={master_port}"
+        #     # command += f" torchrun --rdzv-backend=c10d --rdzv-endpoint=localhost:0"
+        #     # command += f" --nnodes=1 --nproc_per_node={ngpus} --max-restarts=3"
+        #     command += f" torchrun --standalone --nnodes=1 --nproc_per_node={ncpus}"
+        #     #if 'master_port' in kwargs:
+        #     #    command += f" --master_port={master_port}"
         else:
             # tolerates 3 failures
             # command += f" torchrun --nnodes={select} --nproc_per_node={ngpus}"
@@ -188,21 +187,20 @@ def command_setup_ddp(singularity_path, **kwargs):
             # command += f" torchrun --rdzv-backend=c10d --rdzv-endpoint=localhost:{HOST_NODE_ADDR}"
             # command += f" --nnodes={select} --nproc_per_node={ncpus}"                    
 
-            command += f" torchrun --standalone"
-            command += f" --nnodes={select} --nproc_per_node={ncpus}"                
-        else:
-            # command += f" torchrun --nnodes={select} --nproc_per_node={ncpus}"
-            # command += f" --max-restarts=3 --rdzv-id=$JOB_ID"
-            # command += f" --rdzv-backend=c10d --rdzv-endpoint=$HOST_NODE_ADDR"  
+            command += f" torchrun --standalone --nnodes={select} --nproc_per_node={ncpus}"                            
+        # else:
+        #     # command += f" torchrun --nnodes={select} --nproc_per_node={ncpus}"
+        #     # command += f" --max-restarts=3 --rdzv-id=$JOB_ID"
+        #     # command += f" --rdzv-backend=c10d --rdzv-endpoint=$HOST_NODE_ADDR"  
               
-            command += f" torchrun --rdzv-backend=c10d --rdzv-endpoint=localhost:{HOST_NODE_ADDR}"
-            command += f" --nnodes={select} --nproc_per_node={ncpus}"                    
+        #     command += f" torchrun --rdzv-backend=c10d --rdzv-endpoint=localhost:{HOST_NODE_ADDR}"
+        #     command += f" --nnodes={select} --nproc_per_node={ncpus}"                    
 
-            # command += f" torchrun --rdzv-backend=c10d --rdzv-endpoint=localhost:0"            
-            # command += f" --nnodes=1 --nproc_per_node={ncpus} --max-restarts=3"
-            command += f" torchrun --standalone --nnodes=1 --nproc_per_node={ncpus}"
-            # if 'master_port' in kwargs:
-            #     command += f" --master_port={master_port}"            
+        #     # command += f" torchrun --rdzv-backend=c10d --rdzv-endpoint=localhost:0"            
+        #     # command += f" --nnodes=1 --nproc_per_node={ncpus} --max-restarts=3"
+        #     command += f" torchrun --standalone --nnodes=1 --nproc_per_node={ncpus}"
+        #     # if 'master_port' in kwargs:
+        #     #     command += f" --master_port={master_port}"            
         else:
             # command += f" torchrun --nnodes={select} --nproc_per_node={ncpus}"
             # command += f" --max-restarts=3 --rdzv-id=$JOB_ID"

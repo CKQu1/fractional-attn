@@ -30,7 +30,7 @@ colors = list(mcl.TABLEAU_COLORS.keys())
 
 def plot_ensembles(model_root_dir, datasets=['cifar10'],  
                    metrics=['train_loss','val_loss','train_acc','val_acc'], 
-                   mod_rows=10,display=False):
+                   mod_rows=1,display=False):
     global df, df_setting, df_filtered, fig_file, axs
     global model_dir, config_dict, final_metrics, ensemble_metrics, metric_plot 
     global model_dirs, config, attn_setup   
@@ -74,6 +74,7 @@ def plot_ensembles(model_root_dir, datasets=['cifar10'],
 
     #quit()  # delete
     for idx, dataset in tqdm(enumerate(datasets)):
+        print('\n' + '#'*25 + f' Training on {dataset} '  + '#'*25 + '\n')
 
         model_names = []
         model_types = {}
@@ -104,10 +105,10 @@ def plot_ensembles(model_root_dir, datasets=['cifar10'],
             if model_name not in model_names:
                 model_names.append(model_name)
             if 'fns' in dirname.lower():
-                beta, bandwidth  = attn_setup['beta'], attn_setup['bandwidth']
-                #model_settings = rf'$\beta$ = {beta}, $\varepsilon$ = {bandwidth}'
-                model_settings = rf'$\beta$ = {beta}'
-                # if beta < 2:                        
+                alpha, bandwidth, a  = attn_setup['alpha'], attn_setup['bandwidth'], attn_setup['a']
+                #model_settings = rf'$\alpha$ = {alpha}, $\varepsilon$ = {bandwidth}'
+                model_settings = rf'$\alpha$ = {alpha}, $a$ = {a}'
+                # if alpha < 2:                        
                 #     d_intrinsic = attn_setup.loc[0,'d_intrinsic']
                 #     model_settings += rf', $d$ = {d_intrinsic}'  #$d_{\mathcal{M}}$
                 model_name += f' ({model_settings})'
@@ -119,11 +120,12 @@ def plot_ensembles(model_root_dir, datasets=['cifar10'],
             model_colors[model_name] = colors[N_model_types - 1]
 
             # ensemble of training instances for the same architecture
-            final_metrics = {}  # metrics of the final epoch
+            ylims = [100,100,0,0]
             count = 0
+            final_metrics = {}  # metrics of the final epoch            
             ensemble_metrics = {}            
             for model_dir in model_dirs:
-                df = pd.read_csv(njoin(model_dir, 'run_performance.csv'))     
+                df = pd.read_csv(njoin(model_dir, 'run_performance.csv'), index_col=0)     
                                    
                 for kdx, metric in enumerate(metrics):
                     df_filtered = df[df[metric].notna()]        
@@ -154,8 +156,8 @@ def plot_ensembles(model_root_dir, datasets=['cifar10'],
                 count += 1
             final_metrics[f'count'] = count                        
                         
-            print('-'*15)    
-            print(f'{model_name} on {dataset}')
+            print('-'*15)                
+            print(f'{model_name}, total ensembles = {len(model_dirs)}')
             for kdx, metric in enumerate(metrics):
 
                 ensemble_metrics[metric] = pd.concat(ensemble_metrics[metric], axis=1).T
@@ -164,9 +166,12 @@ def plot_ensembles(model_root_dir, datasets=['cifar10'],
                 # ----- Plots -----
                 ensemble_mean = ensemble_metrics[metric].mean(0)
                 ensemble_std = ensemble_metrics[metric].std(0)
-                axs[idx,kdx].plot(df_filtered.loc[:,'iter'], ensemble_mean,
+                max_iter = df_filtered.loc[:,'iter'].max()
+
+                iit = df_filtered[df_filtered.loc[:,'iter']>=max_iter*1/3].index
+                axs[idx,kdx].plot(df_filtered.loc[iit,'iter'], ensemble_mean[iit],
                                   linestyle=model_linestyles[model_name], c=model_colors[model_name],
-                                  label=model_name) 
+                                  label=model_name)                 
 
                 # std
                 # axs[idx,kdx].fill_between(df_filtered.loc[:,'epoch'], 
@@ -177,6 +182,7 @@ def plot_ensembles(model_root_dir, datasets=['cifar10'],
                     axs[idx,kdx].set_title(NAMES_DICT[metric])
                 #if idx == nrows - 1:
                 axs[0,kdx].set_xlabel('Steps')
+                axs[idx,kdx].ticklabel_format(style='sci',scilimits=(-3,10),axis='x')
 
                 #axs[idx,0].set_ylabel(NAMES_DICT[dataset])
                 axs[0,0].legend(loc='upper right', #bbox_to_anchor=(0.5, 1.05),
@@ -187,11 +193,17 @@ def plot_ensembles(model_root_dir, datasets=['cifar10'],
                 worst = min(final_metrics[metric]) if 'acc' in metric or 'f1' in metric else max(final_metrics[metric])
                 median, mean = np.median(final_metrics[metric]), np.mean(final_metrics[metric])
                 print(f'best, median, mean, worst {metric}: {best}, {median}, {mean}, {worst}')
-            print('\n')
+
+                # if 'acc' in metric or 'f1' in metric:
+                #     ylims[kdx] = max(ylims[kdx], mean)
+                # else:
+                #     ylims[kdx] = min(ylims[kdx], mean)
+                # axs[idx,kdx].set_ylim
+
             # for other_metric in ['epoch_eval_runtime', 'train_runtime', 'total_flos']:
             #     print(f'Average total {other_metric}: {np.mean(final_metrics[other_metric])}')
-            print('-'*15 + '\n')                    
-            
+            print('-'*15 + '\n')                                
+
 
     if display:
         plt.show()
@@ -277,7 +289,7 @@ def plot_model(model_root_dir, dirnames, instances,
                 if model_name not in model_names:
                     model_names.append(model_name)
                 if 'fns' in dirname:
-                    #beta, bandwidth  = df_setting.loc[0,['beta','bandwidth']]    
+                    #alpha, bandwidth  = df_setting.loc[0,['alpha','bandwidth']]    
                     model_dict = {}
                     for ls in dirname.split('/'):
                         for ele in ls.split('-'):
@@ -285,9 +297,9 @@ def plot_model(model_root_dir, dirnames, instances,
                                 key, val = ele.split('=')
                                 model_dict[key] = val
 
-                    beta, bandwidth = model_dict['beta'], model_dict['eps']
-                    model_settings = rf'$\beta$ = {beta}, $\varepsilon$ = {bandwidth}'
-                    # if beta < 2:                        
+                    alpha, bandwidth = model_dict['alpha'], model_dict['eps']
+                    model_settings = rf'$\alpha$ = {alpha}, $\varepsilon$ = {bandwidth}'
+                    # if alpha < 2:                        
                     #     d_intrinsic = df_setting.loc[0,'d_intrinsic']
                     #     model_settings += rf', $d$ = {d_intrinsic}'  #$d_{\mathcal{M}}$
                     model_name += f' ({model_settings})'

@@ -75,14 +75,15 @@ if __name__ == '__main__':
     debug_mode = False
     print(f'---------- debug_mode = {debug_mode} ---------- \n')
     
-    instances = list(range(5))    
-    #instances = [0]
+    #instances = list(range(5))    
+    instances = [0]
+    #instances = [1,2,3,4]
     kwargss_all = []    
     for instance in instances:
         for didx, dataset_name in enumerate(dataset_names):
             if not debug_mode:
-                select = 1; ngpus, ncpus = 0, 8                            
-                walltime, mem = '23:59:59', '8GB'                             
+                select = 1; ngpus, ncpus = 0, 1                            
+                walltime, mem = '23:59:59', '6GB'                             
 
                 if ngpus > 1:
                     num_proc = ngpus
@@ -117,7 +118,7 @@ if __name__ == '__main__':
                 #            {'model_name':'dmfnsvit', 'alpha': 2, 'a': 0}
                 #            ] 
 
-                epochs = 50                                              
+                epochs = 10                                              
                 common_kwargs = {'instance':          instance,
                                  'n_layers':          2,
                                  'n_attn_heads':      4,   
@@ -134,9 +135,12 @@ if __name__ == '__main__':
 
                 if epochs is not None:                    
                     train_data_size = 25000
-                    steps_per_epoch = train_data_size // (num_proc * common_kwargs['train_bs']) + 1  
+                    #steps_per_epoch = train_data_size // (num_proc * common_kwargs['train_bs']) + 1  
+                    steps_per_epoch = 1950
                     common_kwargs['max_iters'] = steps_per_epoch * epochs
-
+                    common_kwargs['eval_interval'] = steps_per_epoch
+                    common_kwargs['log_interval'] = steps_per_epoch  # for mfu
+                    
                 if num_proc > 1:
                     common_kwargs['grad_accum_step'] = num_proc
 
@@ -146,7 +150,8 @@ if __name__ == '__main__':
                 model_root_dirname = structural_model_root(qk_share=qk_share, n_layers=common_kwargs['n_layers'],
                                                            n_attn_heads=common_kwargs['n_attn_heads'], hidden_size=common_kwargs['hidden_size']
                                                            )       
-                model_root = njoin(DROOT, 'formers_trained', model_root_dirname)
+                #model_root = njoin(DROOT, 'formers_trained', model_root_dirname)
+                model_root = njoin(DROOT, 'ncpus=1-formers_trained', model_root_dirname)
 
             else:                         
                 ngpus, ncpus = 0, 16

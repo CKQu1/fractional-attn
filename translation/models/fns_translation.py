@@ -23,7 +23,7 @@ class FNSAttentionHead(nn.Module):
     This module is used in the FNSMultiHeadAttention module.
 
     """
-    def __init__(self, beta, bandwidth, sphere_radius, hidden_size, attention_head_size, dropout, bias=True, is_cross_attention=False):
+    def __init__(self, alpha, a, bandwidth, sphere_radius, hidden_size, attention_head_size, dropout, bias=True, is_cross_attention=False):
         super().__init__()
         self.hidden_size = hidden_size
         self.attention_head_size = attention_head_size
@@ -34,7 +34,8 @@ class FNSAttentionHead(nn.Module):
 
         self.dropout = nn.Dropout(dropout)
     
-        self.beta, self.bandwidth = beta, bandwidth
+        self.alpha, self.bandwidth = alpha, bandwidth
+        self.a = a
         self.sphere_radius = sphere_radius
         
         self.is_cross_attention = is_cross_attention
@@ -50,7 +51,7 @@ class FNSAttentionHead(nn.Module):
             key = F.normalize(self.key(x), p=2, dim=-1)
             value = F.normalize(self.value(x), p=2, dim=-1)                
 
-        beta, bandwidth = self.beta, self.bandwidth
+        alpha, bandwidth = self.alpha, self.bandwidth
         sphere_radius = self.sphere_radius
         d_intrinsic = self.attention_head_size
 
@@ -59,16 +60,21 @@ class FNSAttentionHead(nn.Module):
         g_dist = torch.acos(torch.clamp(query @ key.transpose(-2, -1), -1+eps, 1-eps)) * sphere_radius
         
         # Calculate the attention scores
-        if beta < 2:
-            attn_score = (1 + g_dist/bandwidth**0.5)**(-d_intrinsic-beta)
+        if alpha < 2:
+            attn_score = (1 + g_dist/bandwidth**0.5)**(-d_intrinsic-alpha)
         else:
-            attn_score = torch.exp((-g_dist/bandwidth**0.5)**(beta/(beta-1)))
-        D_inv_row = torch.diag_embed(attn_score.sum(-1)**(-1))  # inverse of degree matrix of attn_score
-        D_inv_col = torch.diag_embed(attn_score.sum(-2)**(-1))  # inverse of degree matrix of attn_score
-        K_tilde = D_inv_row @ attn_score @ D_inv_col
+            attn_score = torch.exp((-g_dist/bandwidth**0.5)**(alpha/(alpha-1)))
+
         attention_mask = attention_mask[:,:,:query.size(1),:key.size(1)] # Feels like a dirty fix...
-        K_tilde = K_tilde.masked_fill(attention_mask==0, -1e9) # Mask
-        attention_probs = F.normalize(K_tilde,p=1,dim=3)  # can do this as the attn weights are always positive
+        if self.a == 0:            
+            attn_score = attn_score.masked_fill(attention_mask==0, -1e9) # Mask
+            attention_probs = F.normalize(attn_score,p=1,dim=3)  # can do this as the attn weights are always positive
+        else:
+            D_inv_row = torch.diag_embed(attn_score.sum(-1)**(-a))  # inverse of degree matrix of attn_score
+            D_inv_col = torch.diag_embed(attn_score.sum(-2)**(-a))  # inverse of degree matrix of attn_score
+            K_tilde = D_inv_row @ attn_score @ D_inv_col            
+            K_tilde = K_tilde.masked_fill(attention_mask==0, -1e9) # Mask
+            attention_probs = F.normalize(K_tilde,p=1,dim=3)  # can do this as the attn weights are always positive
         attention_probs = self.attn_dropout(attention_probs)
 
         # Calculate the attention output
@@ -97,13 +103,15 @@ class FNSMultiHeadAttention(nn.Module):
         # Whether it is cross attention
         self.is_cross_attention = is_cross_attention
 
-        self.beta = config['beta']
+        self.alpha = config['alpha']
         self.bandwidth = config['bandwidth']
+        self.a = config['a']
         self.sphere_radius = config['sphere_radius']     
 
         for _ in range(self.num_attention_heads):
             head = FNSAttentionHead(
-                self.beta,
+                self.alpha,
+                self.a,
                 self.bandwidth,
                 self.sphere_radius,
                 self.hidden_size,
@@ -163,8 +171,9 @@ class FasterFNSMultiHeadAttention(nn.Module):
         self.output_projection = nn.Linear(self.all_head_size, self.hidden_size)
         self.output_dropout = nn.Dropout(config["hidden_dropout_prob"])
 
-        self.beta = config['beta']
+        self.alpha = config['alpha']
         self.bandwidth = config['bandwidth']
+        self.a = config['a']
         self.sphere_radius = config['sphere_radius']
 
     def forward(self, x, attention_mask=None, output_attentions=False, encoder_output_states=None):
@@ -189,7 +198,7 @@ class FasterFNSMultiHeadAttention(nn.Module):
         trg_sequence_length = key.size(1)
         num_attention_heads, attention_head_size = self.num_attention_heads, self.attention_head_size
 
-        beta, bandwidth = self.beta, self.bandwidth
+        alpha, bandwidth = self.alpha, self.bandwidth
         sphere_radius = self.sphere_radius
         d_intrinsic = attention_head_size
 
@@ -202,16 +211,21 @@ class FasterFNSMultiHeadAttention(nn.Module):
         g_dist = torch.acos(torch.clamp(query @ key.transpose(-2, -1), -1+eps, 1-eps)) * sphere_radius
         
         # Calculate the attention scores
-        if beta < 2:
-            attn_score = (1 + g_dist/bandwidth**0.5)**(-d_intrinsic-beta)
+        if alpha < 2:
+            attn_score = (1 + g_dist/bandwidth**0.5)**(-d_intrinsic-alpha)
         else:
-            attn_score = torch.exp((-g_dist/bandwidth**0.5)**(beta/(beta-1)))
-        D_inv_row = torch.diag_embed(attn_score.sum(-1)**(-1))  # inverse of degree matrix of attn_score
-        D_inv_col = torch.diag_embed(attn_score.sum(-2)**(-1))  # inverse of degree matrix of attn_score
-        K_tilde = D_inv_row @ attn_score @ D_inv_col
+            attn_score = torch.exp((-g_dist/bandwidth**0.5)**(alpha/(alpha-1)))
+
         attention_mask = attention_mask[:,:,:src_sequence_length,:trg_sequence_length] # Feels like a dirty fix...
-        K_tilde = K_tilde.masked_fill(attention_mask.expand(-1,self.num_attention_heads,-1,-1)==0, -1e9) # Mask
-        attention_probs = F.normalize(K_tilde,p=1,dim=3)  # can do this as the attn weights are always positive
+        if self.a == 0:
+            attn_score = attn_score.masked_fill(attention_mask.expand(-1,self.num_attention_heads,-1,-1)==0, -1e9) # Mask
+            attention_probs = F.normalize(attn_score,p=1,dim=3)  # can do this as the attn weights are always positive
+        else:
+            D_inv_row = torch.diag_embed(attn_score.sum(-1)**(-1))  # inverse of degree matrix of attn_score
+            D_inv_col = torch.diag_embed(attn_score.sum(-2)**(-1))  # inverse of degree matrix of attn_score
+            K_tilde = D_inv_row @ attn_score @ D_inv_col        
+            K_tilde = K_tilde.masked_fill(attention_mask.expand(-1,self.num_attention_heads,-1,-1)==0, -1e9) # Mask
+            attention_probs = F.normalize(K_tilde,p=1,dim=3)  # can do this as the attn weights are always positive
         attention_probs = self.attn_dropout(attention_probs)
 
         # ##### CHANGES HERE #####        
@@ -442,7 +456,7 @@ class FNSDecoder(nn.Module):
         else:
             return (x, all_self_attentions, all_cross_attentions)
 
-class FNSForTranslation(nn.Module):
+class FNSForNMT(nn.Module):
     """
     The seq2seq model for neural machine translation.
     """

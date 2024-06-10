@@ -84,7 +84,8 @@ class DMFNSAttentionHead(nn.Module):
         super().__init__()
         # The attention head size is the hidden size divided by the number of attention heads
         self.hidden_size = config['hidden_size']
-        self.attention_head_size = self.hidden_size // config['num_attention_heads']
+        self.num_attention_heads = config['num_attention_heads']
+        self.attention_head_size = self.hidden_size // self.num_attention_heads
         # Whether or not to use bias in the query, key, and value projection layers
         self.qkv_bias = config["qkv_bias"]
         # Create a linear layer to project the query, key, and value
@@ -107,15 +108,14 @@ class DMFNSAttentionHead(nn.Module):
         # (batch_size, sequence_length, hidden_size) -> (batch_size, sequence_length, attention_head_size)
         query = self.query(x)
         key = self.key(x)
-        value = self.value(x)          
+        value = self.value(x)                
 
         batch_size, sequence_length, _ = query.size()
-        attention_head_size = self.attention_head_size        
+        num_attention_heads, attention_head_size = self.num_attention_heads, self.attention_head_size
 
-        # query = F.normalize(query.view(batch_size, sequence_length, attention_head_size).transpose(1, 2), p=2, dim=-1)
-        # key = F.normalize(key.view(batch_size, sequence_length, attention_head_size).transpose(1, 2), p=2, dim=-1)         
-        query = F.normalize(query, p=2, dim=-1)
-        key = F.normalize(key, p=2, dim=-1)               
+        query = F.normalize(query.view(batch_size, sequence_length, num_attention_heads, attention_head_size).transpose(1, 2), p=2, dim=-1)
+        key = F.normalize(key.view(batch_size, sequence_length, num_attention_heads, attention_head_size).transpose(1, 2), p=2, dim=-1)
+        value = value.view(batch_size, sequence_length, num_attention_heads, attention_head_size).transpose(1, 2)            
 
         alpha, bandwidth = self.alpha, self.bandwidth
         a = self.a
@@ -145,10 +145,10 @@ class DMFNSAttentionHead(nn.Module):
 
         if a > 0:
             K_tilde = torch.diag_embed(attn_score.sum(-1)**(-a)) @ attn_score @ torch.diag_embed(attn_score.sum(-2)**(-a))
+            attention_probs = F.normalize(K_tilde,p=1,dim=3)  # can do this as the attn weights are always positive
         else:
-            K_tilde = attn_score   
+            attention_probs = F.normalize(attn_score,p=1,dim=3)  # can do this as the attn weights are always positive
 
-        attention_probs = F.normalize(K_tilde,p=1,dim=-1)  # can do this as the attn weights are always positive
         attention_probs = self.attn_dropout(attention_probs)
 
         # Calculate the attention output
@@ -274,9 +274,9 @@ class FasterDMFNSMultiHeadAttention(nn.Module):
         attn_score_shape = attn_score.shape
         if a > 0:
             K_tilde = torch.diag_embed(attn_score.sum(-1)**(-a)) @ attn_score @ torch.diag_embed(attn_score.sum(-2)**(-a))
-        else:
-            K_tilde = attn_score  
-        attention_probs = F.normalize(K_tilde,p=1,dim=3)  # can do this as the attn weights are always positive
+            attention_probs = F.normalize(K_tilde,p=1,dim=3)  # can do this as the attn weights are always positive
+        else:                      
+            attention_probs = F.normalize(attn_score,p=1,dim=3)  # can do this as the attn weights are always positive
         attention_probs = self.attn_dropout(attention_probs)
 
         # Calculate the attention output

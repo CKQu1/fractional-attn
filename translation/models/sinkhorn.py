@@ -26,10 +26,12 @@ class SinkhornDistance(nn.Module):
                          requires_grad=False, device=C.device).fill_(1.0 / y_points).squeeze()
 
         if mu.dim() < 2:
-            mu = mu.view(-1, 1)
+            #mu = mu.view(-1, 1)
+            mu = mu.view(1, -1)
 
         if nu.dim() < 2:
-            nu = nu.view(-1, 1)
+            #nu = nu.view(-1, 1)
+            nu = nu.view(1, -1)
 
         u = torch.zeros_like(mu)
         v = torch.zeros_like(nu)

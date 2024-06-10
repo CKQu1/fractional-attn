@@ -43,7 +43,7 @@ $ torchrun --nproc_per_node=8 --nnodes=2 --node_rank=1 --master_addr=123.456.123
 
 # single-core
 """
-python ddp_main.py --model_name=dmfnsvit --alpha=1.5 --a=0 --max_iters=100 --eval_interval=5\
+python ddp_main.py --model_name=opdmfnsvit --alpha=1.5 --a=0 --max_iters=100 --eval_interval=5\
  --eval_iters=200 --weight_decay=0 --n_layers=1 --n_attn_heads=2 --model_root=.droot/single-core 
 
 python ddp_main.py --model_name=opfnsvit --alpha=1.5 --max_iters=100 --eval_interval=5\
@@ -127,7 +127,7 @@ if __name__ == '__main__':
     parser.add_argument('--n_classes', default=10, type=int)
     parser.add_argument('--n_channels', default=3, type=int)
     parser.add_argument('--qkv_bias', default=False, type=bool)
-    parser.add_argument('--use_faster_attn', default=False, type=bool)    
+    parser.add_argument('--use_faster_attn', default=True, type=bool)    
 
 
     args = parser.parse_args()    

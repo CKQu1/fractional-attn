@@ -83,7 +83,7 @@ if __name__ == '__main__':
         for didx, dataset_name in enumerate(dataset_names):
             if not debug_mode:
                 select = 1; ngpus, ncpus = 0, 1                            
-                walltime, mem = '23:59:59', '6GB'                             
+                walltime, mem = '23:59:59', '8GB'                             
 
                 if ngpus > 1:
                     num_proc = ngpus
@@ -118,7 +118,7 @@ if __name__ == '__main__':
                 #            {'model_name':'dmfnsvit', 'alpha': 2, 'a': 0}
                 #            ] 
 
-                epochs = 10                                              
+                epochs = 50                                              
                 common_kwargs = {'instance':          instance,
                                  'n_layers':          2,
                                  'n_attn_heads':      4,   
@@ -128,15 +128,15 @@ if __name__ == '__main__':
                                  'eval_iters':        50,                     
                                  'train_bs':          16,                                                                          
                                  'weight_decay':      0,
-                                 'lr_scheduler_type': 'binary',
+                                 'lr_scheduler_type': 'constant',
                                  'max_lr':            5e-5,
                                  'min_lr':            5e-6,
                                  }  
 
                 if epochs is not None:                    
                     train_data_size = 25000
-                    #steps_per_epoch = train_data_size // (num_proc * common_kwargs['train_bs']) + 1  
-                    steps_per_epoch = 1950
+                    #steps_per_epoch = train_data_size // (num_proc * common_kwargs['train_bs']) + 1                      
+                    steps_per_epoch = train_data_size // common_kwargs['train_bs'] + 1
                     common_kwargs['max_iters'] = steps_per_epoch * epochs
                     common_kwargs['eval_interval'] = steps_per_epoch
                     common_kwargs['log_interval'] = steps_per_epoch  # for mfu
@@ -150,8 +150,8 @@ if __name__ == '__main__':
                 model_root_dirname = structural_model_root(qk_share=qk_share, n_layers=common_kwargs['n_layers'],
                                                            n_attn_heads=common_kwargs['n_attn_heads'], hidden_size=common_kwargs['hidden_size']
                                                            )       
-                #model_root = njoin(DROOT, 'formers_trained', model_root_dirname)
-                model_root = njoin(DROOT, 'ncpus=1-formers_trained', model_root_dirname)
+                model_root = njoin(DROOT, 'formers_trained', model_root_dirname)
+                #model_root = njoin(DROOT, f'ncpus={ncpus}-formers_trained', model_root_dirname)
 
             else:                         
                 ngpus, ncpus = 0, 16

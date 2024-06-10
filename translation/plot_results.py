@@ -34,7 +34,7 @@ def plot_ensembles(model_root_dir, datasets=['iwslt14'],
                    mod_rows=1,display=False):
     global df, df_setting, df_filtered, fig_file, axs
     global model_dir, config_dict, final_metrics, ensemble_metrics, metric_plot 
-    global model_dirs, config, attn_setup   
+    global model_dirs, subpath, config, attn_setup   
 
     datasets = str_to_ls(datasets)
     metrics = str_to_ls(metrics)
@@ -43,7 +43,7 @@ def plot_ensembles(model_root_dir, datasets=['iwslt14'],
     display = str_to_bool(display)
 
     model_root_dir = model_root_dir.replace('\\','')
-    dirnames = sorted([dirname for dirname in os.listdir(model_root_dir) if 'translation' in dirname])
+    dirnames = sorted([dirname for dirname in os.listdir(model_root_dir) if 'nmt' in dirname])
 
     print(f'Datasets: {datasets}')
     print(f'model_root_dir = {model_root_dir}')
@@ -132,7 +132,7 @@ def plot_ensembles(model_root_dir, datasets=['iwslt14'],
                     df_filtered = df[df[metric].notna()]        
                     df_filtered = df_filtered[::mod_rows]            
 
-                    if 'acc' in metric.lower or 'bleu' in metric.lower():
+                    if 'acc' in metric.lower() or 'bleu' in metric.lower():
                         metric_plot = df_filtered.loc[:,metric] * 100
                     else:
                         metric_plot = df_filtered.loc[:,metric]
@@ -169,7 +169,8 @@ def plot_ensembles(model_root_dir, datasets=['iwslt14'],
                 ensemble_std = ensemble_metrics[metric].std(0)
                 max_iter = df_filtered.loc[:,'iter'].max()
 
-                iit = df_filtered[df_filtered.loc[:,'iter']>=max_iter*1/3].index
+                #iit = df_filtered[df_filtered.loc[:,'iter']>=max_iter*1/3].index
+                iit = df_filtered[df_filtered.loc[:,'iter']<=max_iter].index  # all
                 axs[idx,kdx].plot(df_filtered.loc[iit,'iter'], ensemble_mean[iit],
                                   linestyle=model_linestyles[model_name], c=model_colors[model_name],
                                   label=model_name)                 
@@ -210,7 +211,7 @@ def plot_ensembles(model_root_dir, datasets=['iwslt14'],
         plt.show()
     else:
         if not isdir(FIGS_DIR): makedirs(FIGS_DIR)
-        en_layers, de_layers = int(config_dict['encoder_layers']), int(config_dict['decoder_layers'])
+        en_layers, de_layers = int(config_dict['en_layers']), int(config_dict['de_layers'])
         heads, hidden = int(config_dict['heads']), int(config_dict['hidden'])
         fig_file = f'en_layers={en_layers}-de_layers={de_layers}-heads={heads}-hidden={hidden}-'
         fig_file += '-'.join(model_names)+'_'+'-'.join(datasets)

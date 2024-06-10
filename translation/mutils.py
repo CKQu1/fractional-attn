@@ -62,7 +62,7 @@ def create_model_dir(model_root_dir, **kwargs):
 
     dirname = f'{model_name}-{dataset_code}'
     dirname += '-qqv' if qk_share is True else '-qkv'  # qk weight-tying
-    if model_name == 'fnsnmt':                 
+    if 'fns' in model_name:                 
         alpha = kwargs.get("alpha", 1)
         bandwidth = kwargs.get("bandwidth", 1)             
         a = kwargs.get("a", 0)

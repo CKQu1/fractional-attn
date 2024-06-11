@@ -48,7 +48,10 @@ def plot_ensembles(model_root_dir, datasets=['cifar10'],
     print(f'model_root_dir = {model_root_dir}')
     # prompt to reorder file names
     for dirname_idx, dirname in enumerate(dirnames):
-        print(f'Index {dirname_idx}: {dirname}')
+        for subdir in os.listdir(njoin(model_root_dir, dirname)):
+            if isfile(njoin(model_root_dir, dirname, subdir, 'run_performance.csv')):
+                print(f'Index {dirname_idx}: {dirname}')
+                break
     dirname_idxs = input('Order of dirnames:')
     dirname_idxs = [int(dirname_idx) for dirname_idx in dirname_idxs.split(',')]
     assert len(dirname_idxs) <= len(dirnames), 'dirname_idxs cannot exceed dirnames'
@@ -169,7 +172,8 @@ def plot_ensembles(model_root_dir, datasets=['cifar10'],
                 max_iter = df_filtered.loc[:,'iter'].max()
 
                 iit = df_filtered[df_filtered.loc[:,'iter']>=max_iter*1/3].index
-                axs[idx,kdx].plot(df_filtered.loc[iit,'iter'], ensemble_mean[iit],
+                # df_filtered.loc[iit,'iter'], ensemble_mean[iit],
+                axs[idx,kdx].plot(df_filtered.index, ensemble_mean,
                                   linestyle=model_linestyles[model_name], c=model_colors[model_name],
                                   label=model_name)                 
 
@@ -194,8 +198,11 @@ def plot_ensembles(model_root_dir, datasets=['cifar10'],
                 median, mean = np.median(final_metrics[metric]), np.mean(final_metrics[metric])
                 print(f'best, median, mean, worst {metric}: {best}, {median}, {mean}, {worst}')
 
-                # if 'acc' in metric or 'f1' in metric:
-                #     ylims[kdx] = max(ylims[kdx], mean)
+                if 'acc' in metric or 'f1' in metric: 
+                    if 'val' in metric:                   
+                        axs[idx,kdx].set_ylim([40, 65])
+                    else:
+                        axs[idx,kdx].set_ylim([40, 90])
                 # else:
                 #     ylims[kdx] = min(ylims[kdx], mean)
                 # axs[idx,kdx].set_ylim

@@ -74,55 +74,81 @@ class Embeddings(nn.Module):
         return x
 
 
-class FNSAttentionHead(nn.Module):
+class DMFNSAttentionHead(nn.Module):
     """
     A single attention head.
-    This module is used in the FNSMultiHeadAttention module.
+    This module is used in the DMFNSMultiHeadAttention module.
 
     """
-    def __init__(self, alpha, bandwidth, sphere_radius, hidden_size, attention_head_size, dropout, bias=True):
+    def __init__(self, config):
         super().__init__()
-        self.hidden_size = hidden_size
-        self.attention_head_size = attention_head_size
-        # Create the query, key, and value projection layers
-        self.query = nn.Linear(hidden_size, attention_head_size, bias=bias)
-        self.key = nn.Linear(hidden_size, attention_head_size, bias=bias)
-        self.value = nn.Linear(hidden_size, attention_head_size, bias=bias)
+        # The attention head size is the hidden size divided by the number of attention heads
+        self.hidden_size = config['hidden_size']
+        self.num_attention_heads = config['num_attention_heads']
+        self.attention_head_size = self.hidden_size // self.num_attention_heads
+        # Whether or not to use bias in the query, key, and value projection layers
+        self.qkv_bias = config["qkv_bias"]
+        # Create a linear layer to project the query, key, and value
+        self.query = nn.Linear(self.hidden_size, self.attention_head_size, bias=self.qkv_bias)
+        self.key = nn.Linear(self.hidden_size, self.attention_head_size, bias=self.qkv_bias)
+        self.value = nn.Linear(self.hidden_size, self.attention_head_size, bias=self.qkv_bias)
 
-        self.dropout = nn.Dropout(dropout)
-    
-        self.alpha, self.bandwidth = alpha, bandwidth
-        self.sphere_radius = sphere_radius
+        self.attn_dropout = nn.Dropout(config["attention_probs_dropout_prob"])
+
+        self.alpha = config['alpha']
+        self.bandwidth = config['bandwidth']
+        self.a = config['a']
+
+        self.sphere_radius = config['sphere_radius']
 
     def forward(self, x):
         # Project the input into query, key, and value
         # The same input is used to generate the query, key, and value,
         # so it's usually called self-attention.
         # (batch_size, sequence_length, hidden_size) -> (batch_size, sequence_length, attention_head_size)
-        query = F.normalize(self.query(x), p=2, dim=-1)
-        key = F.normalize(self.key(x), p=2, dim=-1)
-        value = F.normalize(self.value(x), p=2, dim=-1)                
-        # print(f'query shape: {query.shape}')
-        # print(f'key shape: {key.shape}')
-        # print(f'value shape: {value.shape}')
+        query = self.query(x)
+        key = self.key(x)
+        value = self.value(x)                
+
+        batch_size, sequence_length, _ = query.size()
+        num_attention_heads, attention_head_size = self.num_attention_heads, self.attention_head_size
+
+        query = F.normalize(query.view(batch_size, sequence_length, num_attention_heads, attention_head_size).transpose(1, 2), p=2, dim=-1)
+        key = F.normalize(key.view(batch_size, sequence_length, num_attention_heads, attention_head_size).transpose(1, 2), p=2, dim=-1)
+        value = value.view(batch_size, sequence_length, num_attention_heads, attention_head_size).transpose(1, 2)            
 
         alpha, bandwidth = self.alpha, self.bandwidth
+        a = self.a
+
         sphere_radius = self.sphere_radius
-        d_intrinsic = attention_head_size
+        d_intrinsic = self.attention_head_size
 
         # geodesic distance on sphere
         eps = 1e-7  # for limiting the divergence from acos
-        g_dist = torch.acos(torch.clamp(query @ key.transpose(-2, -1), -1+eps, 1-eps)) * sphere_radius
-        
+        g_dist = torch.acos(torch.clamp(query @ key.transpose(-2, -1), -1+eps, 1-eps)) * sphere_radius        
+
         # Calculate the attention scores
         if alpha < 2:
             attn_score = (1 + g_dist/bandwidth**0.5)**(-d_intrinsic-alpha)
         else:
             attn_score = torch.exp((-g_dist/bandwidth**0.5)**(alpha/(alpha-1)))
         attn_score_shape = attn_score.shape
-        D_inv = torch.diag_embed(attn_score.sum(-1)**(-1))  # inverse of degree matrix of attn_score
-        K_tilde = D_inv @ attn_score @ D_inv
-        attention_probs = F.normalize(K_tilde,p=1,dim=3)  # can do this as the attn weights are always positive
+
+        # print(f'hidden_size = {self.hidden_size}, attention_head_size = {self.attention_head_size}')
+        # print(f'sequence_length = {sequence_length}')
+        # print(f'query shape: {query.shape}')
+        # print(f'key shape: {key.shape}')
+        # print(f'value shape: {value.shape}')  
+        # print(f'g_dist shape: {g_dist.shape}') 
+        # print(f'attn_score_shape: {attn_score_shape}') 
+        # print(f'diag shape: {torch.diag_embed(attn_score.sum(-1)**(-a)).shape}')
+
+        if a > 0:
+            K_tilde = torch.diag_embed(attn_score.sum(-1)**(-a)) @ attn_score @ torch.diag_embed(attn_score.sum(-2)**(-a))
+            attention_probs = F.normalize(K_tilde,p=1,dim=3)  # can do this as the attn weights are always positive
+        else:
+            attention_probs = F.normalize(attn_score,p=1,dim=3)  # can do this as the attn weights are always positive
+
         attention_probs = self.attn_dropout(attention_probs)
 
         # Calculate the attention output
@@ -131,7 +157,7 @@ class FNSAttentionHead(nn.Module):
         return (attention_output, attention_probs)
 
 
-class FNSMultiHeadAttention(nn.Module):
+class DMFNSMultiHeadAttention(nn.Module):
     """
     Multi-head attention module.
     This module is used in the TransformerEncoder module.
@@ -139,29 +165,28 @@ class FNSMultiHeadAttention(nn.Module):
 
     def __init__(self, config):
         super().__init__()
+
         self.hidden_size = config["hidden_size"]
-        self.num_attention_heads = config["num_attention_heads"]
-        # The attention head size is the hidden size divided by the number of attention heads
+        self.num_attention_heads = config['num_attention_heads']
+        # # The attention head size is the hidden size divided by the number of attention heads
         self.attention_head_size = self.hidden_size // self.num_attention_heads
         self.all_head_size = self.num_attention_heads * self.attention_head_size
-        # Whether or not to use bias in the query, key, and value projection layers
+        # # Whether or not to use bias in the query, key, and value projection layers
         self.qkv_bias = config["qkv_bias"]
+
+
         # Create a list of attention heads
         self.heads = nn.ModuleList([])
 
         self.alpha = config['alpha']
         self.bandwidth = config['bandwidth']
+        self.a = config['a']
+
         self.sphere_radius = config['sphere_radius']     
 
         for _ in range(self.num_attention_heads):
-            head = FNSAttentionHead(
-                self.alpha,
-                self.bandwidth,
-                self.sphere_radius,
-                self.hidden_size,
-                self.attention_head_size,
-                config["attention_probs_dropout_prob"],
-                self.qkv_bias
+            head = DMFNSAttentionHead(
+                config
             )
             self.heads.append(head)
         # Create a linear layer to project the attention output back to the hidden size
@@ -185,7 +210,7 @@ class FNSMultiHeadAttention(nn.Module):
             return (attention_output, attention_probs)
 
 
-class FasterFNSMultiHeadAttention(nn.Module):
+class FasterDMFNSMultiHeadAttention(nn.Module):
     """
     Multi-head attention module with some optimizations.
     All the heads are processed simultaneously with merged query, key, and value projections.
@@ -210,6 +235,7 @@ class FasterFNSMultiHeadAttention(nn.Module):
 
         self.alpha = config['alpha']
         self.bandwidth = config['bandwidth']
+        self.a = config['a']
         self.sphere_radius = config['sphere_radius']
 
     def forward(self, x, output_attentions=False):
@@ -224,6 +250,8 @@ class FasterFNSMultiHeadAttention(nn.Module):
         num_attention_heads, attention_head_size = self.num_attention_heads, self.attention_head_size
 
         alpha, bandwidth = self.alpha, self.bandwidth
+        a = self.a
+
         sphere_radius = self.sphere_radius
         d_intrinsic = attention_head_size
 
@@ -244,9 +272,11 @@ class FasterFNSMultiHeadAttention(nn.Module):
         else:
             attn_score = torch.exp((-g_dist/bandwidth**0.5)**(alpha/(alpha-1)))
         attn_score_shape = attn_score.shape
-        D_inv = torch.diag_embed(attn_score.sum(-1)**(-1))  # inverse of degree matrix of attn_score
-        K_tilde = D_inv @ attn_score @ D_inv
-        attention_probs = F.normalize(K_tilde,p=1,dim=3)  # can do this as the attn weights are always positive
+        if a > 0:
+            K_tilde = torch.diag_embed(attn_score.sum(-1)**(-a)) @ attn_score @ torch.diag_embed(attn_score.sum(-2)**(-a))
+            attention_probs = F.normalize(K_tilde,p=1,dim=3)  # can do this as the attn weights are always positive
+        else:                      
+            attention_probs = F.normalize(attn_score,p=1,dim=3)  # can do this as the attn weights are always positive
         attention_probs = self.attn_dropout(attention_probs)
 
         # Calculate the attention output
@@ -287,7 +317,7 @@ class MLP(nn.Module):
         return x
 
 
-class FNSBlock(nn.Module):
+class DMFNSBlock(nn.Module):
     """
     A single transformer block.
     """
@@ -296,9 +326,9 @@ class FNSBlock(nn.Module):
         super().__init__()
         self.use_faster_attention = config.get("use_faster_attention", False)
         if self.use_faster_attention:
-            self.attention = FasterFNSMultiHeadAttention(config)
+            self.attention = FasterDMFNSMultiHeadAttention(config)
         else:
-            self.attention = FNSMultiHeadAttention(config)
+            self.attention = DMFNSMultiHeadAttention(config)
         self.layernorm_1 = nn.LayerNorm(config["hidden_size"])
         self.mlp = MLP(config)
         self.layernorm_2 = nn.LayerNorm(config["hidden_size"])
@@ -338,7 +368,7 @@ class FNSBlock(nn.Module):
             return (x, attention_probs)              
 
 
-class FNSEncoder(nn.Module):
+class DMFNSEncoder(nn.Module):
     """
     The transformer encoder module.
     """
@@ -348,7 +378,7 @@ class FNSEncoder(nn.Module):
         # Create a list of transformer blocks
         self.blocks = nn.ModuleList([])
         for _ in range(config["num_hidden_layers"]):
-            block = FNSBlock(config)
+            block = DMFNSBlock(config)
             self.blocks.append(block)
 
     def forward(self, x, output_attentions=False):
@@ -365,7 +395,7 @@ class FNSEncoder(nn.Module):
             return (x, all_attentions)
 
 
-class FNSViTForClassfication(nn.Module):
+class DMFNSViTForClassfication(nn.Module):
     """
     The ViT model for classification.
     """
@@ -379,7 +409,7 @@ class FNSViTForClassfication(nn.Module):
         # Create the embedding module
         self.embedding = Embeddings(config)
         # Create the transformer encoder module
-        self.encoder = FNSEncoder(config)
+        self.encoder = DMFNSEncoder(config)
         # Create a linear layer to project the encoder's output to the number of classes
         self.classifier = nn.Linear(self.hidden_size, self.num_classes)
         # Initialize the weights

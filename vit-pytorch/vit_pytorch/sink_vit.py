@@ -1,8 +1,8 @@
 import math
 import torch
 from torch import nn
-from torch.nn import functional as F
 
+from vit_pytorch.sinkhorn import SinkhornDistance
 
 # https://github.com/tintn/vision-transformer-from-scratch/blob/main/vit.py
 class NewGELUActivation(nn.Module):
@@ -74,13 +74,13 @@ class Embeddings(nn.Module):
         return x
 
 
-class FNSAttentionHead(nn.Module):
+class SINKAttentionHead(nn.Module):
     """
     A single attention head.
-    This module is used in the FNSMultiHeadAttention module.
+    This module is used in the SINKMultiHeadAttention module.
 
     """
-    def __init__(self, alpha, bandwidth, sphere_radius, hidden_size, attention_head_size, dropout, bias=True):
+    def __init__(self, n_it, bandwidth, hidden_size, attention_head_size, dropout, bias=True):
         super().__init__()
         self.hidden_size = hidden_size
         self.attention_head_size = attention_head_size
@@ -89,49 +89,38 @@ class FNSAttentionHead(nn.Module):
         self.key = nn.Linear(hidden_size, attention_head_size, bias=bias)
         self.value = nn.Linear(hidden_size, attention_head_size, bias=bias)
 
-        self.dropout = nn.Dropout(dropout)
-    
-        self.alpha, self.bandwidth = alpha, bandwidth
-        self.sphere_radius = sphere_radius
+        self.bandwidth = bandwidth
+        self.n_it = n_it
 
+        self.sink = SinkhornDistance(eps=self.bandwidth, max_iter=self.n_it)
+        self.dropout = nn.Dropout(dropout)        
+    
     def forward(self, x):
         # Project the input into query, key, and value
         # The same input is used to generate the query, key, and value,
         # so it's usually called self-attention.
         # (batch_size, sequence_length, hidden_size) -> (batch_size, sequence_length, attention_head_size)
-        query = F.normalize(self.query(x), p=2, dim=-1)
-        key = F.normalize(self.key(x), p=2, dim=-1)
-        value = F.normalize(self.value(x), p=2, dim=-1)                
-        # print(f'query shape: {query.shape}')
-        # print(f'key shape: {key.shape}')
-        # print(f'value shape: {value.shape}')
-
-        alpha, bandwidth = self.alpha, self.bandwidth
-        sphere_radius = self.sphere_radius
-        d_intrinsic = attention_head_size
-
-        # geodesic distance on sphere
-        eps = 1e-7  # for limiting the divergence from acos
-        g_dist = torch.acos(torch.clamp(query @ key.transpose(-2, -1), -1+eps, 1-eps)) * sphere_radius
-        
+        query = self.query(x)
+        key = self.key(x)
+        value = self.value(x)
         # Calculate the attention scores
-        if alpha < 2:
-            attn_score = (1 + g_dist/bandwidth**0.5)**(-d_intrinsic-alpha)
-        else:
-            attn_score = torch.exp((-g_dist/bandwidth**0.5)**(alpha/(alpha-1)))
-        attn_score_shape = attn_score.shape
-        D_inv = torch.diag_embed(attn_score.sum(-1)**(-1))  # inverse of degree matrix of attn_score
-        K_tilde = D_inv @ attn_score @ D_inv
-        attention_probs = F.normalize(K_tilde,p=1,dim=3)  # can do this as the attn weights are always positive
-        attention_probs = self.attn_dropout(attention_probs)
+        # softmax(Q*K.T/sqrt(head_size))*V
+        dots = torch.matmul(query, key.transpose(-1, -2))
+        dots = dots / math.sqrt(self.attention_head_size)
+        dots_former_shape = dots.shape
+        dots = dots.view(-1, dots_former_shape[2], dots_former_shape[3])
 
+        attn = attn = self.sink(dots)[0]
+        attn = attn * attn.shape[-1]
+        attn = attn.view(dots_former_shape)
+
+        #attn = self.dropout(attn)
         # Calculate the attention output
-        attention_output = attention_probs @ value
-
+        attention_output = torch.matmul(attn, value)
         return (attention_output, attention_probs)
 
 
-class FNSMultiHeadAttention(nn.Module):
+class SINKMultiHeadAttention(nn.Module):
     """
     Multi-head attention module.
     This module is used in the TransformerEncoder module.
@@ -149,15 +138,13 @@ class FNSMultiHeadAttention(nn.Module):
         # Create a list of attention heads
         self.heads = nn.ModuleList([])
 
-        self.alpha = config['alpha']
+        self.n_it = config['n_it']
         self.bandwidth = config['bandwidth']
-        self.sphere_radius = config['sphere_radius']     
 
         for _ in range(self.num_attention_heads):
-            head = FNSAttentionHead(
-                self.alpha,
+            head = SINKAttentionHead(
+                self.n_it,
                 self.bandwidth,
-                self.sphere_radius,
                 self.hidden_size,
                 self.attention_head_size,
                 config["attention_probs_dropout_prob"],
@@ -185,7 +172,7 @@ class FNSMultiHeadAttention(nn.Module):
             return (attention_output, attention_probs)
 
 
-class FasterFNSMultiHeadAttention(nn.Module):
+class FasterSINKMultiHeadAttention(nn.Module):
     """
     Multi-head attention module with some optimizations.
     All the heads are processed simultaneously with merged query, key, and value projections.
@@ -208,9 +195,9 @@ class FasterFNSMultiHeadAttention(nn.Module):
         self.output_projection = nn.Linear(self.all_head_size, self.hidden_size)
         self.output_dropout = nn.Dropout(config["hidden_dropout_prob"])
 
-        self.alpha = config['alpha']
-        self.bandwidth = config['bandwidth']
-        self.sphere_radius = config['sphere_radius']
+        self.n_it = config['n_it']
+        self.bandwidth = config['bandwidth']      
+        self.sink = SinkhornDistance(eps=self.bandwidth, max_iter=self.n_it)  
 
     def forward(self, x, output_attentions=False):
         # Project the query, key, and value
@@ -221,36 +208,23 @@ class FasterFNSMultiHeadAttention(nn.Module):
         query, key, value = torch.chunk(qkv, 3, dim=-1)
         # Resize the query, key, and value to (batch_size, num_attention_heads, sequence_length, attention_head_size)
         batch_size, sequence_length, _ = query.size()
-        num_attention_heads, attention_head_size = self.num_attention_heads, self.attention_head_size
-
-        alpha, bandwidth = self.alpha, self.bandwidth
-        sphere_radius = self.sphere_radius
-        d_intrinsic = attention_head_size
-
-        query = F.normalize(query.view(batch_size, sequence_length, num_attention_heads, attention_head_size).transpose(1, 2), p=2, dim=-1)
-        key = F.normalize(key.view(batch_size, sequence_length, num_attention_heads, attention_head_size).transpose(1, 2), p=2, dim=-1)
-        value = value.view(batch_size, sequence_length, num_attention_heads, attention_head_size).transpose(1, 2)
-        # print(f'query shape: {query.shape}')
-        # print(f'key shape: {key.shape}')
-        # print(f'value shape: {value.shape}')        
-
-        # geodesic distance on sphere
-        eps = 1e-7  # for limiting the divergence from acos
-        g_dist = torch.acos(torch.clamp(query @ key.transpose(-2, -1), -1+eps, 1-eps)) * sphere_radius
-        
+        query = query.view(batch_size, sequence_length, self.num_attention_heads, self.attention_head_size).transpose(1, 2)
+        key = key.view(batch_size, sequence_length, self.num_attention_heads, self.attention_head_size).transpose(1, 2)
+        value = value.view(batch_size, sequence_length, self.num_attention_heads, self.attention_head_size).transpose(1, 2)
         # Calculate the attention scores
-        if alpha < 2:
-            attn_score = (1 + g_dist/bandwidth**0.5)**(-d_intrinsic-alpha)
-        else:
-            attn_score = torch.exp((-g_dist/bandwidth**0.5)**(alpha/(alpha-1)))
-        attn_score_shape = attn_score.shape
-        D_inv = torch.diag_embed(attn_score.sum(-1)**(-1))  # inverse of degree matrix of attn_score
-        K_tilde = D_inv @ attn_score @ D_inv
-        attention_probs = F.normalize(K_tilde,p=1,dim=3)  # can do this as the attn weights are always positive
-        attention_probs = self.attn_dropout(attention_probs)
+        # softmax(Q*K.T/sqrt(head_size))*V
+
+        dots = torch.matmul(query, key.transpose(-1, -2))
+        dots = dots / math.sqrt(self.attention_head_size)
+        dots_former_shape = dots.shape
+        dots = dots.view(-1, dots_former_shape[2], dots_former_shape[3])
+
+        attn = attn = self.sink(dots)[0]
+        attn = attn * attn.shape[-1]
+        attn = attn.view(dots_former_shape)
 
         # Calculate the attention output
-        attention_output = attention_probs @ value
+        attention_output = torch.matmul(attn, value)
         # Resize the attention output
         # from (batch_size, num_attention_heads, sequence_length, attention_head_size)
         # To (batch_size, sequence_length, all_head_size)
@@ -287,7 +261,7 @@ class MLP(nn.Module):
         return x
 
 
-class FNSBlock(nn.Module):
+class Block(nn.Module):
     """
     A single transformer block.
     """
@@ -296,9 +270,9 @@ class FNSBlock(nn.Module):
         super().__init__()
         self.use_faster_attention = config.get("use_faster_attention", False)
         if self.use_faster_attention:
-            self.attention = FasterFNSMultiHeadAttention(config)
+            self.attention = FasterSINKMultiHeadAttention(config)
         else:
-            self.attention = FNSMultiHeadAttention(config)
+            self.attention = SINKMultiHeadAttention(config)
         self.layernorm_1 = nn.LayerNorm(config["hidden_size"])
         self.mlp = MLP(config)
         self.layernorm_2 = nn.LayerNorm(config["hidden_size"])
@@ -335,10 +309,10 @@ class FNSBlock(nn.Module):
         if not output_attentions:
             return (x, None)
         else:
-            return (x, attention_probs)              
+            return (x, attention_probs)  
 
 
-class FNSEncoder(nn.Module):
+class Encoder(nn.Module):
     """
     The transformer encoder module.
     """
@@ -348,7 +322,7 @@ class FNSEncoder(nn.Module):
         # Create a list of transformer blocks
         self.blocks = nn.ModuleList([])
         for _ in range(config["num_hidden_layers"]):
-            block = FNSBlock(config)
+            block = Block(config)
             self.blocks.append(block)
 
     def forward(self, x, output_attentions=False):
@@ -365,7 +339,7 @@ class FNSEncoder(nn.Module):
             return (x, all_attentions)
 
 
-class FNSViTForClassfication(nn.Module):
+class SINKViTForClassfication(nn.Module):
     """
     The ViT model for classification.
     """
@@ -379,7 +353,7 @@ class FNSViTForClassfication(nn.Module):
         # Create the embedding module
         self.embedding = Embeddings(config)
         # Create the transformer encoder module
-        self.encoder = FNSEncoder(config)
+        self.encoder = Encoder(config)
         # Create a linear layer to project the encoder's output to the number of classes
         self.classifier = nn.Linear(self.hidden_size, self.num_classes)
         # Initialize the weights

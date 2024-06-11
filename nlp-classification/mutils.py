@@ -63,17 +63,21 @@ def create_model_dir(model_root_dir, **kwargs):
     dirname = f'{model_name}-{dataset_code}'
     #dirname += '-qqv' if qk_share is True else '-qkv'  # qk weight-tying
     if 'fnsformer' in model_name:                 
-        beta = kwargs.get("beta", 1)
-        bandwidth = kwargs.get("bandwidth", 1)             
-        dirname += f'-beta={beta}-eps={bandwidth}'
-        if (model_name=='v2fnsformer' or model_name=='v3fnsformer') and beta < 2:
-            d_intrinsic = kwargs.get('d_intrinsic')
-            dirname += f'-dman={d_intrinsic}'
+        alpha = kwargs.get("alpha", 1)
+        bandwidth = kwargs.get("bandwidth", 1)
+        a = kwargs.get("a", 1)             
+        dirname += f'-alpha={alpha}-eps={bandwidth}-a={a}'
+        # if (model_name=='v2fnsformer' or model_name=='v3fnsformer') and alpha < 2:
+        #     d_intrinsic = kwargs.get('d_intrinsic')
+        #     dirname += f'-dman={d_intrinsic}'
+    elif model_name == 'sinkformer':
+        bandwidth = kwargs.get("bandwidth", 1)     
+        n_it = kwargs.get("n_it", 1)        
+        dirname += f'-n_it={n_it}-eps={bandwidth}'
+
     models_dir = njoin(model_root_dir, dirname)
     instance = get_instance(models_dir, 'model=')
-    model_dir = njoin(models_dir, f'model={instance}')    
-    if not os.path.isdir(models_dir): os.makedirs(models_dir)
-    if not os.path.isdir(model_dir): os.makedirs(model_dir)     
+    model_dir = njoin(models_dir, f'model={instance}')         
        
     return models_dir, model_dir      
 
@@ -88,16 +92,18 @@ def structural_model_root(**kwargs):
     epochs = kwargs.get('epochs')
 
     affix = 'qqv' if qk_share==True else 'qkv'
-    if isinstance(milestones, str):
-        milestones_str = milestones
-    else:
-        milestones_str = ','.join(str(s) for s in milestones)    
+    # if isinstance(milestones, str):
+    #     milestones_str = milestones
+    # else:
+    #     milestones_str = ','.join(str(s) for s in milestones)    
     if use_custom_optim is True:
-        model_root = njoin(f'layers={n_layers}-heads={n_attn_heads}-hidden={hidden_size}-{affix}',
-                           f'lr={lr}-bs={bs}-milestones={milestones_str}-gamma={gamma}-epochs={epochs}')    
+        # model_root = njoin(f'layers={n_layers}-heads={n_attn_heads}-hidden={hidden_size}-{affix}',
+        #                    f'lr={lr}-bs={bs}-milestones={milestones_str}-gamma={gamma}-epochs={epochs}')    
+        model_root = njoin(f'layers={n_layers}-heads={n_attn_heads}-hidden={hidden_size}-epochs={epochs}-{affix}')                              
     else:
-        model_root = njoin(f'layers={n_layers}-heads={n_attn_heads}-hidden={hidden_size}-{affix}',
-                           f'lr={lr}-bs={bs}-epochs={epochs}')            
+        # model_root = njoin(f'layers={n_layers}-heads={n_attn_heads}-hidden={hidden_size}-{affix}',
+        #                    f'lr={lr}-bs={bs}-epochs={epochs}')            
+        model_root = njoin(f'layers={n_layers}-heads={n_attn_heads}-hidden={hidden_size}-epochs={epochs}-{affix}')             
 
     return model_root    
 

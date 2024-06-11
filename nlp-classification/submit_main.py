@@ -60,110 +60,169 @@ if __name__ == '__main__':
     dataset_names = ['rotten_tomatoes','imdb']
     max_lens = [256, 512]    
     
-    debug_mode = False
+    ##### DOUBLE-CHECK #####
+    debug_mode = False    
     print(f'---------- debug_mode = {debug_mode} ---------- \n')
     
-    kwargss_all = []
+    kwargss_all = []        
     #for didx, dataset_name in enumerate(dataset_names):
     for didx, dataset_name in enumerate(dataset_names[1:]):
+
+        select = 1; ngpus, ncpus = 0, 20
+        #select = 2; ngpus, ncpus = 0, 12            
+        walltime = '23:59:59'
+        mem = '20GB'    
+
         if not debug_mode:
-            select = 1; ngpus, ncpus = 0, 18
-            #select = 2; ngpus, ncpus = 0, 12            
-            walltime = '23:59:59'
-            mem = '16GB'            
 
-            #kwargss = [{'model_name': 'dpformer'}]                            
-            #kwargss = [{'model_name': 'fnsformer', 'beta': 0.5, 'bandwidth': 1}]      
-            #kwargss = [{'model_name': 'dpformer'}, {'model_name': 'spherefnsformer', 'beta': 0.5, 'bandwidth': 1}]                   
-            # kwargss = [{'model_name': 'v2fnsformer', 'beta': 0.5, 'bandwidth': 5}, 
-            #            {'model_name': 'v2fnsformer', 'beta': 0.5, 'bandwidth': 15}]
-            #kwargss = [{'model_name': 'v2fnsformer', 'beta': 0.5, 'bandwidth': 5}, {'model_name': 'dpformer'}]
-            # int(768/2)
-            # kwargss = [{'model_name': 'v2fnsformer', 'beta': 1, 'bandwidth':15, 'd_intrinsic':10, 'qk_share':True}, 
-            #            {'model_name': 'v2fnsformer', 'beta': 1, 'bandwidth':15, 'd_intrinsic':10, 'qk_share':False},
-            #            {'model_name': 'v2fnsformer', 'beta': 2, 'bandwidth':15, 'qk_share':True},
-            #            {'model_name': 'v2fnsformer', 'beta': 2, 'bandwidth':15, 'qk_share':False},
-            #            {'model_name': 'dpformer', 'qk_share':True},
-            #            {'model_name': 'dpformer', 'qk_share':False}]
+            seeds = [0,1,2,3]        
 
-            kwargss = [{'model_name':'dpformer'},
-                       {'model_name':'v3fnsformer','beta':1.5},
-                       {'model_name':'v3fnsformer','beta':2}]           
-                             
-            common_kwargs = {'seed':              0,
-                             'n_layers':          3,
-                             'n_attn_heads':      2,
-                             'hidden_size':       768,
-                             'divider':           1,
-                             'warmup_steps':      0, 
-                             'grad_accum_step':   2,                            
-                             'train_bs':          4,
-                             'eval_bs':           4,
-                             'max_len':           max_lens[didx],                             
-                             'epochs':            15,
-                             'lr_scheduler_type': 'constant',
-                             'lr':                5e-5,
-                             #'use_custom_optim':  True,
-                             #'gamma':             0.1,
-                             #'milestones':        '1,2',      
-                             'gamma':             0.1,
-                             'milestones':        '',                                                 
-                             'weight_decay':      0
-                             }  
-            if 'qk_share' not in common_kwargs.keys():
-                qk_share = False
-            else:
-                qk_share = common_kwargs['qk_share']
-            if 'use_custom_optim' not in common_kwargs.keys():
-                use_custom_optim = False
-            else:
-                use_custom_optim = common_kwargs['use_custom_optim']            
-            model_root_dirname = structural_model_root(qk_share=qk_share, n_layers=common_kwargs['n_layers'],
-                                                       n_attn_heads=common_kwargs['n_attn_heads'], hidden_size=common_kwargs['hidden_size'],
-                                                       lr=common_kwargs['lr'], bs=common_kwargs['train_bs'], 
-                                                       use_custom_optim=use_custom_optim,
-                                                       milestones=common_kwargs['milestones'], gamma=common_kwargs['gamma'],
-                                                       epochs=common_kwargs['epochs']                                               
-                                                       )       
-            model_root = njoin(DROOT, 'formers_trained', model_root_dirname)
+            # LIST:
+            # {'model_name':'dpformer'}
+            # {'model_name':'v3fnsformer','alpha':1.5}
+            # {'model_name':'v3fnsformer','alpha':2}
+            # {'model_name':'opfnsformer','alpha':1.5}
+            # {'model_name':'opfnsformer','alpha':2}
+            # {'model_name':'sinkformer','n_it':1}
+            # {'model_name':'sinkformer', 'n_it':3}
+
+            # kwargss = [{'model_name':'v4fnsformer','alpha':1.4},
+            #            {'model_name':'v4fnsformer','alpha':1.6},
+            #            {'model_name':'v4fnsformer','alpha':1.8},
+            #            {'model_name':'v2opfnsformer','alpha':1.4},
+            #            {'model_name':'v2opfnsformer','alpha':1.6},
+            #            {'model_name':'v2opfnsformer','alpha':1.8}
+            #            ]    
+
+            kwargss = [{'model_name':'v4fnsformer','alpha':1.2,'a': 1},
+                       {'model_name':'v4fnsformer','alpha':2,'a':1},
+                       {'model_name':'v2opfnsformer','alpha':1.2,'a':1},
+                       {'model_name':'v2opfnsformer','alpha':2,'a':1},
+                       {'model_name':'v4fnsformer','alpha':1.2,'a': 0.5},
+                       {'model_name':'v4fnsformer','alpha':2,'a':0.5},
+                       {'model_name':'v2opfnsformer','alpha':1.2,'a':0.5},
+                       {'model_name':'v2opfnsformer','alpha':2,'a':0.5},
+                       {'model_name':'v4fnsformer','alpha':1.2,'a': 0},
+                       {'model_name':'v4fnsformer','alpha':2,'a':0},
+                       {'model_name':'v2opfnsformer','alpha':1.2,'a':0},
+                       {'model_name':'v2opfnsformer','alpha':2,'a':0}
+                       ]  
+
+            for seed in seeds:                                 
+                                
+                common_kwargs = {'seed':              seed,
+                                 'n_layers':          2,
+                                 'n_attn_heads':      8,
+                                 'hidden_size':       768,
+                                 'divider':           1,
+                                 'warmup_steps':      0, 
+                                 'grad_accum_step':   2,                            
+                                 'train_bs':          16,
+                                 'eval_bs':           16,
+                                 'max_len':           max_lens[didx],                             
+                                 'epochs':            10,
+                                 'lr_scheduler_type': 'linear',
+                                 #'lr_scheduler_type': 'cosine',
+                                 #'lr':                5e-5,
+                                 'lr':                1e-4,
+                                 #'use_custom_optim':  True,
+                                 #'gamma':             0.1,
+                                 #'milestones':        '1,2',      
+                                 'gamma':             0.1,
+                                 'milestones':        '',                                                 
+                                 'weight_decay':      0
+                                 }  
+                qk_share = False if 'qk_share' not in common_kwargs.keys() else common_kwargs['qk_share']
+                use_custom_optim = False if 'use_custom_optim' not in common_kwargs.keys() else common_kwargs['use_custom_optim']
+                                                            
+                model_root_dirname = structural_model_root(qk_share=qk_share, n_layers=common_kwargs['n_layers'],
+                                                           n_attn_heads=common_kwargs['n_attn_heads'], hidden_size=common_kwargs['hidden_size'],
+                                                           lr=common_kwargs['lr'], bs=common_kwargs['train_bs'], 
+                                                           use_custom_optim=use_custom_optim,
+                                                           milestones=common_kwargs['milestones'], gamma=common_kwargs['gamma'],
+                                                           epochs=common_kwargs['epochs']                                               
+                                                           )       
+                model_root = njoin(DROOT, 'formers_trained', model_root_dirname)
+
+                for idx in range(len(kwargss)):
+                    # function automatically creates dir
+                    kwargss[idx]["dataset"] = dataset_name    
+                    kwargss[idx]['model_root'] = model_root
+                
+                kwargss = add_common_kwargs(kwargss, common_kwargs)
+                kwargss_all += kwargss                
 
         else:     
-                   
-            ngpus, ncpus = 0, 2  
-            select = 2  
+
+            seeds = [0]                
+            ngpus, ncpus = 0, 20  
+            select = 1  
             walltime = '23:59:59'
-            mem = '12GB'                 
+            mem = '12GB'            
 
-            #kwargss = [{'model_name': 'dpformer'}]
-            #kwargss = [{"beta":0.5, "bandwidth":1}, {"beta":1, "bandwidth":1}]
-            #kwargss = [{'model_name': 'dpformer'}, {'model_name': 'spherefnsformer', 'beta': 0.5, 'bandwidth': 1}]              
-            kwargss = [{'model_name':'dpformer'},
-                       {'model_name':'v3fnsformer','beta':1.5},
-                       {'model_name':'v3fnsformer','beta':2}]              
-            model_root = njoin(DROOT,'submit_main_check',f'ncpus={ncpus * select}_ngpus={ngpus * select}')
-            common_kwargs = {'n_layers':                     1,
-                             'n_attn_heads':                 2,
-                             'divider':                      1,
-                             'warmup_steps':                 0,                             
-                             'train_bs':                     4,
-                             'eval_bs':                      4,
-                             'max_len':                      128,                             
-                             'max_steps':                    50,
-                             'logging_steps':                10,
-                             'save_steps':                   10,
-                             'eval_steps':                   10,
-                             'weight_decay':                 0                         
-                             }                                                     
-        
-        for idx in range(len(kwargss)):
-            # function automatically creates dir
-            kwargss[idx]["dataset"] = dataset_name    
-            kwargss[idx]['model_root'] = model_root
-        
-        kwargss = add_common_kwargs(kwargss, common_kwargs)
-        kwargss_all += kwargss
+            # kwargss = [{'model_name':'v4fnsformer','alpha':1.2,'a': 1},
+            #            {'model_name':'v4fnsformer','alpha':2,'a':1},
+            #            {'model_name':'v2opfnsformer','alpha':1.2,'a':1},
+            #            {'model_name':'v2opfnsformer','alpha':2,'a':1},
+            #            {'model_name':'v4fnsformer','alpha':1.2,'a': 0.5},
+            #            {'model_name':'v4fnsformer','alpha':2,'a':0.5},
+            #            {'model_name':'v2opfnsformer','alpha':1.2,'a':0.5},
+            #            {'model_name':'v2opfnsformer','alpha':2,'a':0.5},
+            #            {'model_name':'sinkformer', 'n_it':1},
+            #            {'model_name':'sinkformer', 'n_it':3},
+            #            {'model_name':'dpformer'}
+            #            ]   
+             
+            kwargss = [{'model_name':'v4fnsformer','alpha':1.2,'a': 0},
+                       {'model_name':'v4fnsformer','alpha':2,'a':0},
+                       {'model_name':'v2opfnsformer','alpha':1.2,'a':0},
+                       {'model_name':'v2opfnsformer','alpha':2,'a':0},
+                       {'model_name':'v4fnsformer','alpha':1.2,'a': 0},
+                       {'model_name':'v4fnsformer','alpha':2,'a':0},
+                       {'model_name':'v2opfnsformer','alpha':1.2,'a':0},
+                       {'model_name':'v2opfnsformer','alpha':2,'a':0},
+                       ]                                     
 
-    #print(kwargss_all)  
+            for seed in seeds:                                                                  
+                                
+                common_kwargs = {'seed':              seed,
+                                 'n_layers':          1,
+                                 'n_attn_heads':      2,
+                                 'hidden_size':       768,
+                                 'divider':           1,
+                                 'warmup_steps':      0, 
+                                 'grad_accum_step':   2,                            
+                                 'train_bs':          4,
+                                 'eval_bs':           4,
+                                 'max_len':           max_lens[didx],                             
+                                 'epochs':            1,
+                                 'lr_scheduler_type': 'constant',
+                                 'lr':                5e-5,
+                                 #'use_custom_optim':  True,
+                                 #'gamma':             0.1,
+                                 #'milestones':        '1,2',      
+                                 'gamma':             0.1,
+                                 'milestones':        '',                                                 
+                                 'weight_decay':      0
+                                 }  
+                qk_share = False if 'qk_share' not in common_kwargs.keys() else common_kwargs['qk_share']
+                use_custom_optim = False if 'use_custom_optim' not in common_kwargs.keys() else common_kwargs['use_custom_optim'] 
+
+                #model_root = njoin(DROOT, 'submit_main_check', f'ncpus={select*ncpus}-ngpus={select*ngpus}')                                                 
+                model_root = njoin(DROOT, 'v4_check')
+        
+                for idx in range(len(kwargss)):
+                    # function automatically creates dir
+                    kwargss[idx]["dataset"] = dataset_name    
+                    kwargss[idx]['model_root'] = model_root
+                
+                kwargss = add_common_kwargs(kwargss, common_kwargs)
+                kwargss_all += kwargss
+
+    print(f'Total jobs: {len(kwargss_all)} \n')
+    for xx in kwargss_all:
+        print(xx)  
+        print('\n')
     #quit()  # delete      
     train_submit(script_name, kwargss_all,
                  ncpus=ncpus,

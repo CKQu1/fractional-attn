@@ -2,6 +2,7 @@ import math
 import torch
 from torch import nn
 from torch.nn import functional as F
+from torch.nn.utils.parametrizations import orthogonal
 
 
 # https://github.com/tintn/vision-transformer-from-scratch/blob/main/vit.py
@@ -74,10 +75,10 @@ class Embeddings(nn.Module):
         return x
 
 
-class FNSAttentionHead(nn.Module):
+class OPFNSAttentionHead(nn.Module):
     """
     A single attention head.
-    This module is used in the FNSMultiHeadAttention module.
+    This module is used in the OPFNSMultiHeadAttention module.
 
     """
     def __init__(self, alpha, bandwidth, sphere_radius, hidden_size, attention_head_size, dropout, bias=True):
@@ -85,8 +86,8 @@ class FNSAttentionHead(nn.Module):
         self.hidden_size = hidden_size
         self.attention_head_size = attention_head_size
         # Create the query, key, and value projection layers
-        self.query = nn.Linear(hidden_size, attention_head_size, bias=bias)
-        self.key = nn.Linear(hidden_size, attention_head_size, bias=bias)
+        self.query = orthogonal(nn.Linear(hidden_size, attention_head_size, bias=bias))
+        self.key = orthogonal(nn.Linear(hidden_size, attention_head_size, bias=bias))
         self.value = nn.Linear(hidden_size, attention_head_size, bias=bias)
 
         self.dropout = nn.Dropout(dropout)
@@ -131,7 +132,7 @@ class FNSAttentionHead(nn.Module):
         return (attention_output, attention_probs)
 
 
-class FNSMultiHeadAttention(nn.Module):
+class OPFNSMultiHeadAttention(nn.Module):
     """
     Multi-head attention module.
     This module is used in the TransformerEncoder module.
@@ -154,7 +155,7 @@ class FNSMultiHeadAttention(nn.Module):
         self.sphere_radius = config['sphere_radius']     
 
         for _ in range(self.num_attention_heads):
-            head = FNSAttentionHead(
+            head = OPFNSAttentionHead(
                 self.alpha,
                 self.bandwidth,
                 self.sphere_radius,
@@ -185,7 +186,7 @@ class FNSMultiHeadAttention(nn.Module):
             return (attention_output, attention_probs)
 
 
-class FasterFNSMultiHeadAttention(nn.Module):
+class FasterOPFNSMultiHeadAttention(nn.Module):
     """
     Multi-head attention module with some optimizations.
     All the heads are processed simultaneously with merged query, key, and value projections.
@@ -201,7 +202,7 @@ class FasterFNSMultiHeadAttention(nn.Module):
         # Whether or not to use bias in the query, key, and value projection layers
         self.qkv_bias = config["qkv_bias"]
         # Create a linear layer to project the query, key, and value
-        self.qkv_projection = nn.Linear(self.hidden_size, self.all_head_size * 3, bias=self.qkv_bias)
+        self.qkv_projection = orthogonal(nn.Linear(self.hidden_size, self.all_head_size * 3, bias=self.qkv_bias))
         self.attn_dropout = nn.Dropout(config["attention_probs_dropout_prob"])
         # Create a linear layer to project the attention output back to the hidden size
         # In most cases, all_head_size and hidden_size are the same
@@ -287,7 +288,7 @@ class MLP(nn.Module):
         return x
 
 
-class FNSBlock(nn.Module):
+class OPFNSBlock(nn.Module):
     """
     A single transformer block.
     """
@@ -296,9 +297,9 @@ class FNSBlock(nn.Module):
         super().__init__()
         self.use_faster_attention = config.get("use_faster_attention", False)
         if self.use_faster_attention:
-            self.attention = FasterFNSMultiHeadAttention(config)
+            self.attention = FasterOPFNSMultiHeadAttention(config)
         else:
-            self.attention = FNSMultiHeadAttention(config)
+            self.attention = OPFNSMultiHeadAttention(config)
         self.layernorm_1 = nn.LayerNorm(config["hidden_size"])
         self.mlp = MLP(config)
         self.layernorm_2 = nn.LayerNorm(config["hidden_size"])
@@ -338,7 +339,7 @@ class FNSBlock(nn.Module):
             return (x, attention_probs)              
 
 
-class FNSEncoder(nn.Module):
+class OPFNSEncoder(nn.Module):
     """
     The transformer encoder module.
     """
@@ -348,7 +349,7 @@ class FNSEncoder(nn.Module):
         # Create a list of transformer blocks
         self.blocks = nn.ModuleList([])
         for _ in range(config["num_hidden_layers"]):
-            block = FNSBlock(config)
+            block = OPFNSBlock(config)
             self.blocks.append(block)
 
     def forward(self, x, output_attentions=False):
@@ -365,7 +366,7 @@ class FNSEncoder(nn.Module):
             return (x, all_attentions)
 
 
-class FNSViTForClassfication(nn.Module):
+class OPFNSViTForClassfication(nn.Module):
     """
     The ViT model for classification.
     """
@@ -379,7 +380,7 @@ class FNSViTForClassfication(nn.Module):
         # Create the embedding module
         self.embedding = Embeddings(config)
         # Create the transformer encoder module
-        self.encoder = FNSEncoder(config)
+        self.encoder = OPFNSEncoder(config)
         # Create a linear layer to project the encoder's output to the number of classes
         self.classifier = nn.Linear(self.hidden_size, self.num_classes)
         # Initialize the weights

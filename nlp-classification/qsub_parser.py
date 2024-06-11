@@ -140,23 +140,27 @@ def command_setup_ddp(singularity_path, **kwargs):
         #command += f" CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.launch --nproc_per_node={ngpus}"
         #additional_command = 'run --backend=nccl'
         if select == 1:
-            command += f" torchrun --rdzv-backend=c10d --rdzv-endpoint=localhost:0"
-            command += f" --nnodes=1 --nproc_per_node={ngpus} --max-restarts=3"
+            # command += f" torchrun --rdzv-backend=c10d --rdzv-endpoint=localhost:0"
+            # command += f" --nnodes=1 --nproc_per_node={ngpus} --max-restarts=3"
+            command += f" torchrun --standalone --nnodes=1 --nproc_per_node={ncpus}"
         else:
             # tolerates 3 failures
-            command += f" torchrun --nnodes={select} --nproc_per_node={ngpus}"
-            command += f" --max-restarts=3 --rdzv-id=$JOB_ID"
-            command += f" --rdzv-backend=c10d --rdzv-endpoint=$HOST_NODE_ADDR"
+            # command += f" torchrun --nnodes={select} --nproc_per_node={ngpus}"
+            # command += f" --max-restarts=3 --rdzv-id=$JOB_ID"
+            # command += f" --rdzv-backend=c10d --rdzv-endpoint=$HOST_NODE_ADDR"
+            command += f" torchrun --nnodes={select} --nproc_per_node={ncpus}"
     elif ngpus == 0 and ncpus > 1:
         #python -m torch.distributed.launch --nproc_per_node=4 --use_env train_classification_imdb.py run --backend=gloo
         #additional_command = 'run --backend=gloo'
         if select == 1:
-            command += f" torchrun --rdzv-backend=c10d --rdzv-endpoint=localhost:0"
-            command += f" --nnodes=1 --nproc_per_node={ncpus} --max-restarts=3"
+            # command += f" torchrun --rdzv-backend=c10d --rdzv-endpoint=localhost:0"            
+            # command += f" --nnodes=1 --nproc_per_node={ncpus} --max-restarts=3"
+            command += f" torchrun --standalone --nnodes=1 --nproc_per_node={ncpus}"
         else:
-            command += f" torchrun --nnodes={select} --nproc_per_node={ncpus}"
-            command += f" --max-restarts=3 --rdzv-id=$JOB_ID"
-            command += f" --rdzv-backend=c10d --rdzv-endpoint=$HOST_NODE_ADDR"    
+            # command += f" torchrun --nnodes={select} --nproc_per_node={ncpus}"
+            # command += f" --max-restarts=3 --rdzv-id=$JOB_ID"
+            # command += f" --rdzv-backend=c10d --rdzv-endpoint=$HOST_NODE_ADDR"    
+            command += f" torchrun --nnodes={select} --nproc_per_node={ncpus}"          
 
     if len(singularity_path) == 0:
         command = command[1:]

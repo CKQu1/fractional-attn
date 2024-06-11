@@ -30,9 +30,10 @@ colors = list(mcl.TABLEAU_COLORS.keys())
 """
 
 def plot_ensembles(model_root_dir, datasets=['iwslt14'],  
-                   metrics=['train_loss','val_loss','val_bleu'], 
+                   metrics=['train_loss','val_loss'], 
                    mod_rows=1,display=False):
     global df, df_setting, df_filtered, fig_file, axs
+    global subdir, dirname
     global model_dir, config_dict, final_metrics, ensemble_metrics, metric_plot 
     global model_dirs, subpath, config, attn_setup   
 
@@ -49,7 +50,10 @@ def plot_ensembles(model_root_dir, datasets=['iwslt14'],
     print(f'model_root_dir = {model_root_dir}')
     # prompt to reorder file names
     for dirname_idx, dirname in enumerate(dirnames):
-        print(f'Index {dirname_idx}: {dirname}')
+        for subdir in os.listdir(njoin(model_root_dir, dirname)):
+            if 'run_performance.csv' in os.listdir(njoin(model_root_dir, dirname, subdir)):                    
+                print(f'Index {dirname_idx}: {dirname}')
+                break
     dirname_idxs = input('Order of dirnames:')
     dirname_idxs = [int(dirname_idx) for dirname_idx in dirname_idxs.split(',')]
     assert len(dirname_idxs) <= len(dirnames), 'dirname_idxs cannot exceed dirnames'
@@ -58,7 +62,7 @@ def plot_ensembles(model_root_dir, datasets=['iwslt14'],
 
     nrows, ncols = len(datasets), len(metrics)
     #figsize = (9.5,2.5*nrows)
-    figsize = (12,2.5*nrows)
+    figsize = (9,2.5*nrows)
     fig, axs = plt.subplots(nrows,ncols,figsize=figsize,
                             sharex=True,sharey=False)
     if axs.ndim == 1:
@@ -171,7 +175,8 @@ def plot_ensembles(model_root_dir, datasets=['iwslt14'],
 
                 #iit = df_filtered[df_filtered.loc[:,'iter']>=max_iter*1/3].index
                 iit = df_filtered[df_filtered.loc[:,'iter']<=max_iter].index  # all
-                axs[idx,kdx].plot(df_filtered.loc[iit,'iter'], ensemble_mean[iit],
+                # df_filtered.loc[iit,'iter'], ensemble_mean[iit],
+                axs[idx,kdx].plot(df_filtered.index, ensemble_mean,
                                   linestyle=model_linestyles[model_name], c=model_colors[model_name],
                                   label=model_name)                 
 

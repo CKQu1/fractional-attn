@@ -2,6 +2,7 @@ import math
 import torch
 from torch import nn
 from torch.nn import functional as F
+from torch.nn.utils.parametrizations import orthogonal
 
 
 # https://github.com/tintn/vision-transformer-from-scratch/blob/main/vit.py
@@ -17,10 +18,10 @@ class NewGELUActivation(nn.Module):
         return 0.5 * input * (1.0 + torch.tanh(math.sqrt(2.0 / math.pi) * (input + 0.044715 * torch.pow(input, 3.0))))
 
 
-class FNSAttentionHead(nn.Module):
+class OPFNSAttentionHead(nn.Module):
     """
     A single attention head.
-    This module is used in the FNSMultiHeadAttention module.
+    This module is used in the OPFNSMultiHeadAttention module.
 
     """
     def __init__(self, alpha, a, bandwidth, sphere_radius, hidden_size, attention_head_size, dropout, bias=True, is_cross_attention=False):
@@ -28,8 +29,8 @@ class FNSAttentionHead(nn.Module):
         self.hidden_size = hidden_size
         self.attention_head_size = attention_head_size
         # Create the query, key, and value projection layers
-        self.query = nn.Linear(hidden_size, attention_head_size, bias=bias)
-        self.key = nn.Linear(hidden_size, attention_head_size, bias=bias)
+        self.query = orthogonal(nn.Linear(hidden_size, attention_head_size, bias=bias))
+        self.key = orthogonal(nn.Linear(hidden_size, attention_head_size, bias=bias))
         self.value = nn.Linear(hidden_size, attention_head_size, bias=bias)
 
         self.dropout = nn.Dropout(dropout)
@@ -83,7 +84,7 @@ class FNSAttentionHead(nn.Module):
         return (attention_output, attention_probs)
 
 
-class FNSMultiHeadAttention(nn.Module):
+class OPFNSMultiHeadAttention(nn.Module):
     """
     Multi-head attention module.
     This module is used in the TransformerEncoder module.
@@ -109,7 +110,7 @@ class FNSMultiHeadAttention(nn.Module):
         self.sphere_radius = config['sphere_radius']     
 
         for _ in range(self.num_attention_heads):
-            head = FNSAttentionHead(
+            head = OPFNSAttentionHead(
                 self.alpha,
                 self.a,
                 self.bandwidth,
@@ -142,7 +143,7 @@ class FNSMultiHeadAttention(nn.Module):
             return (attention_output, attention_probs)
 
 
-class FasterFNSMultiHeadAttention(nn.Module):
+class FasterOPFNSMultiHeadAttention(nn.Module):
     """
     Multi-head attention module with some optimizations.
     All the heads are processed simultaneously with merged query, key, and value projections.
@@ -160,11 +161,17 @@ class FasterFNSMultiHeadAttention(nn.Module):
         # Whether or not to use bias in the query, key, and value projection layers
         self.qkv_bias = config["qkv_bias"]
         # Create a linear layer to project the query, key, and value
+        """
         if self.is_cross_attention:
             self.kv_projection = nn.Linear(self.hidden_size, self.all_head_size * 2, bias=self.qkv_bias)
-            self.q_projection = nn.Linear(self.hidden_size, self.all_head_size, bias=self.qkv_bias)
+            self.q_projection = orthogonal(nn.Linear(self.hidden_size, self.all_head_size, bias=self.qkv_bias))
         else:
-            self.qkv_projection = nn.Linear(self.hidden_size, self.all_head_size * 3, bias=self.qkv_bias)         
+            self.qkv_projection = orthogonal(nn.Linear(self.hidden_size, self.all_head_size * 3, bias=self.qkv_bias))  
+        """
+        self.q_projection = orthogonal(nn.Linear(self.hidden_size, self.all_head_size, bias=self.qkv_bias))
+        self.k_projection = orthogonal(nn.Linear(self.hidden_size, self.all_head_size, bias=self.qkv_bias))
+        self.v_projection = nn.Linear(self.hidden_size, self.all_head_size, bias=self.qkv_bias)       
+
         self.attn_dropout = nn.Dropout(config["attention_probs_dropout_prob"])
         # Create a linear layer to project the attention output back to the hidden size
         # In most cases, all_head_size and hidden_size are the same
@@ -184,14 +191,21 @@ class FasterFNSMultiHeadAttention(nn.Module):
                 self, "q_projection"
             ), "If class is used as cross attention, the weights `q_projection` have to be defined. Please make sure to instantiate class with `Attention(..., is_cross_attention=True)`."
             query = self.q_projection(x)
-            kv = self.kv_projection(encoder_output_states)
-            key, value = torch.chunk(kv, 2, dim=-1)
+            # kv = self.kv_projection(encoder_output_states)
+            # key, value = torch.chunk(kv, 2, dim=-1)
+            key = self.k_projection(encoder_output_states)
+            value = self.v_projection(encoder_output_states)
         else:
+            """
             # (batch_size, sequence_length, hidden_size) -> (batch_size, sequence_length, all_head_size * 3)
             qkv = self.qkv_projection(x)
             # Split the projected query, key, and value into query, key, and value
             # (batch_size, sequence_length, all_head_size * 3) -> (batch_size, sequence_length, all_head_size)
             query, key, value = torch.chunk(qkv, 3, dim=-1)
+            """
+            query = self.q_projection(x)
+            key = self.k_projection(x)
+            value = self.v_projection(x)
 
         # Resize the query, key, and value to (batch_size, num_attention_heads, sequence_length, attention_head_size)
         batch_size, src_sequence_length, _ = query.size()
@@ -274,7 +288,7 @@ class MLP(nn.Module):
         return x
 
 
-class FNSEncoderBlock(nn.Module):
+class OPFNSEncoderBlock(nn.Module):
     """
     A single transformer block.
     """
@@ -283,9 +297,9 @@ class FNSEncoderBlock(nn.Module):
         super().__init__()
         self.use_faster_attention = config.get("use_faster_attention", False)
         if self.use_faster_attention:
-            self.attention = FasterFNSMultiHeadAttention(config)
+            self.attention = FasterOPFNSMultiHeadAttention(config)
         else:
-            self.attention = FNSMultiHeadAttention(config)
+            self.attention = OPFNSMultiHeadAttention(config)
         self.layernorm_1 = nn.LayerNorm(config["hidden_size"])
         self.mlp = MLP(config)
         self.layernorm_2 = nn.LayerNorm(config["hidden_size"])
@@ -307,7 +321,7 @@ class FNSEncoderBlock(nn.Module):
             return (x, attention_probs)
         
 
-class FNSDecoderBlock(nn.Module):
+class OPFNSDecoderBlock(nn.Module):
     """
     A single transformer block.
     """
@@ -316,11 +330,11 @@ class FNSDecoderBlock(nn.Module):
         super().__init__()
         self.use_faster_attention = config.get("use_faster_attention", False)
         if self.use_faster_attention:
-            self.self_attention = FasterFNSMultiHeadAttention(config)
-            self.cross_attention = FasterFNSMultiHeadAttention(config, is_cross_attention=True)
+            self.self_attention = FasterOPFNSMultiHeadAttention(config)
+            self.cross_attention = FasterOPFNSMultiHeadAttention(config, is_cross_attention=True)
         else:
-            self.self_attention = FNSMultiHeadAttention(config)
-            self.cross_attention = FNSMultiHeadAttention(config, is_cross_attention=True)
+            self.self_attention = OPFNSMultiHeadAttention(config)
+            self.cross_attention = OPFNSMultiHeadAttention(config, is_cross_attention=True)
         self.layernorm_1 = nn.LayerNorm(config["hidden_size"])
         self.layernorm_2 = nn.LayerNorm(config["hidden_size"])
         self.mlp = MLP(config)
@@ -351,7 +365,7 @@ class FNSDecoderBlock(nn.Module):
             return (x, self_attention_probs, cross_attention_probs)
 
 
-class FNSEncoder(nn.Module):
+class OPFNSEncoder(nn.Module):
     """
     The transformer encoder module.
     """
@@ -373,7 +387,7 @@ class FNSEncoder(nn.Module):
         # Create a list of transformer blocks
         self.blocks = nn.ModuleList([])
         for _ in range(config["num_encoder_layers"]):
-            block = FNSEncoderBlock(config)
+            block = OPFNSEncoderBlock(config)
             self.blocks.append(block)
 
     def forward(self, x, attention_mask=None, output_attentions=False):
@@ -395,7 +409,7 @@ class FNSEncoder(nn.Module):
         else:
             return (x, all_attentions)    
     
-class FNSDecoder(nn.Module):
+class OPFNSDecoder(nn.Module):
     """
     The transformer decoder module.
     """
@@ -417,7 +431,7 @@ class FNSDecoder(nn.Module):
         # Create a list of transformer blocks
         self.blocks = nn.ModuleList([])
         for _ in range(config["num_decoder_layers"]):
-            block = FNSDecoderBlock(config)
+            block = OPFNSDecoderBlock(config)
             self.blocks.append(block)
         # Tie output linear weights to input embedding matrix
 
@@ -456,7 +470,7 @@ class FNSDecoder(nn.Module):
         else:
             return (x, all_self_attentions, all_cross_attentions)
 
-class FNSForNMT(nn.Module):
+class OPFNSForNMT(nn.Module):
     """
     The seq2seq model for neural machine translation.
     """
@@ -465,9 +479,9 @@ class FNSForNMT(nn.Module):
         super().__init__()
         self.config = config
         # Create the transformer encoder module
-        self.encoder = FNSEncoder(config)
+        self.encoder = OPFNSEncoder(config)
         # Create the transformer decoder module
-        self.decoder = FNSDecoder(config)
+        self.decoder = OPFNSDecoder(config)
         # Initialize the weights
         self.apply(self._init_weights)
 

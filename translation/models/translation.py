@@ -389,7 +389,7 @@ class Decoder(nn.Module):
         else:
             return (x, all_self_attentions, all_cross_attentions)
 
-class DPForTranslation(nn.Module):
+class DPForNMT(nn.Module):
     """
     The seq2seq model for neural machine translation.
     """

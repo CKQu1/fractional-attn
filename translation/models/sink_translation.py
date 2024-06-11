@@ -1,8 +1,14 @@
 import math
 import torch
 from torch import nn
+
+
+import math
+import torch
+from torch import nn
 from torch.nn import functional as F
 
+from models.sinkhorn import SinkhornDistance
 
 # https://github.com/tintn/vision-transformer-from-scratch/blob/main/vit.py
 class NewGELUActivation(nn.Module):
@@ -17,13 +23,13 @@ class NewGELUActivation(nn.Module):
         return 0.5 * input * (1.0 + torch.tanh(math.sqrt(2.0 / math.pi) * (input + 0.044715 * torch.pow(input, 3.0))))
 
 
-class FNSAttentionHead(nn.Module):
+class SINKAttentionHead(nn.Module):
     """
     A single attention head.
-    This module is used in the FNSMultiHeadAttention module.
+    This module is used in the MultiHeadAttention module.
 
     """
-    def __init__(self, alpha, a, bandwidth, sphere_radius, hidden_size, attention_head_size, dropout, bias=True, is_cross_attention=False):
+    def __init__(self, n_it, bandwidth, hidden_size, attention_head_size, dropout, bias=True, is_cross_attention=False):
         super().__init__()
         self.hidden_size = hidden_size
         self.attention_head_size = attention_head_size
@@ -32,58 +38,51 @@ class FNSAttentionHead(nn.Module):
         self.key = nn.Linear(hidden_size, attention_head_size, bias=bias)
         self.value = nn.Linear(hidden_size, attention_head_size, bias=bias)
 
+        self.n_it = n_it
+        self.bandwidth = bandwidth
+        self.sink = SinkhornDistance(eps=self.bandwidth, max_iter=self.n_it)
+
         self.dropout = nn.Dropout(dropout)
-    
-        self.alpha, self.bandwidth = alpha, bandwidth
-        self.a = a
-        self.sphere_radius = sphere_radius
         
         self.is_cross_attention = is_cross_attention
-
+    
     def forward(self, x, encoder_output_states=None, attention_mask=None):
+        # Project the input into query, key, and value
+        # The same input is used to generate the query, key, and value,
+        # so it's usually called self-attention.
+        # (batch_size, sequence_length, hidden_size) -> (batch_size, sequence_length, attention_head_size)
         if encoder_output_states is not None:
             assert self.is_cross_attention, "Please make sure to instantiate class with `Attention(..., is_cross_attention=True)`."
-            query = F.normalize(self.query(x), p=2, dim=-1)
-            key = F.normalize(self.key(encoder_output_states), p=2, dim=-1)
-            value = F.normalize(self.value(encoder_output_states), p=2, dim=-1)   
+            query = self.query(x)
+            key = self.key(encoder_output_states)
+            value = self.value(encoder_output_states)            
         else:
-            query = F.normalize(self.query(x), p=2, dim=-1)
-            key = F.normalize(self.key(x), p=2, dim=-1)
-            value = F.normalize(self.value(x), p=2, dim=-1)                
-
-        alpha, bandwidth = self.alpha, self.bandwidth
-        sphere_radius = self.sphere_radius
-        d_intrinsic = self.attention_head_size
-
-        # geodesic distance on sphere
-        eps = 1e-7  # for limiting the divergence from acos
-        g_dist = torch.acos(torch.clamp(query @ key.transpose(-2, -1), -1+eps, 1-eps)) * sphere_radius
-        
+            query = self.query(x)
+            key = self.key(x)
+            value = self.value(x)
         # Calculate the attention scores
-        if alpha < 2:
-            attn_score = (1 + g_dist/bandwidth**0.5)**(-d_intrinsic-alpha)
-        else:
-            attn_score = torch.exp((-g_dist/bandwidth**0.5)**(alpha/(alpha-1)))
+        # softmax(Q*K.T/sqrt(head_size))*V
+        attention_scores = torch.matmul(query, key.transpose(-1, -2))
+        attention_scores = attention_scores / math.sqrt(self.attention_head_size)
+        if attention_mask is not None:
+            # Write a very low value (indicating -inf) to the positions where mask == 0
+            attention_mask = attention_mask[:,:,:query.size(1),:key.size(1)] # Feels like a dirty fix...
+            attention_scores.masked_fill_(attention_mask == 0, -1e9)
 
-        attention_mask = attention_mask[:,:,:query.size(1),:key.size(1)] # Feels like a dirty fix...
-        if self.a == 0:            
-            attn_score = attn_score.masked_fill(attention_mask==0, -1e9) # Mask
-            attention_probs = F.normalize(attn_score,p=1,dim=3)  # can do this as the attn weights are always positive
-        else:
-            D_inv_row = torch.diag_embed(attn_score.sum(-1)**(-a))  # inverse of degree matrix of attn_score
-            D_inv_col = torch.diag_embed(attn_score.sum(-2)**(-a))  # inverse of degree matrix of attn_score
-            K_tilde = D_inv_row @ attn_score @ D_inv_col            
-            K_tilde = K_tilde.masked_fill(attention_mask==0, -1e9) # Mask
-            attention_probs = F.normalize(K_tilde,p=1,dim=3)  # can do this as the attn weights are always positive
-        attention_probs = self.attn_dropout(attention_probs)
+        attn_score_shape = attention_scores.shape
+        attention_scores = attention_scores.view(-1, attn_score_shape[2], attn_score_shape[3])
+        attention_probs = self.sink(attention_scores)[0]
 
+        attention_probs = attention_probs * attention_probs.shape[-1]
+        attention_probs = attention_probs.view(attn_score_shape)  
+
+        attention_probs = self.dropout(attention_probs)
         # Calculate the attention output
-        attention_output = attention_probs @ value
-
+        attention_output = torch.matmul(attention_probs, value)
         return (attention_output, attention_probs)
 
 
-class FNSMultiHeadAttention(nn.Module):
+class SINKMultiHeadAttention(nn.Module):
     """
     Multi-head attention module.
     This module is used in the TransformerEncoder module.
@@ -91,6 +90,7 @@ class FNSMultiHeadAttention(nn.Module):
 
     def __init__(self, config, is_cross_attention=False):
         super().__init__()
+        self.is_cross_attention = is_cross_attention        
         self.hidden_size = config["hidden_size"]
         self.num_attention_heads = config["num_attention_heads"]
         # The attention head size is the hidden size divided by the number of attention heads
@@ -100,20 +100,14 @@ class FNSMultiHeadAttention(nn.Module):
         self.qkv_bias = config["qkv_bias"]
         # Create a list of attention heads
         self.heads = nn.ModuleList([])
-        # Whether it is cross attention
-        self.is_cross_attention = is_cross_attention
 
-        self.alpha = config['alpha']
+        self.n_it = config['n_it']
         self.bandwidth = config['bandwidth']
-        self.a = config['a']
-        self.sphere_radius = config['sphere_radius']     
 
         for _ in range(self.num_attention_heads):
-            head = FNSAttentionHead(
-                self.alpha,
-                self.a,
+            head = SINKAttentionHead(
+                self.n_it,
                 self.bandwidth,
-                self.sphere_radius,
                 self.hidden_size,
                 self.attention_head_size,
                 config["attention_probs_dropout_prob"],
@@ -142,7 +136,7 @@ class FNSMultiHeadAttention(nn.Module):
             return (attention_output, attention_probs)
 
 
-class FasterFNSMultiHeadAttention(nn.Module):
+class FasterSINKMultiHeadAttention(nn.Module):
     """
     Multi-head attention module with some optimizations.
     All the heads are processed simultaneously with merged query, key, and value projections.
@@ -164,20 +158,18 @@ class FasterFNSMultiHeadAttention(nn.Module):
             self.kv_projection = nn.Linear(self.hidden_size, self.all_head_size * 2, bias=self.qkv_bias)
             self.q_projection = nn.Linear(self.hidden_size, self.all_head_size, bias=self.qkv_bias)
         else:
-            self.qkv_projection = nn.Linear(self.hidden_size, self.all_head_size * 3, bias=self.qkv_bias)         
+            self.qkv_projection = nn.Linear(self.hidden_size, self.all_head_size * 3, bias=self.qkv_bias)
         self.attn_dropout = nn.Dropout(config["attention_probs_dropout_prob"])
         # Create a linear layer to project the attention output back to the hidden size
         # In most cases, all_head_size and hidden_size are the same
         self.output_projection = nn.Linear(self.all_head_size, self.hidden_size)
         self.output_dropout = nn.Dropout(config["hidden_dropout_prob"])
 
-        self.alpha = config['alpha']
-        self.bandwidth = config['bandwidth']
-        self.a = config['a']
-        self.sphere_radius = config['sphere_radius']
+        self.n_it = config['n_it']
+        self.bandwidth = config['bandwidth']   
+        self.sink = SinkhornDistance(eps=self.bandwidth, max_iter=self.n_it)       
 
     def forward(self, x, attention_mask=None, output_attentions=False, encoder_output_states=None):
-
         # Project the query, key, and value
         if encoder_output_states is not None:
             assert hasattr(
@@ -192,52 +184,38 @@ class FasterFNSMultiHeadAttention(nn.Module):
             # Split the projected query, key, and value into query, key, and value
             # (batch_size, sequence_length, all_head_size * 3) -> (batch_size, sequence_length, all_head_size)
             query, key, value = torch.chunk(qkv, 3, dim=-1)
-
         # Resize the query, key, and value to (batch_size, num_attention_heads, sequence_length, attention_head_size)
         batch_size, src_sequence_length, _ = query.size()
         trg_sequence_length = key.size(1)
-        num_attention_heads, attention_head_size = self.num_attention_heads, self.attention_head_size
-
-        alpha, bandwidth = self.alpha, self.bandwidth
-        sphere_radius = self.sphere_radius
-        d_intrinsic = attention_head_size
-
-        query = F.normalize(query.view(batch_size, src_sequence_length, num_attention_heads, attention_head_size).transpose(1, 2), p=2, dim=-1)
-        key = F.normalize(key.view(batch_size, trg_sequence_length, num_attention_heads, attention_head_size).transpose(1, 2), p=2, dim=-1)
-        value = value.view(batch_size, trg_sequence_length, num_attention_heads, attention_head_size).transpose(1, 2)      
-
-        # geodesic distance on sphere
-        eps = 1e-7  # for limiting the divergence from acos
-        g_dist = torch.acos(torch.clamp(query @ key.transpose(-2, -1), -1+eps, 1-eps)) * sphere_radius
-        
+        query = query.view(batch_size, src_sequence_length, self.num_attention_heads, self.attention_head_size).transpose(1, 2)
+        key = key.view(batch_size, trg_sequence_length, self.num_attention_heads, self.attention_head_size).transpose(1, 2)
+        value = value.view(batch_size, trg_sequence_length, self.num_attention_heads, self.attention_head_size).transpose(1, 2)
         # Calculate the attention scores
-        if alpha < 2:
-            attn_score = (1 + g_dist/bandwidth**0.5)**(-d_intrinsic-alpha)
-        else:
-            attn_score = torch.exp((-g_dist/bandwidth**0.5)**(alpha/(alpha-1)))
+        # softmax(Q*K.T/sqrt(head_size))*V
+        attention_scores = torch.matmul(query, key.transpose(-1, -2))
+        attention_scores = attention_scores / math.sqrt(self.attention_head_size)
+        if attention_mask is not None:
+            # Write a very low value (indicating -inf) to the positions where mask == 0
+            attention_mask = attention_mask[:,:,:src_sequence_length,:trg_sequence_length] # Feels like a dirty fix...
+            attention_scores.masked_fill_(attention_mask == 0, -1e9)
 
-        attention_mask = attention_mask[:,:,:src_sequence_length,:trg_sequence_length] # Feels like a dirty fix...
-        if self.a == 0:
-            attn_score = attn_score.masked_fill(attention_mask.expand(-1,self.num_attention_heads,-1,-1)==0, -1e9) # Mask
-            attention_probs = F.normalize(attn_score,p=1,dim=3)  # can do this as the attn weights are always positive
-        else:
-            D_inv_row = torch.diag_embed(attn_score.sum(-1)**(-1))  # inverse of degree matrix of attn_score
-            D_inv_col = torch.diag_embed(attn_score.sum(-2)**(-1))  # inverse of degree matrix of attn_score
-            K_tilde = D_inv_row @ attn_score @ D_inv_col        
-            K_tilde = K_tilde.masked_fill(attention_mask.expand(-1,self.num_attention_heads,-1,-1)==0, -1e9) # Mask
-            attention_probs = F.normalize(K_tilde,p=1,dim=3)  # can do this as the attn weights are always positive
+        attn_score_shape = attention_scores.shape
+        attention_scores = attention_scores.view(-1, attn_score_shape[2], attn_score_shape[3])
+        attention_probs = self.sink(attention_scores)[0]        
+        
+        attention_probs = attention_probs * attention_probs.shape[-1]
+        attention_probs = attention_probs.view(attn_score_shape)        
+
         attention_probs = self.attn_dropout(attention_probs)
 
-        # ##### CHANGES HERE #####        
-        # print(f'attention_probs shape: {attention_probs.shape}')        
+        ##### DEBUG #####
+        # print(f'attn_score_shape = {attn_score_shape}')
+        # print(f'attention_scores shape = {attention_scores.shape}')
+        # print(f'attention_probs shape = {attention_probs.shape}')
+        # print(f'value shape = {value.shape}')
 
         # Calculate the attention output
-        attention_output = attention_probs @ value
-
-        # ##### CHANGES HERE #####
-        # print(f'attention_output shape: {attention_output.shape}')  
-        # print('\n')
-
+        attention_output = torch.matmul(attention_probs, value)
         # Resize the attention output
         # from (batch_size, num_attention_heads, sequence_length, attention_head_size)
         # To (batch_size, sequence_length, all_head_size)
@@ -274,7 +252,7 @@ class MLP(nn.Module):
         return x
 
 
-class FNSEncoderBlock(nn.Module):
+class SINKEncoderBlock(nn.Module):
     """
     A single transformer block.
     """
@@ -283,9 +261,9 @@ class FNSEncoderBlock(nn.Module):
         super().__init__()
         self.use_faster_attention = config.get("use_faster_attention", False)
         if self.use_faster_attention:
-            self.attention = FasterFNSMultiHeadAttention(config)
+            self.attention = FasterSINKMultiHeadAttention(config)
         else:
-            self.attention = FNSMultiHeadAttention(config)
+            self.attention = SINKMultiHeadAttention(config)
         self.layernorm_1 = nn.LayerNorm(config["hidden_size"])
         self.mlp = MLP(config)
         self.layernorm_2 = nn.LayerNorm(config["hidden_size"])
@@ -307,7 +285,7 @@ class FNSEncoderBlock(nn.Module):
             return (x, attention_probs)
         
 
-class FNSDecoderBlock(nn.Module):
+class SINKDecoderBlock(nn.Module):
     """
     A single transformer block.
     """
@@ -316,11 +294,11 @@ class FNSDecoderBlock(nn.Module):
         super().__init__()
         self.use_faster_attention = config.get("use_faster_attention", False)
         if self.use_faster_attention:
-            self.self_attention = FasterFNSMultiHeadAttention(config)
-            self.cross_attention = FasterFNSMultiHeadAttention(config, is_cross_attention=True)
+            self.self_attention = FasterSINKMultiHeadAttention(config)
+            self.cross_attention = FasterSINKMultiHeadAttention(config, is_cross_attention=True)
         else:
-            self.self_attention = FNSMultiHeadAttention(config)
-            self.cross_attention = FNSMultiHeadAttention(config, is_cross_attention=True)
+            self.self_attention = SINKMultiHeadAttention(config)
+            self.cross_attention = SINKMultiHeadAttention(config, is_cross_attention=True)
         self.layernorm_1 = nn.LayerNorm(config["hidden_size"])
         self.layernorm_2 = nn.LayerNorm(config["hidden_size"])
         self.mlp = MLP(config)
@@ -333,11 +311,8 @@ class FNSDecoderBlock(nn.Module):
         # Skip connection
         x = self.layernorm_1(x + attention_output)
         # Cross-attention
-        ##### CHANGES HERE #####
         attention_output, cross_attention_probs = \
             self.cross_attention(x, attention_mask=src_mask, output_attentions=output_attentions, encoder_output_states=encoder_output_states)
-            #self.cross_attention(x, attention_mask=trg_mask, output_attentions=output_attentions, encoder_output_states=encoder_output_states)            
-            
         # Skip connection
         x = self.layernorm_2(x + attention_output)
         # Feed-forward network
@@ -349,9 +324,9 @@ class FNSDecoderBlock(nn.Module):
             return (x, None, None)
         else:
             return (x, self_attention_probs, cross_attention_probs)
+        
 
-
-class FNSEncoder(nn.Module):
+class SINKEncoder(nn.Module):
     """
     The transformer encoder module.
     """
@@ -373,7 +348,7 @@ class FNSEncoder(nn.Module):
         # Create a list of transformer blocks
         self.blocks = nn.ModuleList([])
         for _ in range(config["num_encoder_layers"]):
-            block = FNSEncoderBlock(config)
+            block = SINKEncoderBlock(config)
             self.blocks.append(block)
 
     def forward(self, x, attention_mask=None, output_attentions=False):
@@ -395,7 +370,7 @@ class FNSEncoder(nn.Module):
         else:
             return (x, all_attentions)    
     
-class FNSDecoder(nn.Module):
+class SINKDecoder(nn.Module):
     """
     The transformer decoder module.
     """
@@ -417,15 +392,11 @@ class FNSDecoder(nn.Module):
         # Create a list of transformer blocks
         self.blocks = nn.ModuleList([])
         for _ in range(config["num_decoder_layers"]):
-            block = FNSDecoderBlock(config)
+            block = SINKDecoderBlock(config)
             self.blocks.append(block)
         # Tie output linear weights to input embedding matrix
-
-        ##### CHANGES HERE #####
         self.fc = nn.Linear(config["hidden_size"], config["trg_vocab_size"], bias=bias)
-        self.fc.weight = self.token_embedding.weight
-        #self.fc = nn.Linear(config["hidden_size"], config["max_length"], bias=bias)
-         
+        self.fc.weight = self.token_embedding.weight 
         
     def forward(self, x, embedding_output_states, src_mask=None, trg_mask=None, output_attentions=False):
         # Create the position ids from the input token ids. Any padded tokens remain padded.
@@ -437,14 +408,12 @@ class FNSDecoder(nn.Module):
         # Calculate the transformer block's output for each block
         all_self_attentions = []
         all_cross_attentions = []
-        for block in self.blocks:         
-            ##### CHANGES HERE #####   
+        for block in self.blocks:
             if output_attentions:
                 x, self_attention_probs, cross_attention_probs = block(x, embedding_output_states, src_mask=src_mask, trg_mask=trg_mask, output_attentions=output_attentions)
                 all_self_attentions.append(self_attention_probs)
                 all_cross_attentions.append(cross_attention_probs)
-            ##### CHANGES HERE #####
-            else:
+            else: 
                 x, _, _ = block(x, embedding_output_states, src_mask=src_mask, trg_mask=trg_mask, output_attentions=output_attentions)              
         # Linear layer
         x = self.fc(x)
@@ -456,7 +425,7 @@ class FNSDecoder(nn.Module):
         else:
             return (x, all_self_attentions, all_cross_attentions)
 
-class FNSForNMT(nn.Module):
+class SINKForNMT(nn.Module):
     """
     The seq2seq model for neural machine translation.
     """
@@ -465,30 +434,23 @@ class FNSForNMT(nn.Module):
         super().__init__()
         self.config = config
         # Create the transformer encoder module
-        self.encoder = FNSEncoder(config)
+        self.encoder = SINKEncoder(config)
         # Create the transformer decoder module
-        self.decoder = FNSDecoder(config)
+        self.decoder = SINKDecoder(config)
         # Initialize the weights
         self.apply(self._init_weights)
 
-    def forward(self, src, trg, src_mask, trg_mask, output_attentions=False):
+    def forward(self, src, trg, encoder_mask, decoder_mask, output_attentions=False):
         # Calculate the encoder's output
-        encoder_output, encoder_self_attentions = self.encoder(src, attention_mask = src_mask, output_attentions=output_attentions)
-        # ##### CHANGES HERE #####
-        # print(f'encoder_output shape: {encoder_output.shape}')
-        # print('\n')
-
+        encoder_output, encoder_self_attentions = self.encoder(src, attention_mask = encoder_mask, output_attentions=output_attentions)
         # Return the logits and the attention probabilities (optional)
         if not output_attentions:
             # Calculate the decoder's output
-            decoder_output, _, _ = self.decoder(trg, encoder_output, src_mask=src_mask, trg_mask=trg_mask, output_attentions=output_attentions)            
-
+            decoder_output, _, _ = self.decoder(trg, encoder_output, src_mask=encoder_mask, trg_mask=decoder_mask, output_attentions=output_attentions)
             return (decoder_output, None, None, None)
         else:
-            ##### CHANGES HERE #####
             # Calculate the decoder's output
-            decoder_output, decoder_self_attentions, decoder_cross_attentions = self.decoder(trg, encoder_output, src_mask=src_mask, trg_mask=trg_mask, output_attentions=output_attentions)            
-
+            decoder_output, decoder_self_attentions, decoder_cross_attentions = self.decoder(trg, encoder_output, src_mask=encoder_mask, trg_mask=decoder_mask, output_attentions=output_attentions)
             return (decoder_output, encoder_self_attentions, decoder_self_attentions, decoder_cross_attentions)
 
     def _init_weights(self, module):

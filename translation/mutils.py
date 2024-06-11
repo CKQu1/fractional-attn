@@ -50,7 +50,7 @@ def get_instance(dir, *args):  # for enumerating each instance of training
 
 # create model_dir which determines the instance for the specific model/training setting
 def create_model_dir(model_root_dir, **kwargs):
-    model_name = kwargs.get('model_name', 'fnsvit')    
+    model_name = kwargs.get('model_name', 'fnsnmt')    
     dataset_name = kwargs.get('dataset_name', 'cifar10')
     if '_' in dataset_name:
         dataset_code = ''.join([s[0] for s in dataset_name.split('_')])
@@ -62,15 +62,22 @@ def create_model_dir(model_root_dir, **kwargs):
 
     dirname = f'{model_name}-{dataset_code}'
     dirname += '-qqv' if qk_share is True else '-qkv'  # qk weight-tying
-    if model_name == 'fnsvit':                 
-        beta = kwargs.get("beta", 1)
+    if 'fns' in model_name:                 
+        alpha = kwargs.get("alpha", 1)
         bandwidth = kwargs.get("bandwidth", 1)             
-        dirname += f'-beta={beta}-eps={bandwidth}'
-        # if beta < 2:
+        a = kwargs.get("a", 0)
+        dirname += f'-alpha={alpha}-eps={bandwidth}-a={a}'
+        # if alpha < 2:
         #     d_intrinsic = kwargs.get('d_intrinsic')
         #     dirname += f'-dman={d_intrinsic}'
+    elif model_name == 'sinknmt':
+        bandwidth = kwargs.get("bandwidth", 1)     
+        n_it = kwargs.get("n_it", 1)        
+        dirname += f'-n_it={n_it}-eps={bandwidth}'        
     models_dir = njoin(model_root_dir, dirname)
-    instance = get_instance(models_dir, 'model=')
+    instance = kwargs.get('instance', None)
+    if instance is None:
+        instance = get_instance(models_dir, 'model=')
     model_dir = njoin(models_dir, f'model={instance}')    
     #if not os.path.isdir(models_dir): os.makedirs(models_dir)
     #if not os.path.isdir(model_dir): os.makedirs(model_dir)     
@@ -85,20 +92,19 @@ def structural_model_root(**kwargs):
     num_decoder_layers = kwargs.get('num_decoder_layers')
     n_attn_heads = kwargs.get('num_attention_heads'); hidden_size = kwargs.get('hidden_size')
 
-    lr = kwargs.get('lr'); bs = kwargs.get('bs'); milestones = kwargs.get('milestones'); gamma = kwargs.get('gamma')
+    #lr = kwargs.get('lr'); 
+    bs = kwargs.get('bs'); milestones = kwargs.get('milestones'); gamma = kwargs.get('gamma')
     epochs = kwargs.get('epochs')
 
     affix = 'qqv' if qk_share==True else 'qkv'
-    if isinstance(milestones, str):
-        milestones_str = milestones
-    else:
-        milestones_str = ','.join(str(s) for s in milestones)    
+    # if isinstance(milestones, str):
+    #     milestones_str = milestones
+    # else:
+    #     milestones_str = ','.join(str(s) for s in milestones)    
     if use_custom_optim is True:
-        model_root = njoin(f'encoder_layers={num_encoder_layers}-decoder_layers={num_decoder_layers}-heads={n_attn_heads}-hidden={hidden_size}-{affix}',
-                           f'lr={lr}-bs={bs}-milestones={milestones_str}-gamma={gamma}-epochs={epochs}')    
+        model_root = njoin(f'en_layers={num_encoder_layers}-de_layers={num_decoder_layers}-heads={n_attn_heads}-hidden={hidden_size}-{affix}')    
     else:
-        model_root = njoin(f'encoder_layers={num_encoder_layers}-decoder_layers={num_decoder_layers}-heads={n_attn_heads}-hidden={hidden_size}-{affix}',
-                           f'lr={lr}-bs={bs}-epochs={epochs}')            
+        model_root = njoin(f'en_layers={num_encoder_layers}-de_layers={num_decoder_layers}-heads={n_attn_heads}-hidden={hidden_size}-{affix}')            
 
     return model_root       
 

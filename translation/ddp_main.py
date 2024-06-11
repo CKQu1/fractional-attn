@@ -211,7 +211,7 @@ if __name__ == '__main__':
     attn_setup = {'qk_share': args.qk_share, 'qkv_bias': args.qkv_bias, 'instance': args.instance}
     attn_setup['model_name'] = args.model_name
     attn_setup['dataset_name'] = args.dataset_name    
-    if args.model_name == 'fnsnmt':
+    if 'fns' in args.model_name:
         config['alpha'] = attn_setup['alpha'] = args.alpha      
         config['a'] = attn_setup['a'] = args.a
         config['bandwidth'] = attn_setup['bandwidth'] = args.bandwidth   

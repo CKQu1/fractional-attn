@@ -7,6 +7,7 @@ import math
 import torch
 from torch import nn
 from torch.nn import functional as F
+from torch.nn.init import xavier_uniform_
 
 # https://github.com/tintn/vision-transformer-from-scratch/blob/main/vit.py
 class NewGELUActivation(nn.Module):
@@ -60,7 +61,8 @@ class AttentionHead(nn.Module):
         attention_scores = attention_scores / math.sqrt(self.attention_head_size)
         if attention_mask is not None:
             # Write a very low value (indicating -inf) to the positions where mask == 0
-            attention_mask = attention_mask[:,:,:query.size(1),:key.size(1)] # Feels like a dirty fix...
+            if self.is_cross_attention:
+                attention_mask = attention_mask[:,:,:query.size(1),:key.size(1)] # Feels like a dirty fix...
             attention_scores.masked_fill_(attention_mask == 0, -1e9)
         attention_probs = nn.functional.softmax(attention_scores, dim=-1)
         attention_probs = self.dropout(attention_probs)
@@ -172,10 +174,25 @@ class FasterMultiHeadAttention(nn.Module):
         # softmax(Q*K.T/sqrt(head_size))*V
         attention_scores = torch.matmul(query, key.transpose(-1, -2))
         attention_scores = attention_scores / math.sqrt(self.attention_head_size)
+
+        ##### begin{DEBUG} #####
+        # print(f'query shape: {query.shape}')
+        # print(f'key shape: {key.shape}')
+        # print(f'value shape: {value.shape}')
+        # print(f'attention_scores shape: {attention_scores.shape}')
+        ##### end{DEBUG} #####
+
         if attention_mask is not None:
+            ##### begin{DEBUG} #####
+            # print(f'attention_scores shape: {attention_scores.shape}')
+            # print(f'attention_mask shape: {attention_mask.shape}')
+            ##### end{DEBUG} #####
+
             # Write a very low value (indicating -inf) to the positions where mask == 0
-            attention_mask = attention_mask[:,:,:src_sequence_length,:trg_sequence_length] # Feels like a dirty fix...
+            if self.is_cross_attention:
+                attention_mask = attention_mask[:,:,:src_sequence_length,:trg_sequence_length] # Feels like a dirty fix...
             attention_scores.masked_fill_(attention_mask == 0, -1e9)
+
         attention_probs = nn.functional.softmax(attention_scores, dim=-1)
         attention_probs = self.attn_dropout(attention_probs)
         # Calculate the attention output
@@ -234,6 +251,9 @@ class EncoderBlock(nn.Module):
 
     def forward(self, x, attention_mask=None, output_attentions=False):
         # Self-attention
+        ##### begin{DEBUG} #####
+        # print('Encoder Att')
+        ##### end{DEBUG} #####
         attention_output, attention_probs = \
             self.attention(x, attention_mask=attention_mask, output_attentions=output_attentions)
         # Skip connection
@@ -270,11 +290,17 @@ class DecoderBlock(nn.Module):
 
     def forward(self, x, encoder_output_states, src_mask=None, trg_mask=None, output_attentions=False):
         # Self-attention
+        ##### begin{DEBUG} #####
+        # print('Decoder Att')
+        ##### end{DEBUG} #####
         attention_output, self_attention_probs = \
             self.self_attention(x, attention_mask=trg_mask, output_attentions=output_attentions)
         # Skip connection
         x = self.layernorm_1(x + attention_output)
         # Cross-attention
+        ##### begin{DEBUG} #####
+        # print('Decoder Cross Att')
+        ##### end{DEBUG} #####
         attention_output, cross_attention_probs = \
             self.cross_attention(x, attention_mask=src_mask, output_attentions=output_attentions, encoder_output_states=encoder_output_states)
         # Skip connection
@@ -402,7 +428,8 @@ class DPForNMT(nn.Module):
         # Create the transformer decoder module
         self.decoder = Decoder(config)
         # Initialize the weights
-        self.apply(self._init_weights)
+        #self.apply(self._init_weights)
+        self._reset_parameters()
 
     def forward(self, src, trg, encoder_mask, decoder_mask, output_attentions=False):
         # Calculate the encoder's output
@@ -417,13 +444,19 @@ class DPForNMT(nn.Module):
             decoder_output, decoder_self_attentions, decoder_cross_attentions = self.decoder(trg, encoder_output, src_mask=encoder_mask, trg_mask=decoder_mask, output_attentions=output_attentions)
             return (decoder_output, encoder_self_attentions, decoder_self_attentions, decoder_cross_attentions)
 
-    def _init_weights(self, module):
-        if isinstance(module, nn.Linear):
-            torch.nn.init.normal_(module.weight, mean=0.0, std=self.config["initializer_range"])
-            if module.bias is not None:
-                torch.nn.init.zeros_(module.bias)
-        elif isinstance(module, nn.Embedding):
-            torch.nn.init.normal_(module.weight, mean=0.0, std=self.config["initializer_range"])
-        elif isinstance(module, nn.LayerNorm):
-            module.bias.data.zero_()
-            module.weight.data.fill_(1.0)
+    # def _init_weights(self, module):
+    #     if isinstance(module, nn.Linear):
+    #         torch.nn.init.normal_(module.weight, mean=0.0, std=self.config["initializer_range"])
+    #         if module.bias is not None:
+    #             torch.nn.init.zeros_(module.bias)
+    #     elif isinstance(module, nn.Embedding):
+    #         torch.nn.init.normal_(module.weight, mean=0.0, std=self.config["initializer_range"])
+    #     elif isinstance(module, nn.LayerNorm):
+    #         module.bias.data.zero_()
+    #         module.weight.data.fill_(1.0)
+
+    def _reset_parameters(self):
+        """Initiate parameters in the transformer model."""
+        for p in self.parameters():
+            if p.dim() > 1:
+                xavier_uniform_(p)    

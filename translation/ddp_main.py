@@ -37,6 +37,7 @@ from tokenizers.pre_tokenizers import Whitespace
 from pathlib import Path
 
 import torchmetrics
+from nltk.translate.bleu_score import corpus_bleu, sentence_bleu
 
 """
 This training script can be run both on a single gpu in debug mode,
@@ -58,12 +59,20 @@ $ torchrun --nproc_per_node=8 --nnodes=2 --node_rank=1 --master_addr=123.456.123
 
 # single-core
 """
+# training based on steps
+python -i ddp_main.py --model_name=dpnmt --n_attn_heads=2\
+ --max_iters=50 --eval_interval=5 --eval_iters=10 --weight_decay=0 --model_root=.droot/debug_mode
+
+# training based on epochs
+python -i ddp_main.py --model_name=dpnmt --n_attn_heads=2\
+ --epochs=1 --weight_decay=0 --model_root=.droot/debug_mode
+
 python -i ddp_main.py --model_name=fnsnmt --alpha=1.2 --n_attn_heads=1\
  --max_iters=10 --eval_interval=5 --eval_iters=200 --weight_decay=0 --model_root=.droot/single-core 
 
 python -i ddp_main.py --model_name=fnsnmt --alpha=1.2\
  --num_encoder_layers=2 --num_decoder_layers=2\
- --max_iters=10 --eval_interval=5 --eval_iters=200 --weight_decay=0 --model_root=.droot/single-core  
+ --max_iters=10 --eval_interval=5 --eval_iters=10 --weight_decay=0 --model_root=.droot/single-core  
 """
 
 # multi-core
@@ -78,6 +87,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='translation/ddp_main.py training arguments')   
     # training settings 
     parser.add_argument('--train_with_ddp', default=True, type=bool, help='to use DDP or not')
+    #parser.add_argument('--epochs', default=None, type=(type(None) or int))
+    parser.add_argument('--epochs', default=None)
     parser.add_argument('--max_iters', default=10, type=int)
     parser.add_argument('--grad_clip', default=1.0, type=float)
     parser.add_argument('--decay_lr', default=True, type=bool)
@@ -106,7 +117,7 @@ if __name__ == '__main__':
     parser.add_argument('--wandb_log', default=False, type=bool)
     parser.add_argument("--wandb_project", default='translation-task', type=str)    
 
-    parser.add_argument('--instance', default=None, type=int)
+    parser.add_argument('--instance', default=None, type=(type(None) or int))
     # parser.add_argument('--seed', default=42, type=int)    
     # parser.add_argument('--debug', default=False, type=bool)  # for debuggin
     parser.add_argument('--lr_scheduler_type', default='constant', type=str)
@@ -208,7 +219,8 @@ if __name__ == '__main__':
     assert config["hidden_size"] % config["num_attention_heads"] == 0
     #assert config['intermediate_size'] == 4 * config['hidden_size']
 
-    attn_setup = {'qk_share': args.qk_share, 'qkv_bias': args.qkv_bias, 'instance': args.instance}
+    instance = int(args.instance) if args.instance is not None else args.instance
+    attn_setup = {'qk_share': args.qk_share, 'qkv_bias': args.qkv_bias, 'instance': instance}
     attn_setup['model_name'] = args.model_name
     attn_setup['dataset_name'] = args.dataset_name    
     if 'fns' in args.model_name:
@@ -216,28 +228,28 @@ if __name__ == '__main__':
         config['a'] = attn_setup['a'] = args.a
         config['bandwidth'] = attn_setup['bandwidth'] = args.bandwidth   
         if args.alpha < 2:            
-            config['d_intrinsic'] = int(config["hidden_size"] / config["num_attention_heads"])  # head_dim
+            config['d_intrinsic'] = int(config['hidden_size'] / config['num_attention_heads'])  # head_dim
             config['sphere_radius'] = ((np.pi**(1/config['d_intrinsic'])-1)/np.pi)                            
         else:
             config['sphere_radius'] = 1
 
         attn_setup['sphere_radius'] = config['sphere_radius']       
-        attn_setup['mask_val'] = np.pi * config['sphere_radius']   
+        attn_setup['mask_val'] = config['mask_val'] = np.pi * config['sphere_radius']   
     elif args.model_name == 'sinknmt':
         config['n_it'] = attn_setup['n_it'] = args.n_it
         config['bandwidth'] = attn_setup['bandwidth'] = args.bandwidth           
 
     # adamw optimizer
     learning_rate = args.max_lr  # max learning rate
-    max_iters = args.max_iters # total number of training iterations
+    epochs = args.epochs
+    # previously had max_iters HERE
     weight_decay = args.weight_decay
     beta1 = args.beta1
     beta2 = args.beta2
     grad_clip = args.grad_clip # clip gradients at this value, or disable if == 0.0
     # learning rate decay settings
     decay_lr = args.decay_lr # whether to decay the learning rate
-    warmup_iters = args.warmup_iters # how many steps to warm up for
-    lr_decay_iters = max_iters # should be ~= max_iters per Chinchilla
+    warmup_iters = args.warmup_iters # how many steps to warm up for    
     min_lr = args.min_lr # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
 
     # system
@@ -297,42 +309,7 @@ if __name__ == '__main__':
         model_root = njoin(DROOT, 'ddp_formers', model_root)
     else:
         model_root = args.model_root  
-    models_dir, out_dir = create_model_dir(model_root, **attn_setup)   
-
-    if master_process:
-        # makedir of out_dir
-        os.makedirs(out_dir, exist_ok=True)
-
-        # save config
-        with open(njoin(out_dir,"config.json"), "w") as ofile: 
-            json.dump(config, ofile)   
-        # save attn_setup
-        with open(njoin(out_dir,"attn_setup.json"), "w") as ofile: 
-            json.dump(attn_setup, ofile)                 
-        # save train settings
-        train_settings = pd.DataFrame(columns=["max_lr", "min_lr", "batch_size", "beta1", "beta2",
-                                               "max_iters", "weight_decay", "grad_clip", "decay_lr",
-                                               "lr_scheduler_type",
-                                               "eval_interval", "log_interval", "eval_iters", "eval_only", "always_save_checkpoint",                         
-                                               "warmup_iters",  "grad_accum_step"], index=range(1))
-        train_settings.iloc[0] = [args.max_lr, args.min_lr, args.train_bs, args.beta1, args.beta2,
-                                  args.max_iters, args.weight_decay, args.grad_clip, args.decay_lr,
-                                  args.lr_scheduler_type,
-                                  args.eval_interval, args.log_interval, args.eval_iters, args.eval_only, args.always_save_checkpoint,
-                                  args.warmup_iters, args.grad_accum_step
-                                  ]
-        train_settings.to_csv(njoin(out_dir, "train_setting.csv"))        
-
-
-        print('-'*25)
-        print(f'ddp = {ddp}')
-        if ddp and args.train_with_ddp:        
-            print(f'ddp_rank = {ddp_rank}')
-            print(f'ddp_local_rank = {ddp_local_rank}')
-        print(f'ddp_world_size = {ddp_world_size}')
-        print(f'device = {device}')
-        print(f'backend = {backend}')
-        print('-'*25 + '\n')    
+    models_dir, out_dir = create_model_dir(model_root, **attn_setup)    
 
     torch.manual_seed(1337 + seed_offset)
     if torch.cuda.is_available():
@@ -394,9 +371,10 @@ if __name__ == '__main__':
     #     labels = [label.ids for label in labels]
     #     return model_inputs, labels
 
-    if dataset == 'iwslt14': 
+    if 'iwslt' in dataset: 
+        year_dataset = '20' + dataset[dataset.find('iwslt') + 5:]
         src_language, trg_language = 'de', 'en'
-        dataset = load_dataset("ted_talks_iwslt", language_pair=(src_language, trg_language), year="2014", split="train")
+        dataset = load_dataset("ted_talks_iwslt", language_pair=(src_language, trg_language), year=year_dataset, split="train")
         tokenizer_src = get_or_build_tokenizer(config, dataset, src_language)
         tokenizer_trg = get_or_build_tokenizer(config, dataset, trg_language)
         # Split dataset
@@ -413,6 +391,9 @@ if __name__ == '__main__':
         config["src_pad_token_id"] = tokenizer_src.token_to_id("[PAD]")
         config["trg_vocab_size"] = tokenizer_trg.get_vocab_size()
         config["trg_pad_token_id"] = tokenizer_trg.token_to_id("[PAD]")
+
+        src_vocab_size = config["src_vocab_size"]
+        trg_vocab_size = config["trg_vocab_size"]
 
     # only for large datasets
     # def get_batch(split):
@@ -431,6 +412,54 @@ if __name__ == '__main__':
     #     else:
     #         x, y = x.to(device), y.to(device)
     #     return x, y
+
+    if epochs is None:
+        steps_per_epoch = None
+        max_iters = args.max_iters # total number of training iterations
+    else:    
+        epochs = int(epochs)
+        steps_per_epoch = len(trainset) // train_batch_size + 1
+        max_iters = epochs * steps_per_epoch
+        eval_interval = steps_per_epoch
+        log_interval = steps_per_epoch  # will need to change later
+    lr_decay_iters = max_iters # should be ~= max_iters per Chinchilla
+
+    if master_process:
+        # makedir of out_dir
+        os.makedirs(out_dir, exist_ok=True)
+
+        # save config
+        with open(njoin(out_dir,"config.json"), "w") as ofile: 
+            json.dump(config, ofile)   
+        # save attn_setup
+        with open(njoin(out_dir,"attn_setup.json"), "w") as ofile: 
+            json.dump(attn_setup, ofile)                 
+        # save train settings
+        train_settings = pd.DataFrame(columns=["max_lr", "min_lr", "batch_size", "beta1", "beta2",
+                                               "epochs", "steps_per_epoch",
+                                               "max_iters", "weight_decay", "grad_clip", "decay_lr",
+                                               "lr_scheduler_type",
+                                               "eval_interval", "log_interval", "eval_iters", "eval_only", "always_save_checkpoint",                         
+                                               "warmup_iters",  "grad_accum_step"], index=range(1))
+        train_settings.iloc[0] = [args.max_lr, args.min_lr, args.train_bs, args.beta1, args.beta2,
+                                  epochs, steps_per_epoch,
+                                  args.max_iters, args.weight_decay, args.grad_clip, args.decay_lr,
+                                  args.lr_scheduler_type,
+                                  args.eval_interval, args.log_interval, args.eval_iters, args.eval_only, args.always_save_checkpoint,
+                                  args.warmup_iters, args.grad_accum_step
+                                  ]
+        train_settings.to_csv(njoin(out_dir, "train_setting.csv"))        
+
+
+        print('-'*25)
+        print(f'ddp = {ddp}')
+        if ddp and args.train_with_ddp:        
+            print(f'ddp_rank = {ddp_rank}')
+            print(f'ddp_local_rank = {ddp_local_rank}')
+        print(f'ddp_world_size = {ddp_world_size}')
+        print(f'device = {device}')
+        print(f'backend = {backend}')
+        print('-'*25 + '\n')           
 
     def causal_mask(size):
         mask = torch.triu(torch.ones((1, size, size)), diagonal=1).type(torch.int)
@@ -459,13 +488,16 @@ if __name__ == '__main__':
         encoder_mask = (pre_encoder_mask.unsqueeze(-1)@pre_encoder_mask.unsqueeze(1)).view(batch_size, 1, config["max_length"], config["max_length"]) # (B,1,N,N)
         decoder_mask = torch.stack([data_points[i]['decoder_mask'] for i in range(batch_size)]) # (B,1,N,N)
 
+        tgt_text = [data_points[i]['tgt_text'] for i in range(batch_size)]  # added for BLEU later        
+
         if device_type == 'cuda':
             # pin arrays x,y, which allows us to move them to GPU asynchronously (non_blocking=True)
             x, y = x.pin_memory().to(device, non_blocking=True), y.pin_memory().to(device, non_blocking=True)
             encoder_mask, decoder_mask = encoder_mask.pin_memory().to(device, non_blocking=True), decoder_mask.pin_memory().to(device, non_blocking=True)
         else:
             x, y, encoder_mask, decoder_mask = x.to(device), y.to(device), encoder_mask.to(device), decoder_mask.to(device)
-        return x, y, encoder_mask, decoder_mask    
+        #return x, y, encoder_mask, decoder_mask    
+        return x, y, encoder_mask, decoder_mask, tgt_text
 
     # init these up here, can override if init_from='resume' (i.e. from a checkpoint)
     iter_num = 0
@@ -609,15 +641,27 @@ if __name__ == '__main__':
         else:
             encoder_output, _ = model.encoder(source, source_mask)
         # Initialize the decoder input with the sos token
-        decoder_input = torch.empty(1, 1).fill_(sos_idx).type_as(source).to(device)
+        #trg_len = max_len
+        decoder_input = torch.empty(1, 1).fill_(sos_idx).type_as(source).to(device)            
         while True:
-            if decoder_input.size(1) == max_len:
+            trg_len = decoder_input.size(1)
+            if trg_len == max_len:
                 break
 
-            # build causal mask for target 
-            trg_mask = (torch.triu(torch.ones((1, 1, decoder_input.size(1), decoder_input.size(1))), diagonal=1).type(torch.int) == 0) # (1,1,N,N)
-            # decoder_mask = torch.stack([(source_mask[i,0,0,:] != 0).unsqueeze(0).int() & causal_mask(config["max_length"]) for i in range(source_mask.shape[0])]) # (B,1,N,N)
+            # build causal mask for target --> (B,1,N,N)            
+            # TYPE BEFORE?
+            # trg_mask = (torch.triu(torch.ones((1, 1, decoder_input.size(1), decoder_input.size(1))), diagonal=1).type(torch.int) == 0).expand(
+            #     bs, 1, 1, 1
+            # )                    
+            # Decoder self-attention mask
+            trg_mask = torch.tril(torch.ones((trg_len, trg_len))).expand(
+                1, 1, trg_len, trg_len
+            )
             trg_mask = trg_mask.type_as(source_mask).to(device)
+
+            # print(f'trg_mask shape: {trg_mask.shape}')
+            # print(trg_mask)
+            # decoder_mask = torch.stack([(source_mask[i,0,0,:] != 0).unsqueeze(0).int() & causal_mask(config["max_length"]) for i in range(source_mask.shape[0])]) # (B,1,N,N)            
 
             ##### CHANGES HERE #####
             # calculate output
@@ -626,7 +670,9 @@ if __name__ == '__main__':
             else:
                 out, _, _ = model.decoder(decoder_input, encoder_output, src_mask=source_mask, trg_mask=trg_mask)
             # get next token
-            _, next_word = torch.max(out[0,-1,:], dim=-1)
+            #_, next_word = torch.max(out[0,-1,:], dim=-1)
+            #_, next_word = torch.max(out[:,-1,:], dim=-1)
+            next_word = out[0,-1,:].argmax(-1)
             decoder_input = torch.cat(
                 [decoder_input, torch.empty(1, 1).type_as(source).fill_(next_word.item()).to(device)], dim=1
             )
@@ -644,26 +690,44 @@ if __name__ == '__main__':
         for split in ['train', 'val']:
             losses = torch.zeros(eval_iters)
             predicted = []
-            expected = []
+            #expected = []
             for k in range(eval_iters):
-                X, Y, encoder_mask, decoder_mask = get_batch(split)
+                #X, Y, encoder_mask, decoder_mask = get_batch(split)
+                X, Y, encoder_mask, decoder_mask, tgt_text = get_batch(split)
                 with ctx:
                     ##### CHANGES HERE #####
                     logits, _, _, _ = model(X, Y, encoder_mask, decoder_mask)
-                    loss = loss_fn(logits, F.one_hot(Y, num_classes=config['trg_vocab_size']).float())                
+                    #loss = loss_fn(logits, F.one_hot(Y, num_classes=config['trg_vocab_size']).type_as(logits))                
+                    #loss = loss_fn(logits, F.one_hot(Y, num_classes=config['trg_vocab_size']).type_as(logits))
+                    loss = loss_fn(logits.reshape(-1,trg_vocab_size), F.one_hot(Y, num_classes=trg_vocab_size).type_as(logits).reshape(-1,trg_vocab_size))
                     if split == 'val':
                         # Generate sentence
-                        model_out = greedy_decode(model, X, encoder_mask, tokenizer_trg, config["max_length"], device) 
-                        model_out_text = tokenizer_trg.decode(model_out.detach().cpu().numpy())
+                        model_outs = []
+                        bs = X.shape[0]
+                        for batch_idx in range(bs):
+                            model_out = greedy_decode(model, X[batch_idx,None], encoder_mask[batch_idx,None], tokenizer_trg, config["max_length"], device) 
+                            model_out_text = tokenizer_trg.decode(model_out.detach().cpu().numpy())
+                            model_outs.append(model_out)
                         predicted.append(model_out_text)
-                        expected.append(tokenizer_trg.decode(Y.squeeze().tolist())) # Probably better to just get target text
+                        model_out = model_out.detach().cpu().numpy()
+                        for batch_idx in range(model_out.shape[0]):
+                            model_out_text = tokenizer_trg.decode(model_out)
+                            predicted.append(model_out_text)                                                
+                        #expected.append(tokenizer_trg.decode(Y.squeeze().tolist())) # Probably better to just get target text
                 losses[k] = loss.item()
             out_loss[split] = losses.mean()
             if split == 'val':
                 # Compute the BLEU metric
-                metric = torchmetrics.BLEUScore()
-                bleu = metric(predicted, expected)
-                out_bleu[split] = bleu
+                # # option 1             
+                metric = torchmetrics.text.BLEUScore()
+                bleu_score = metric(predicted, [tgt_text])
+                # option 2
+                # hyp = [tgt_text[idx].split(' ') for idx in range(len(tgt_text))]
+                # ref = [[tgt_text[idx].split(' ')] for idx in range(len(tgt_text))]  # reference translation directly from dataset                   
+                # bleu_score = corpus_bleu(ref, hyp)  
+                # option 3
+                # bleu_score = sentence_bleu(ref, hyp)
+                out_bleu[split] = bleu_score
         model.train()
         return out_loss, out_bleu
 
@@ -687,7 +751,7 @@ if __name__ == '__main__':
         wandb.init(project=wandb_project, name=wandb_run_name, config=config)
     
     # training loop
-    X, Y, encoder_mask, decoder_mask = get_batch('train') # fetch the very first batch
+    X, Y, encoder_mask, decoder_mask, _ = get_batch('train') # fetch the very first batch
     t0 = time.time()
     local_iter_num = 0 # number of iterations in the lifetime of this process
     raw_model = model.module if ddp else model # unwrap DDP container if needed
@@ -754,11 +818,11 @@ if __name__ == '__main__':
                 ##### CHANGES HERE #####
                 logits, _, _, _ = model(X, Y, encoder_mask, decoder_mask)
                 # logits (bs, seq_len, tgt_vocab_size)
-                loss = loss_fn(logits, torch.nn.functional.one_hot(Y, num_classes=config['trg_vocab_size']).float())  # logits.argmax(-1)                
+                loss = loss_fn(logits.reshape(-1,trg_vocab_size), torch.nn.functional.one_hot(Y, num_classes=trg_vocab_size).type_as(logits).reshape(-1,trg_vocab_size))  # logits.argmax(-1)                
                 # loss = loss_fn(logits.view(-1, config["trg_vocab_size"]), Y.view(-1)) 
                 loss = loss / gradient_accumulation_steps # scale the loss to account for gradient accumulation
             # immediately async prefetch next batch while model is doing the forward pass on the GPU
-            X, Y, encoder_mask, decoder_mask = get_batch('train')
+            X, Y, encoder_mask, decoder_mask, _ = get_batch('train')
             # backward pass, with gradient scaling if training in fp16
             scaler.scale(loss).backward()
         # clip the gradient

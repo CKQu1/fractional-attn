@@ -41,11 +41,18 @@ class BilingualDataset(Dataset):
         dec_num_padding_tokens = self.seq_len - len(dec_input_tokens) - 1
 
         # Make sure the number of padding tokens is not negative. If it is, the sentence is too long
-        if enc_num_padding_tokens < 0 or dec_num_padding_tokens < 0:
-            # Truncate sentence
-            trunc_length = max(-enc_num_padding_tokens, -dec_num_padding_tokens)
-            enc_input_tokens = enc_input_tokens[:-trunc_length]
-            dec_input_tokens = dec_input_tokens[:-trunc_length]
+        # if enc_num_padding_tokens < 0 or dec_num_padding_tokens < 0:
+        #     # Truncate sentence
+        #     trunc_length = max(-enc_num_padding_tokens, -dec_num_padding_tokens)
+        #     enc_input_tokens = enc_input_tokens[:-trunc_length]
+        #     dec_input_tokens = dec_input_tokens[:-trunc_length]
+
+        ##### begin{debug} #####
+        if enc_num_padding_tokens < 0:            
+            enc_input_tokens = enc_input_tokens[:enc_num_padding_tokens]
+        if dec_num_padding_tokens < 0:         
+            dec_input_tokens = dec_input_tokens[:dec_num_padding_tokens]       
+        ##### end{debug} #####
 
         # Add <s> and </s> token
         encoder_input = torch.cat(
@@ -77,6 +84,15 @@ class BilingualDataset(Dataset):
             ],
             dim=0,
         )
+
+        ##### begin{debug} #####
+        # if encoder_input.size(0) != self.seq_len:
+        #     print(f'encoder_input size: {encoder_input.shape}')        
+        # if decoder_input.size(0) != self.seq_len:
+        #     print(f'decoder_input size: {decoder_input.shape}')
+        # if label.size(0) != self.seq_len:
+        #     print(f'label size: {label.shape}')            
+        ##### end{debug} #####
 
         # Double check the size of the tensors to make sure they are all seq_len long
         assert encoder_input.size(0) == self.seq_len

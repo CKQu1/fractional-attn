@@ -90,9 +90,10 @@ if __name__ == '__main__':
                 # kwargss = [{'model_name':'fnsnmt', 'alpha': 1.2, 'a': 0}, {'model_name':'fnsnmt', 'alpha': 2, 'a': 0}, 
                 #            {'model_name':'opfnsnmt', 'alpha': 1.2, 'a': 0}, {'model_name':'opfnsnmt', 'alpha': 2, 'a': 0},                                                     
                 #            {'model_name':'dpnmt'}] 
-                kwargss = [{'model_name':'dpnmt'}]
+                kwargss = [{'model_name':'dpnmt'}] 
+                           #{'model_name':'fnsnmt','alpha': 1.2,'a':0,'bandwidth':0.5},{'model_name':'fnsnmt''alpha': 2,'a':0,'bandwidth':0.5}]
 
-                epochs = 35
+                epochs = 20
                 common_kwargs = {'instance':                    instance,
                                  'num_encoder_layers':          2,
                                  'num_decoder_layers':          2,
@@ -108,12 +109,7 @@ if __name__ == '__main__':
                                  }  
 
                 if epochs is not None:       
-                    if dataset_name == 'iwslt14':             
-                        train_data_size = 2377
-                    steps_per_epoch = train_data_size // common_kwargs['train_bs'] + 1  
-                    common_kwargs['max_iters'] = steps_per_epoch * epochs
-                    common_kwargs['eval_interval'] = steps_per_epoch
-                    common_kwargs['log_interval'] = steps_per_epoch  # for mfu
+                    common_kwargs['epochs'] = epochs
                     
                 if num_proc > 1:
                     common_kwargs['grad_accum_step'] = num_proc

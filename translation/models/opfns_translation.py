@@ -38,6 +38,7 @@ class OPFNSAttentionHead(nn.Module):
         self.alpha, self.bandwidth = alpha, bandwidth
         self.a = a
         self.sphere_radius = sphere_radius
+        self.mask_val = math.pi * sphere_radius
         
         self.is_cross_attention = is_cross_attention
 
@@ -53,28 +54,34 @@ class OPFNSAttentionHead(nn.Module):
             value = F.normalize(self.value(x), p=2, dim=-1)                
 
         alpha, bandwidth = self.alpha, self.bandwidth
+        a = self.a
         sphere_radius = self.sphere_radius
+        mask_val = self.mask_val
         d_intrinsic = self.attention_head_size
 
         # geodesic distance on sphere
         eps = 1e-7  # for limiting the divergence from acos
         g_dist = torch.acos(torch.clamp(query @ key.transpose(-2, -1), -1+eps, 1-eps)) * sphere_radius
         
+        if attention_mask is not None:
+            if self.is_cross_attention:
+                attention_mask = attention_mask[:,:,:query.size(1),:key.size(1)] # Feels like a dirty fix...
+            g_dist = g_dist.masked_fill(attention_mask==0, mask_val)        
+
         # Calculate the attention scores
         if alpha < 2:
             attn_score = (1 + g_dist/bandwidth**0.5)**(-d_intrinsic-alpha)
         else:
             attn_score = torch.exp((-g_dist/bandwidth**0.5)**(alpha/(alpha-1)))
 
-        attention_mask = attention_mask[:,:,:query.size(1),:key.size(1)] # Feels like a dirty fix...
         if self.a == 0:            
-            attn_score = attn_score.masked_fill(attention_mask==0, -1e9) # Mask
+            #attn_score = attn_score.masked_fill(attention_mask==0, -1e9) # Mask
             attention_probs = F.normalize(attn_score,p=1,dim=3)  # can do this as the attn weights are always positive
         else:
             D_inv_row = torch.diag_embed(attn_score.sum(-1)**(-a))  # inverse of degree matrix of attn_score
             D_inv_col = torch.diag_embed(attn_score.sum(-2)**(-a))  # inverse of degree matrix of attn_score
             K_tilde = D_inv_row @ attn_score @ D_inv_col            
-            K_tilde = K_tilde.masked_fill(attention_mask==0, -1e9) # Mask
+            #K_tilde = K_tilde.masked_fill(attention_mask==0, -1e9) # Mask
             attention_probs = F.normalize(K_tilde,p=1,dim=3)  # can do this as the attn weights are always positive
         attention_probs = self.attn_dropout(attention_probs)
 
@@ -182,6 +189,7 @@ class FasterOPFNSMultiHeadAttention(nn.Module):
         self.bandwidth = config['bandwidth']
         self.a = config['a']
         self.sphere_radius = config['sphere_radius']
+        self.mask_val = config['mask_val']
 
     def forward(self, x, attention_mask=None, output_attentions=False, encoder_output_states=None):
 
@@ -213,7 +221,9 @@ class FasterOPFNSMultiHeadAttention(nn.Module):
         num_attention_heads, attention_head_size = self.num_attention_heads, self.attention_head_size
 
         alpha, bandwidth = self.alpha, self.bandwidth
+        a = self.a
         sphere_radius = self.sphere_radius
+        mask_val = self.mask_val
         d_intrinsic = attention_head_size
 
         query = F.normalize(query.view(batch_size, src_sequence_length, num_attention_heads, attention_head_size).transpose(1, 2), p=2, dim=-1)
@@ -224,21 +234,25 @@ class FasterOPFNSMultiHeadAttention(nn.Module):
         eps = 1e-7  # for limiting the divergence from acos
         g_dist = torch.acos(torch.clamp(query @ key.transpose(-2, -1), -1+eps, 1-eps)) * sphere_radius
         
+        if attention_mask is not None:
+            if self.is_cross_attention:
+                attention_mask = attention_mask[:,:,:src_sequence_length,:trg_sequence_length] # Feels like a dirty fix...
+            g_dist = g_dist.masked_fill(attention_mask==0, mask_val)        
+
         # Calculate the attention scores
         if alpha < 2:
             attn_score = (1 + g_dist/bandwidth**0.5)**(-d_intrinsic-alpha)
         else:
             attn_score = torch.exp((-g_dist/bandwidth**0.5)**(alpha/(alpha-1)))
 
-        attention_mask = attention_mask[:,:,:src_sequence_length,:trg_sequence_length] # Feels like a dirty fix...
         if self.a == 0:
-            attn_score = attn_score.masked_fill(attention_mask.expand(-1,self.num_attention_heads,-1,-1)==0, -1e9) # Mask
+            #attn_score = attn_score.masked_fill(attention_mask.expand(-1,self.num_attention_heads,-1,-1)==0, -1e9) # Mask
             attention_probs = F.normalize(attn_score,p=1,dim=3)  # can do this as the attn weights are always positive
         else:
-            D_inv_row = torch.diag_embed(attn_score.sum(-1)**(-1))  # inverse of degree matrix of attn_score
-            D_inv_col = torch.diag_embed(attn_score.sum(-2)**(-1))  # inverse of degree matrix of attn_score
+            D_inv_row = torch.diag_embed(attn_score.sum(-1)**(-a))  # inverse of degree matrix of attn_score
+            D_inv_col = torch.diag_embed(attn_score.sum(-2)**(-a))  # inverse of degree matrix of attn_score
             K_tilde = D_inv_row @ attn_score @ D_inv_col        
-            K_tilde = K_tilde.masked_fill(attention_mask.expand(-1,self.num_attention_heads,-1,-1)==0, -1e9) # Mask
+            #K_tilde = K_tilde.masked_fill(attention_mask.expand(-1,self.num_attention_heads,-1,-1)==0, -1e9) # Mask
             attention_probs = F.normalize(K_tilde,p=1,dim=3)  # can do this as the attn weights are always positive
         attention_probs = self.attn_dropout(attention_probs)
 

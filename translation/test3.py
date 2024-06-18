@@ -28,16 +28,16 @@ config = {
     "bandwidth": 1,
     "sphere_radius": 1,
     "hidden_size": 128,
-    "num_encoder_layers": 1,
-    "num_decoder_layers": 1,
-    "num_attention_heads": 1,
+    "num_encoder_layers": 2,
+    "num_decoder_layers": 2,
+    "num_attention_heads": 2,
     "intermediate_size": 128,
     "hidden_dropout_prob": 0,
     "encoder_dropout_prob": 0,
     "decoder_dropout_prob": 0,
     "attention_probs_dropout_prob": 0,
     "initializer_range": 0.1,
-    "qkv_bias": True,
+    "qkv_bias": False,
     "use_faster_attention": True,
     # "src_vocab_size": tokenizer_src.vocab_size,
     # "src_pad_token_id": tokenizer_src.pad_token_id,
@@ -290,6 +290,28 @@ with ctx:
         expected = tgt_text
         #model_out = decoder_input.squeeze(0)
         
+# full decoder forward pass
+batch_idx = 0
+x = torch.empty(1, 1).fill_(sos_idx).type_as(source).to(device)  # decoder_input
+trg_len = x.shape[1]
+trg_mask = torch.tril(torch.ones((trg_len, trg_len))).expand(1, 1, trg_len, trg_len)
+
+position_ids = torch.arange(0, x.shape[-1]).to(x.device)
+position_embeddings = model.decoder.positional_embedding(position_ids)
+token_embeddings = model.decoder.token_embedding(x)
+# Dropout 
+# x = self.dropout(position_embeddings + token_embeddings)  # remove dropout for evaluation
+x = model.decoder.dropout(position_embeddings + token_embeddings)
+# Calculate the transformer block's output for each block
+all_self_attentions = []
+all_cross_attentions = []
+for block in model.decoder.blocks:
+    x, _, _ = block(x, encoder_output[batch_idx,None], src_mask=source_mask[batch_idx,None], trg_mask=trg_mask, output_attentions=False)              
+# Linear layer
+x = model.decoder.fc(x)
+# Softmax
+x_prob = nn.Softmax(dim=-1)(x)
+
 
 # one step
 losses = torch.zeros(1)

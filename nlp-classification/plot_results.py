@@ -186,7 +186,7 @@ def plot_ensembles(model_root_dir, datasets=['imdb'],
                 axs[0,0].legend(loc='upper left', #bbox_to_anchor=(0.5, 1.05),
                                 ncol=1, frameon=False)    
 
-                axs[-1,kdx].set_ylabel(NAMES_DICT[dataset])
+                #axs[-1,kdx].set_ylabel(NAMES_DICT[dataset])
 
                 # ----- Messages -----
                 best = max(final_metrics[metric]) if 'acc' in metric or 'f1' in metric else min(final_metrics[metric])

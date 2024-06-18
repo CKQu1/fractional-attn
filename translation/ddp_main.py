@@ -70,12 +70,12 @@ python -i ddp_main.py --model_name=sinknmt --n_attn_heads=2\
 python -i ddp_main.py --model_name=dpnmt --n_attn_heads=2\
  --epochs=1 --weight_decay=0 --model_root=.droot/debug_mode
 
-python -i ddp_main.py --model_name=fnsnmt --alpha=1.2 --n_attn_heads=1\
- --max_iters=10 --eval_interval=5 --eval_iters=200 --weight_decay=0 --model_root=.droot/single-core 
+python -i ddp_main.py --model_name=fnsnmt --alpha=1.2 --n_attn_heads=2\
+ --max_iters=10 --eval_interval=5 --eval_iters=10 --weight_decay=0 --model_root=.droot/debug_mode 
 
 python -i ddp_main.py --model_name=fnsnmt --alpha=1.2\
  --num_encoder_layers=2 --num_decoder_layers=2\
- --max_iters=10 --eval_interval=5 --eval_iters=10 --weight_decay=0 --model_root=.droot/single-core  
+ --max_iters=10 --eval_interval=5 --eval_iters=10 --weight_decay=0 --model_root=.droot/debug_mode
 """
 
 # multi-core
@@ -155,7 +155,7 @@ if __name__ == '__main__':
     parser.add_argument('--decoder_dropout_prob', default=0.0, type=float)
     parser.add_argument('--attention_probs_dropout_prob', default=0.0, type=float)
     parser.add_argument('--initializer_range', default=0.02, type=float)
-    parser.add_argument('--qkv_bias', default=True, type=bool)
+    parser.add_argument('--qkv_bias', default=False, type=bool)
     parser.add_argument('--use_faster_attn', default=True, type=bool)
     parser.add_argument('--src_vocab_size', default=1000, type=int)  
     parser.add_argument('--src_pad_token_id', default=0, type=int)  
@@ -342,37 +342,7 @@ if __name__ == '__main__':
             tokenizer_path = Path(config['tokenizer_path'].format(lang))
             assert Path.exists(tokenizer_path), "Tokenizer path does not exist"
             tokenizer = Tokenizer.from_file(str(tokenizer_path))
-        return tokenizer
-    
-    # def preprocess_function(examples, tokenizer, language, max_length):
-    #     inputs = [example[language] for example in examples["translation"]]
-    #     pad_id = tokenizer.token_to_id("[PAD]")
-    #     encodings = tokenizer.encode_batch(inputs)
-    #     for encoding in encodings:
-    #         encoding.truncate(max_length=max_length)
-    #         encoding.pad(length=max_length, pad_id=pad_id, pad_token="[PAD]")
-    #     return [encoding.ids for encoding in encodings]
-    
-    # def preprocess_function(examples, tokenizer_src, src_language, tokenizer_trg, trg_language, max_length):
-    #     inputs = [example[src_language] for example in examples["translation"]]
-    #     targets = [example[trg_language] for example in examples["translation"]]
-        
-    #     model_inputs = tokenizer_src(inputs, text_target=targets, max_length=128, truncation=True)
-    #     return model_inputs
-        
-        
-    #     pad_id = tokenizer_src.token_to_id("[PAD]")
-    #     model_inputs = tokenizer_src.encode_batch(inputs)
-    #     for model_input in model_inputs:
-    #         model_input.truncate(max_length=max_length)
-    #         model_input.pad(length=max_length, pad_id=pad_id, pad_token="[PAD]")
-    #     model_inputs = [model_input.ids for model_input in model_inputs]
-    #     labels = tokenizer_trg.encode_batch(targets)
-    #     for label in labels:
-    #         label.truncate(max_length=max_length)
-    #         label.pad(length=max_length, pad_id=pad_id, pad_token="[PAD]")
-    #     labels = [label.ids for label in labels]
-    #     return model_inputs, labels
+        return tokenizer    
 
     if 'iwslt' in dataset: 
         year_dataset = '20' + dataset[dataset.find('iwslt') + 5:]
@@ -397,24 +367,6 @@ if __name__ == '__main__':
 
         src_vocab_size = config["src_vocab_size"]
         trg_vocab_size = config["trg_vocab_size"]
-
-    # only for large datasets
-    # def get_batch(split):
-    #     # We recreate np.memmap every batch to avoid a memory leak, as per
-    #     # https://stackoverflow.com/questions/45132940/numpy-memmap-memory-usage-want-to-iterate-once/61472122#61472122
-    #     if split == 'train':
-    #         data = np.memmap(os.path.join(data_dir, 'train.bin'), dtype=np.uint16, mode='r')
-    #     else:
-    #         data = np.memmap(os.path.join(data_dir, 'val.bin'), dtype=np.uint16, mode='r')
-    #     ix = torch.randint(len(data) - block_size, (batch_size,))
-    #     x = torch.stack([torch.from_numpy((data[i:i+block_size]).astype(np.int64)) for i in ix])
-    #     y = torch.stack([torch.from_numpy((data[i+1:i+1+block_size]).astype(np.int64)) for i in ix])
-    #     if device_type == 'cuda':
-    #         # pin arrays x,y, which allows us to move them to GPU asynchronously (non_blocking=True)
-    #         x, y = x.pin_memory().to(device, non_blocking=True), y.pin_memory().to(device, non_blocking=True)
-    #     else:
-    #         x, y = x.to(device), y.to(device)
-    #     return x, y
 
     if epochs is None:
         steps_per_epoch = None
@@ -591,11 +543,8 @@ if __name__ == '__main__':
     # else:
     #     scaler = torch.GradScaler('cpu', enabled=(dtype == 'float16'))
 
-    ##### CHANGES HERE #####
     # loss function    
-    #loss_fn = nn.CrossEntropyLoss(ignore_index=config["src_pad_token_id"])
-    loss_fn = nn.CrossEntropyLoss()
-
+    loss_fn = nn.CrossEntropyLoss(ignore_index=config["src_pad_token_id"])
     # optimizer
     #optimizer = model.configure_optimizers(weight_decay, learning_rate, (beta1, beta2), device_type)    
     optimizer = AdamW(model.parameters(), lr=learning_rate, betas=(beta1,beta2), weight_decay=args.weight_decay)
@@ -617,24 +566,10 @@ if __name__ == '__main__':
             model = DDP(model, device_ids=[ddp_local_rank])
         else:
             model = DDP(model, device_ids=[], output_device=[])
-        #model = DDP(model, device_ids=[ddp_local_rank], output_device=ddp_local_rank)    
-
-    # ----- DEBUG -----
-    # if master_process:
-    #     print('-'*20)
-    #     print(f'model type: {type(model)}')   
-    #     print(model)
-    #     print(dir(model)) 
-    #     print(model.encoder)    
-    #     print('-'*20)
-    # quit()
-    
+        #model = DDP(model, device_ids=[ddp_local_rank], output_device=ddp_local_rank)        
 
     # helps estimate an arbitrarily accurate loss over either split using many batches
     def greedy_decode(model, source, source_mask, tokenizer_trg, max_len, device):        
-        # sos_idx = tokenizer_trg.bos_token_id
-        # eos_idx = tokenizer_trg.eos_token_id
-        ##### CHANGES HERE #####
         sos_idx = tokenizer_trg.get_vocab()['[SOS]']
         eos_idx = tokenizer_trg.get_vocab()['[EOS]']
 
@@ -644,40 +579,26 @@ if __name__ == '__main__':
         else:
             encoder_output, _ = model.encoder(source, source_mask)
         # Initialize the decoder input with the sos token
-        #trg_len = max_len
         decoder_input = torch.empty(1, 1).fill_(sos_idx).type_as(source).to(device)            
         while True:
             trg_len = decoder_input.size(1)
             if trg_len == max_len:
                 break
-
-            # build causal mask for target --> (B,1,N,N)            
-            # TYPE BEFORE?
-            # trg_mask = (torch.triu(torch.ones((1, 1, decoder_input.size(1), decoder_input.size(1))), diagonal=1).type(torch.int) == 0).expand(
-            #     bs, 1, 1, 1
-            # )                    
+               
             # Decoder self-attention mask
             trg_mask = torch.tril(torch.ones((trg_len, trg_len))).expand(1, 1, trg_len, trg_len)
             # trg_mask = trg_mask.type_as(source_mask).to(device)
 
-            # print(f'trg_mask shape: {trg_mask.shape}')
-            # print(trg_mask)
-            # decoder_mask = torch.stack([(source_mask[i,0,0,:] != 0).unsqueeze(0).int() & causal_mask(config["max_length"]) for i in range(source_mask.shape[0])]) # (B,1,N,N)            
-
-            ##### CHANGES HERE #####
             # calculate output
             if ddp:
                 out, _, _ = model.module.decoder(decoder_input, encoder_output, src_mask=source_mask, trg_mask=trg_mask)
             else:
                 out, _, _ = model.decoder(decoder_input, encoder_output, src_mask=source_mask, trg_mask=trg_mask)
             # get next token
-            #_, next_word = torch.max(out[0,-1,:], dim=-1)
-            #_, next_word = torch.max(out[:,-1,:], dim=-1)
             next_word = out[0,-1,:].argmax(-1)
             decoder_input = torch.cat(
                 [decoder_input, torch.empty(1, 1).type_as(source).fill_(next_word.item()).to(device)], dim=1
             )
-
             if next_word == eos_idx:
                 break
 
@@ -695,12 +616,9 @@ if __name__ == '__main__':
             for k in range(eval_iters):
                 #X, Y, encoder_mask, decoder_mask = get_batch(split)
                 X, Y, encoder_mask, decoder_mask, tgt_text = get_batch(split)
-                with ctx:
-                    ##### CHANGES HERE #####
+                with ctx:                    
                     logits, _, _, _ = model(X, Y, encoder_mask, decoder_mask)
-                    #loss = loss_fn(logits, F.one_hot(Y, num_classes=config['trg_vocab_size']).type_as(logits))                
-                    #loss = loss_fn(logits, F.one_hot(Y, num_classes=config['trg_vocab_size']).type_as(logits))
-                    loss = loss_fn(logits.reshape(-1,trg_vocab_size), F.one_hot(Y, num_classes=trg_vocab_size).type_as(logits).reshape(-1,trg_vocab_size))
+                    loss = loss_fn(logits.view(-1, trg_vocab_size), Y.view(-1)) 
                     if split == 'val':
                         # Generate sentence
                         model_outs = []
@@ -749,8 +667,8 @@ if __name__ == '__main__':
     # logging
     if wandb_log and master_process:
         import wandb  # NOT IN CONTAINER
-        wandb.init(project=wandb_project, name=wandb_run_name, config=config)
-    
+        wandb.init(project=wandb_project, name=wandb_run_name, config=config)    
+
     # training loop
     X, Y, encoder_mask, decoder_mask, _ = get_batch('train') # fetch the very first batch
     t0 = time.time()
@@ -819,8 +737,7 @@ if __name__ == '__main__':
                 ##### CHANGES HERE #####
                 logits, _, _, _ = model(X, Y, encoder_mask, decoder_mask)
                 # logits (bs, seq_len, tgt_vocab_size)
-                loss = loss_fn(logits.reshape(-1,trg_vocab_size), torch.nn.functional.one_hot(Y, num_classes=trg_vocab_size).type_as(logits).reshape(-1,trg_vocab_size))  # logits.argmax(-1)                
-                # loss = loss_fn(logits.view(-1, config["trg_vocab_size"]), Y.view(-1)) 
+                loss = loss_fn(logits.view(-1, trg_vocab_size), Y.view(-1)) 
                 loss = loss / gradient_accumulation_steps # scale the loss to account for gradient accumulation
             # immediately async prefetch next batch while model is doing the forward pass on the GPU
             X, Y, encoder_mask, decoder_mask, _ = get_batch('train')
@@ -863,9 +780,4 @@ if __name__ == '__main__':
             break
 
     if ddp:
-        destroy_process_group()
-        
-        
-# Tokenizer - which tokenizers, import tokenizers, preprocess data in datautils
-# Train - WHat is the task? How does it know when to finish generating? 
-# BLEU - correct implementation of BLEU score? 
+        destroy_process_group()        

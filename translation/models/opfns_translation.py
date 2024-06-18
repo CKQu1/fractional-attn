@@ -3,6 +3,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 from torch.nn.utils.parametrizations import orthogonal
+from torch.nn.init import xavier_uniform_
 
 
 # https://github.com/tintn/vision-transformer-from-scratch/blob/main/vit.py
@@ -497,7 +498,8 @@ class OPFNSForNMT(nn.Module):
         # Create the transformer decoder module
         self.decoder = OPFNSDecoder(config)
         # Initialize the weights
-        self.apply(self._init_weights)
+        #self.apply(self._init_weights)
+        self._reset_parameters()
 
     def forward(self, src, trg, src_mask, trg_mask, output_attentions=False):
         # Calculate the encoder's output
@@ -519,13 +521,19 @@ class OPFNSForNMT(nn.Module):
 
             return (decoder_output, encoder_self_attentions, decoder_self_attentions, decoder_cross_attentions)
 
-    def _init_weights(self, module):
-        if isinstance(module, nn.Linear):
-            torch.nn.init.normal_(module.weight, mean=0.0, std=self.config["initializer_range"])
-            if module.bias is not None:
-                torch.nn.init.zeros_(module.bias)
-        elif isinstance(module, nn.Embedding):
-            torch.nn.init.normal_(module.weight, mean=0.0, std=self.config["initializer_range"])
-        elif isinstance(module, nn.LayerNorm):
-            module.bias.data.zero_()
-            module.weight.data.fill_(1.0)
+    # def _init_weights(self, module):
+    #     if isinstance(module, nn.Linear):
+    #         torch.nn.init.normal_(module.weight, mean=0.0, std=self.config["initializer_range"])
+    #         if module.bias is not None:
+    #             torch.nn.init.zeros_(module.bias)
+    #     elif isinstance(module, nn.Embedding):
+    #         torch.nn.init.normal_(module.weight, mean=0.0, std=self.config["initializer_range"])
+    #     elif isinstance(module, nn.LayerNorm):
+    #         module.bias.data.zero_()
+    #         module.weight.data.fill_(1.0)
+
+    def _reset_parameters(self):
+        """Initiate parameters in the transformer model."""
+        for p in self.parameters():
+            if p.dim() > 1:
+                xavier_uniform_(p)        

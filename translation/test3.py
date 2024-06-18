@@ -1,3 +1,4 @@
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -28,8 +29,8 @@ config = {
     "bandwidth": 1,
     "sphere_radius": 1,
     "hidden_size": 128,
-    "num_encoder_layers": 2,
-    "num_decoder_layers": 2,
+    "num_encoder_layers": 1,
+    "num_decoder_layers": 1,
     "num_attention_heads": 2,
     "intermediate_size": 128,
     "hidden_dropout_prob": 0,
@@ -83,14 +84,30 @@ config["src_pad_token_id"] = tokenizer_src.token_to_id("[PAD]")
 config["trg_vocab_size"] = tokenizer_trg.get_vocab_size()
 config["trg_pad_token_id"] = tokenizer_trg.token_to_id("[PAD]")
 
+##### DP-former #####
 from models.translation import DPForNMT
 model = DPForNMT(config)
 
-# from models.fns_translation import FNSForNMT
+##### FNS/OPFNS-former #####
 # config['alpha'] = 1.5
 # config['bandwidth'] = 1
 # config['a'] = 0
-# model = FNSForNMT(config)    
+
+# if config['alpha'] < 2:            
+#     config['d_intrinsic'] = int(config['hidden_size'] / config['num_attention_heads'])  # head_dim
+#     config['sphere_radius'] = ((math.pi**(1/config['d_intrinsic'])-1)/math.pi)                            
+# else:
+#     config['sphere_radius'] = 1       
+# config['mask_val'] = math.pi * config['sphere_radius']   
+# # from models.fns_translation import FNSForNMT
+# # model = FNSForNMT(config)   
+# from models.opfns_translation import OPFNSForNMT 
+# model = OPFNSForNMT(config)   
+
+##### SINK-former #####
+# from models.sink_translation import SINKForNMT
+# config['n_it'] = 1
+# model = SINKForNMT(config)
 
 print('\n Model created! \n')
 
@@ -204,7 +221,9 @@ for split in ['train', 'val']:
     print(f'Unique encoder lens: {list(set(encoder_lens))}')
     print(f'Unique decoder lens: {list(set(decoder_lens))} \n')
 
-loss_fn = nn.CrossEntropyLoss()
+#loss_fn = nn.CrossEntropyLoss()
+loss_fn = nn.CrossEntropyLoss(ignore_index=config["src_pad_token_id"])
+
 split = 'val'
 if split == 'val':
     X, Y, encoder_mask, decoder_mask, tgt_text = get_batch(split)
@@ -215,10 +234,12 @@ predicted = []
 expected = []
 out_loss = {}
 out_bleu = {}
+trg_vocab_size = config['trg_vocab_size']
 with ctx:
     ##### CHANGES HERE #####
     logits, _, _, _ = model(X, Y, encoder_mask, decoder_mask)
-    loss = loss_fn(logits, F.one_hot(Y, num_classes=config['trg_vocab_size']).type_as(logits))                
+    #loss = loss_fn(logits.reshape(-1,trg_vocab_size), F.one_hot(Y, num_classes=trg_vocab_size).type_as(logits).reshape(-1,trg_vocab_size))           
+    loss = loss_fn(logits.reshape(-1,trg_vocab_size), Y.reshape(-1))
     if split == 'val':
         # Generate sentence
         # Type 1 (use greedy_decode directly)
@@ -341,3 +362,13 @@ if split == 'val':
     # bleu = sentence_bleu(ref, hyp)
     out_bleu[split] = bleu
     print("BLEU score:", bleu)
+
+
+"""
+split = 'val'
+batch_idx = 0
+X, Y, encoder_mask, decoder_mask, tgt_text = get_batch(split)
+model_out = greedy_decode(model, X[batch_idx,None], encoder_mask[batch_idx,None], tokenizer_trg, config["max_length"], device)
+model_out_text = tokenizer_trg.decode(model_out.detach().cpu().numpy())
+print(model_out_text)
+"""

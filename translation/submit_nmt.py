@@ -70,12 +70,13 @@ torchrun --nnodes=1 --nproc_per_node=2 ddp_main.py --max_iters=5 --eval_interval
 if __name__ == '__main__':
     
     script_name = "ddp_main.py"       # script for running
-    dataset_names = ['iwslt14']   # add or change datasets here
+    dataset_names = ['iwslt14']   # add or change datasets here, i.e. iwslt16
     
     debug_mode = False
     print(f'---------- debug_mode = {debug_mode} ---------- \n')
     
-    instances = [0,1]
+    instances = [None]
+    #instances = [0,1]
     #instances = [0,1,2]    
     #instances = [0,1,2,3,4]
     kwargss_all = []    
@@ -83,31 +84,32 @@ if __name__ == '__main__':
         for didx, dataset_name in enumerate(dataset_names):
             if not debug_mode:
                 select = 1; ngpus, ncpus = 0, 1            
-                walltime, mem = '23:59:59', '12GB'    
+                walltime, mem = '23:59:59', '6GB'    
                 num_proc = ngpus if ngpus > 1 else ncpus                                                                       
 
                 #{'model_name':'sinknmt', 'n_it': 1}, {'model_name':'sinknmt', 'n_it': 3}, 
                 # kwargss = [{'model_name':'fnsnmt', 'alpha': 1.2, 'a': 0}, {'model_name':'fnsnmt', 'alpha': 2, 'a': 0}, 
                 #            {'model_name':'opfnsnmt', 'alpha': 1.2, 'a': 0}, {'model_name':'opfnsnmt', 'alpha': 2, 'a': 0},                                                     
                 #            {'model_name':'dpnmt'}] 
-                kwargss = [{'model_name':'dpnmt'}] 
-                           #{'model_name':'fnsnmt','alpha': 1.2,'a':0,'bandwidth':0.5},{'model_name':'fnsnmt''alpha': 2,'a':0,'bandwidth':0.5}]
+                kwargss = [{'model_name':'dpnmt'}, 
+                           {'model_name':'fnsnmt','alpha':1.2,'a':1,'bandwidth':0.5},{'model_name':'fnsnmt','alpha':2,'a':1,'bandwidth':0.5},
+                           {'model_name':'opfnsnmt','alpha':1.2,'a':1,'bandwidth':0.5},{'model_name':'opfnsnmt','alpha':2,'a':1,'bandwidth':0.5}]
 
-                epochs = 20
-                common_kwargs = {'instance':                    instance,
-                                 'num_encoder_layers':          2,
+                epochs = 30
+                common_kwargs = {'num_encoder_layers':          2,
                                  'num_decoder_layers':          2,
                                  'n_attn_heads':                4,
                                  'hidden_size':                 128,    
                                  'max_iters':                   200,
                                  'eval_interval':               10,
                                  'eval_iters':                  10, 
-                                 'max_lr':                      5e-5,                    
+                                 'max_lr':                      1e-4,                    
                                  'lr_scheduler_type':           'constant',
                                  'train_bs':                    16,                                                                          
                                  'weight_decay':                0
                                  }  
-
+                if instance is not None:
+                    common_kwargs['instance'] = instance
                 if epochs is not None:       
                     common_kwargs['epochs'] = epochs
                     
@@ -121,7 +123,7 @@ if __name__ == '__main__':
                                                            num_decoder_layers=common_kwargs['num_decoder_layers'], 
                                                            num_attention_heads=common_kwargs['n_attn_heads'], hidden_size=common_kwargs['hidden_size']
                                                            )       
-                model_root = njoin(DROOT, 'formers_trained_v2', model_root_dirname)
+                model_root = njoin(DROOT, 'formers_trained_v6exit()', model_root_dirname)
 
             else:                         
                 ngpus, ncpus = 0, 1

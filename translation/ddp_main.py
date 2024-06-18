@@ -63,6 +63,9 @@ $ torchrun --nproc_per_node=8 --nnodes=2 --node_rank=1 --master_addr=123.456.123
 python -i ddp_main.py --model_name=dpnmt --n_attn_heads=2\
  --max_iters=50 --eval_interval=5 --eval_iters=10 --weight_decay=0 --model_root=.droot/debug_mode
 
+python -i ddp_main.py --model_name=sinknmt --n_attn_heads=2\
+ --max_iters=1 --eval_interval=1 --eval_iters=1 --weight_decay=0 --model_root=.droot/debug_mode 
+
 # training based on epochs
 python -i ddp_main.py --model_name=dpnmt --n_attn_heads=2\
  --epochs=1 --weight_decay=0 --model_root=.droot/debug_mode
@@ -199,7 +202,7 @@ if __name__ == '__main__':
         "num_encoder_layers": args.num_encoder_layers,
         "num_decoder_layers": args.num_decoder_layers,
         "num_attention_heads": args.n_attn_heads,
-        #"intermediate_size": 4 * args.hidden_size, # 4 * hidden_size,
+        #"intermediate_size": 4 * args.hidden_size,
         "intermediate_size": args.hidden_size,
         "hidden_dropout_prob": args.hidden_dropout_prob,
         "encoder_dropout_prob": args.encoder_dropout_prob,
@@ -654,10 +657,8 @@ if __name__ == '__main__':
             #     bs, 1, 1, 1
             # )                    
             # Decoder self-attention mask
-            trg_mask = torch.tril(torch.ones((trg_len, trg_len))).expand(
-                1, 1, trg_len, trg_len
-            )
-            trg_mask = trg_mask.type_as(source_mask).to(device)
+            trg_mask = torch.tril(torch.ones((trg_len, trg_len))).expand(1, 1, trg_len, trg_len)
+            # trg_mask = trg_mask.type_as(source_mask).to(device)
 
             # print(f'trg_mask shape: {trg_mask.shape}')
             # print(trg_mask)

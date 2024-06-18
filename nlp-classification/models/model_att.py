@@ -398,7 +398,8 @@ class DPSelfAttention(nn.Module):
         #     attention_mask_expanded = attention_mask.view(1, 1, seq_len, seq_len).expand(batch_size, num_heads, -1, -1)
 
         # obtained from class Model in models/model.py
-        bool_mask = (attention_mask>=0).long()
+        #bool_mask = (attention_mask>=0).long()
+        bool_mask = (attention_mask>0).long()
         #attention_mask_expanded = torch.bmm(bool_mask.unsqueeze(-1), bool_mask.unsqueeze(1))
         attention_mask_expanded = (bool_mask.unsqueeze(-1)@bool_mask.unsqueeze(1)).view(batch_size, 1, seq_len, seq_len).expand(-1, num_heads, -1, -1)     
 
@@ -530,7 +531,8 @@ class FNSSelfAttention(nn.Module):
             euclidean_dist = torch.cdist(query_vectors, query_vectors) # (B,H,N,N)     
 
         # attention_mask obtained from class Model in models/model.py
-        bool_mask = (attention_mask>=0).long()
+        #bool_mask = (attention_mask>=0).long()
+        bool_mask = (attention_mask>0).long()
         #attention_mask_expanded = torch.bmm(bool_mask.unsqueeze(-1), bool_mask.unsqueeze(1))
         attention_mask_expanded = (bool_mask.unsqueeze(-1)@bool_mask.unsqueeze(1)).view(batch_size, 1, seq_len, seq_len).expand(-1, num_heads, -1, -1)      
 
@@ -687,7 +689,8 @@ class V2FNSSelfAttention(nn.Module):
         #print(f'Distance percentiles: {torch.quantile(euclidean_dist.flatten(), q)}')
 
         # obtained from class Model in models/model.py
-        bool_mask = (attention_mask>=0).long()
+        #bool_mask = (attention_mask>=0).long()
+        bool_mask = (attention_mask>0).long()
         attention_mask_expanded = (bool_mask.unsqueeze(-1)@bool_mask.unsqueeze(1)).view(batch_size, 1, seq_len, seq_len).expand(-1, num_heads, -1, -1)      
 
         euclidean_dist = euclidean_dist.masked_fill(attention_mask_expanded==0, 1e9)  # 1e9
@@ -846,7 +849,8 @@ class V3FNSSelfAttention(nn.Module):
         #print(f'Distance percentiles: {torch.quantile(g_dist.flatten(), q)}')
 
         # obtained from class Model in models/model.py
-        bool_mask = (attention_mask>=0).long()
+        #bool_mask = (attention_mask>=0).long()
+        bool_mask = (attention_mask>0).long()
         attention_mask_expanded = (bool_mask.unsqueeze(-1)@bool_mask.unsqueeze(1)).view(batch_size, 1, seq_len, seq_len).expand(-1, num_heads, -1, -1)      
 
         g_dist = g_dist.masked_fill(attention_mask_expanded==0, self.mask_val)  # 1e9
@@ -1006,7 +1010,8 @@ class OPFNSSelfAttention(nn.Module):
         #print(f'Distance percentiles: {torch.quantile(g_dist.flatten(), q)}')
 
         # obtained from class Model in models/model.py
-        bool_mask = (attention_mask>=0).long()
+        #bool_mask = (attention_mask>=0).long()
+        bool_mask = (attention_mask>0).long()
         attention_mask_expanded = (bool_mask.unsqueeze(-1)@bool_mask.unsqueeze(1)).view(batch_size, 1, seq_len, seq_len).expand(-1, num_heads, -1, -1)      
 
         g_dist = g_dist.masked_fill(attention_mask_expanded==0, self.mask_val)  # 1e9
@@ -1165,7 +1170,8 @@ class V4FNSSelfAttention(nn.Module):
         #print(f'Distance percentiles: {torch.quantile(g_dist.flatten(), q)}')
 
         # obtained from class Model in models/model.py
-        bool_mask = (attention_mask>=0).long()
+        #bool_mask = (attention_mask>=0).long()
+        bool_mask = (attention_mask>0).long()
         attention_mask_expanded = (bool_mask.unsqueeze(-1)@bool_mask.unsqueeze(1)).view(batch_size, 1, seq_len, seq_len).expand(-1, num_heads, -1, -1)      
 
         g_dist = g_dist.masked_fill(attention_mask_expanded==0, self.mask_val)  # 1e9
@@ -1332,7 +1338,8 @@ class V2OPFNSSelfAttention(nn.Module):
         #print(f'Distance percentiles: {torch.quantile(g_dist.flatten(), q)}')
 
         # obtained from class Model in models/model.py
-        bool_mask = (attention_mask>=0).long()
+        #bool_mask = (attention_mask>=0).long()
+        bool_mask = (attention_mask>0).long()
         attention_mask_expanded = (bool_mask.unsqueeze(-1)@bool_mask.unsqueeze(1)).view(batch_size, 1, seq_len, seq_len).expand(-1, num_heads, -1, -1)      
 
         g_dist = g_dist.masked_fill(attention_mask_expanded==0, self.mask_val)  # 1e9
@@ -1447,7 +1454,8 @@ class SINKSelfAttention(nn.Module):
         n_it = self.n_it; bandwidth = self.bandwidth
 
         # obtained from class Model in models/model.py        
-        bool_mask = (attention_mask>=0).long()
+        #bool_mask = (attention_mask>=0).long()
+        bool_mask = (attention_mask>0).long()
         attention_mask_expanded = (bool_mask.unsqueeze(-1)@bool_mask.unsqueeze(1)).view(batch_size, 1, seq_len, seq_len).expand(-1, num_heads, -1, -1)      
         mask_val = self.mask_val
 

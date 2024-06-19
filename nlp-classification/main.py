@@ -250,10 +250,24 @@ if __name__ == '__main__':
             attn_setup['a'] = args.a      
             config.a = args.a  
         
-        # mask for distance
-        config.mask_val = config.sphere_radius * np.pi
-        attn_setup['sphere_radius'] = config.sphere_radius       
-        attn_setup['mask_val'] = np.pi * config.sphere_radius   
+            # mask for distance
+            config.mask_val = config.sphere_radius * np.pi
+            attn_setup['sphere_radius'] = config.sphere_radius       
+            attn_setup['mask_val'] = np.pi * config.sphere_radius   
+
+        elif args.model_name in ['rdfnsformer', 'rdopfnsformer']:
+
+            if args.alpha < 2:
+                config.d_intrinsic = int(args.hidden_size/args.n_attn_heads)  # head_dim
+                config.sphere_radius = ((np.pi**(1/config.d_intrinsic)-1)/np.pi)   
+                #config.sphere_radius = 1
+                attn_setup['d_intrinsic'] = config.d_intrinsic
+            elif args.alpha >= 2:
+                config.sphere_radius = 1
+
+            # degree index
+            attn_setup['a'] = args.a      
+            config.a = args.a          
 
     elif args.model_name == 'sinkformer':
         n_it = args.n_it

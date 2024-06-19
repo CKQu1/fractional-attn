@@ -64,9 +64,10 @@ class SINKAttentionHead(nn.Module):
         # softmax(Q*K.T/sqrt(head_size))*V
         attention_scores = torch.matmul(query, key.transpose(-1, -2))
         attention_scores = attention_scores / math.sqrt(self.attention_head_size)
-        if attention_mask is not None:
+        if attention_mask is not None and self.is_cross_attention:
             # Write a very low value (indicating -inf) to the positions where mask == 0
-            attention_mask = attention_mask[:,:,:query.size(1),:key.size(1)] # Feels like a dirty fix...
+            if self.is_cross_attention:
+                attention_mask = attention_mask[:,:,:query.size(1),:key.size(1)] # Feels like a dirty fix...
             attention_scores.masked_fill_(attention_mask == 0, -1e9)
 
         attn_score_shape = attention_scores.shape
@@ -194,9 +195,10 @@ class FasterSINKMultiHeadAttention(nn.Module):
         # softmax(Q*K.T/sqrt(head_size))*V
         attention_scores = torch.matmul(query, key.transpose(-1, -2))
         attention_scores = attention_scores / math.sqrt(self.attention_head_size)
-        if attention_mask is not None:
+        if attention_mask is not None and self.is_cross_attention:
             # Write a very low value (indicating -inf) to the positions where mask == 0
-            attention_mask = attention_mask[:,:,:src_sequence_length,:trg_sequence_length] # Feels like a dirty fix...
+            if self.is_cross_attention:
+                attention_mask = attention_mask[:,:,:src_sequence_length,:trg_sequence_length] # Feels like a dirty fix...
             attention_scores.masked_fill_(attention_mask == 0, -1e9)
 
         attn_score_shape = attention_scores.shape
@@ -204,15 +206,20 @@ class FasterSINKMultiHeadAttention(nn.Module):
         attention_probs = self.sink(attention_scores)[0]        
         
         attention_probs = attention_probs * attention_probs.shape[-1]
-        attention_probs = attention_probs.view(attn_score_shape)        
 
+        ##### begin{debug} #####
+        print(f'query shape = {query.shape}')
+        print(f'key shape = {key.shape}')
+        print(f'value shape = {value.shape}')
+        print(f'attention_scores shape = {attention_scores.shape}')
+        print(f'attn_score_shape = {attn_score_shape}')        
+        print(f'attention_probs pre shape = {attention_probs.shape}')        
+        ##### end{debug} #####
+
+        attention_probs = attention_probs.view(attn_score_shape)        
         attention_probs = self.attn_dropout(attention_probs)
 
-        ##### DEBUG #####
-        # print(f'attn_score_shape = {attn_score_shape}')
-        # print(f'attention_scores shape = {attention_scores.shape}')
-        # print(f'attention_probs shape = {attention_probs.shape}')
-        # print(f'value shape = {value.shape}')
+        print(f'attention_probs post shape = {attention_probs.shape}')
 
         # Calculate the attention output
         attention_output = torch.matmul(attention_probs, value)
@@ -269,6 +276,9 @@ class SINKEncoderBlock(nn.Module):
         self.layernorm_2 = nn.LayerNorm(config["hidden_size"])
 
     def forward(self, x, attention_mask=None, output_attentions=False):
+        ##### begin{debug} #####
+        print('Encoder self-attention')
+        ##### end{debug} #####          
         # Self-attention
         attention_output, attention_probs = \
             self.attention(x, attention_mask=attention_mask, output_attentions=output_attentions)
@@ -305,11 +315,17 @@ class SINKDecoderBlock(nn.Module):
         self.layernorm_3 = nn.LayerNorm(config["hidden_size"])
 
     def forward(self, x, encoder_output_states, src_mask=None, trg_mask=None, output_attentions=False):
+        ##### begin{debug} #####
+        print('Decoder self-attention')
+        ##### end{debug} #####          
         # Self-attention
         attention_output, self_attention_probs = \
             self.self_attention(x, attention_mask=trg_mask, output_attentions=output_attentions)
         # Skip connection
         x = self.layernorm_1(x + attention_output)
+        ##### begin{debug} #####
+        print('Decoder cross-attention')
+        ##### end{debug} #####          
         # Cross-attention
         attention_output, cross_attention_probs = \
             self.cross_attention(x, attention_mask=src_mask, output_attentions=output_attentions, encoder_output_states=encoder_output_states)
@@ -352,7 +368,7 @@ class SINKEncoder(nn.Module):
             self.blocks.append(block)
 
     def forward(self, x, attention_mask=None, output_attentions=False):
-        # Create the position ids from the input token ids. Any padded tokens remain padded.
+        # Create the position ids from the input token ids. Any padded tokens remain padded.      
         position_ids = torch.arange(0, x.shape[-1]).to(x.device)
         position_embeddings = self.positional_embedding(position_ids)
         token_embeddings = self.token_embedding(x)
@@ -418,7 +434,7 @@ class SINKDecoder(nn.Module):
         # Linear layer
         x = self.fc(x)
         # Softmax
-        x = nn.Softmax(dim=-1)(x)
+        #x = nn.Softmax(dim=-1)(x)
         # Return logits and the attention probabilities (optional)
         if not output_attentions:
             return (x, None, None)

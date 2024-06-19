@@ -86,8 +86,10 @@ if __name__ == '__main__':
 
     # Training options
     parser = argparse.ArgumentParser(description='translation/ddp_main.py training arguments')   
-
+    
     parser.add_argument('--out_dir', default='', type=str, help='model dir')
+    parser.add_argument('--eval_iters', default=10, type=int, help='number of sentences to translate')
+    parser.add_argument('--split', default='val', type=str)
 
     # Dataset settings
     parser.add_argument('--dataset_name', default='iwslt14', type=str)
@@ -100,7 +102,8 @@ if __name__ == '__main__':
     # I/O
     out_dir = args.out_dir      
     train_setting = pd.read_csv(njoin(out_dir, 'train_setting.csv'))
-    run_performance = pd.read_csv(njoin(out_dir, 'run_performance.csv'))
+    if os.path.isdir(njoin(out_dir, 'run_performance.csv')):
+        run_performance = pd.read_csv(njoin(out_dir, 'run_performance.csv'))
     f = open(njoin(out_dir,'config.json'))
     config = json.load(f)
     f.close()
@@ -292,8 +295,13 @@ if __name__ == '__main__':
 
         return decoder_input.squeeze(0)        
 
-    eval_iters = 15
-    split = 'val'
+    special_tokens_dict = {}
+    for word in list(tokenizer_trg.get_vocab().keys()):
+        if '[' in word and ']' in word:
+            special_tokens_dict[word] = tokenizer_trg.get_vocab()[word]
+
+    eval_iters = args.eval_iters
+    split = args.split
     model_outs = []
     predicted = []
 
@@ -305,4 +313,8 @@ if __name__ == '__main__':
             model_out = greedy_decode(model, X[batch_idx,None], encoder_mask[batch_idx,None], tokenizer_trg, config["max_length"], device) 
             model_out_text = tokenizer_trg.decode(model_out.detach().cpu().numpy())
             model_outs.append(model_out)
-            predicted.append(model_out_text)      
+            predicted.append(model_out_text)    
+
+    print(model_outs)
+    print('\n')
+    print(predicted)

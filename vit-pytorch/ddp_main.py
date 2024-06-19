@@ -43,8 +43,8 @@ $ torchrun --nproc_per_node=8 --nnodes=2 --node_rank=1 --master_addr=123.456.123
 
 # single-core
 """
-python ddp_main.py --model_name=opdmfnsvit --alpha=1.5 --a=0 --max_iters=100 --eval_interval=5\
- --eval_iters=200 --weight_decay=0 --n_layers=1 --n_attn_heads=2 --model_root=.droot/single-core 
+python ddp_main.py --model_name=v2dmfnsvit --alpha=1.5 --a=0 --max_iters=100 --eval_interval=5\
+ --eval_iters=200 --weight_decay=0 --n_layers=1 --n_attn_heads=2 --model_root=.droot/debug-mode 
 
 python ddp_main.py --model_name=opfnsvit --alpha=1.5 --max_iters=100 --eval_interval=5\
  --lr_scheduler_type=binary --max_lr=5e-5 --max_lr=5e-6\
@@ -399,7 +399,14 @@ if __name__ == '__main__':
             model = DMFNSViTForClassfication(config)    
         elif args.model_name == 'opdmfnsvit':
             from vit_pytorch.opdmfns_vit import OPDMFNSViTForClassfication
-            model = OPDMFNSViTForClassfication(config)              
+            model = OPDMFNSViTForClassfication(config)      
+        elif args.model_name == 'v2dmfnsvit':
+            from vit_pytorch.v2dmfns_vit import V2DMFNSViTForClassfication
+            model = V2DMFNSViTForClassfication(config)    
+        elif args.model_name == 'v2opdmfnsvit':
+            from vit_pytorch.v2opdmfns_vit import V2OPDMFNSViTForClassfication
+            model = V2OPDMFNSViTForClassfication(config)               
+
         elif args.model_name == 'sinkvit':
             from vit_pytorch.sink_vit import SINKViTForClassfication
             model = SINKViTForClassfication(config)               

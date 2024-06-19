@@ -5,6 +5,7 @@ from transformers.modeling_utils import PreTrainedModel,apply_chunking_to_forwar
 from transformers.models.roberta.configuration_roberta import RobertaConfig
 from typing import Optional, Tuple, Union, List
 from models.model_att import DPAttention, FNSAttention, V2FNSAttention, V3FNSAttention, V4FNSAttention, OPFNSAttention, V2OPFNSAttention, SINKAttention
+from models.model_att import RDFNSAttention, RDOPFNSAttention
 from models.model_utils import *
 #from models.model_utils import BaseModelOutput
 
@@ -320,7 +321,13 @@ class Block(nn.Module):
         elif model_name == 'opfnsformer':
             self.attention = OPFNSAttention(config, layer_id, **kwargs)
         elif model_name == 'v2opfnsformer':
-            self.attention = V2OPFNSAttention(config, layer_id, **kwargs)            
+            self.attention = V2OPFNSAttention(config, layer_id, **kwargs)   
+
+        elif model_name == 'rdfnsformer':
+            self.attention = RDFNSAttention(config, layer_id, **kwargs)  
+        elif model_name == 'rdopfnsformer':
+            self.attention = RDOPFNSAttention(config, layer_id, **kwargs)  
+
         elif model_name == 'sinkformer':
             self.attention = SINKAttention(config, layer_id, **kwargs)            
         elif model_name == 'dpformer':

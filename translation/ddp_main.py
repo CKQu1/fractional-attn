@@ -61,27 +61,27 @@ $ torchrun --nproc_per_node=8 --nnodes=2 --node_rank=1 --master_addr=123.456.123
 """
 # training based on steps
 python -i ddp_main.py --model_name=dpnmt --n_attn_heads=2\
- --max_iters=50 --eval_interval=5 --eval_iters=10 --weight_decay=0 --model_root=.droot/debug_mode
+ --max_iters=50 --eval_interval=10 --log_interval=10 --eval_iters=10 --weight_decay=0 --model_root=.droot/debug_mode
 
 python -i ddp_main.py --model_name=sinknmt --n_attn_heads=2\
- --max_iters=1 --eval_interval=1 --eval_iters=1 --weight_decay=0 --model_root=.droot/debug_mode 
+ --max_iters=50 --eval_interval=10 --log_interval=10 --eval_iters=1 --weight_decay=0 --model_root=.droot/debug_mode 
 
 # training based on epochs
 python -i ddp_main.py --model_name=dpnmt --n_attn_heads=2\
  --epochs=1 --weight_decay=0 --model_root=.droot/debug_mode
 
 python -i ddp_main.py --model_name=fnsnmt --alpha=1.2 --n_attn_heads=2\
- --max_iters=10 --eval_interval=5 --eval_iters=10 --weight_decay=0 --model_root=.droot/debug_mode 
+ --max_iters=50 --eval_interval=10 --log_interval=10 --eval_iters=10 --weight_decay=0 --model_root=.droot/debug_mode 
 
 python -i ddp_main.py --model_name=fnsnmt --alpha=1.2\
  --num_encoder_layers=2 --num_decoder_layers=2\
- --max_iters=10 --eval_interval=5 --eval_iters=10 --weight_decay=0 --model_root=.droot/debug_mode
+ --max_iters=50 --eval_interval=10 --log_interval=10 --eval_iters=10 --weight_decay=0 --model_root=.droot/debug_mode
 """
 
 # multi-core
 """
 torchrun --nnodes=1 --nproc_per_node=4 ddp_main.py --model_name=fnsnmt --alpha=1.5\
- --max_iters=10 --eval_interval=5 --eval_iters=200 --weight_decay=0 --model_root=.droot/multi-core 
+ --max_iters=50 --eval_interval=10 --log_interval=10 --eval_iters=200 --weight_decay=0 --model_root=.droot/multi-core 
 """
 
 if __name__ == '__main__':
@@ -617,7 +617,7 @@ if __name__ == '__main__':
                 #X, Y, encoder_mask, decoder_mask = get_batch(split)
                 X, Y, encoder_mask, decoder_mask, tgt_text = get_batch(split)
                 with ctx:                    
-                    logits, _, _, _ = model(X, Y, encoder_mask, decoder_mask)
+                    logits, _, _, _ = model(X, Y, encoder_mask, decoder_mask)  # NOT REALLY LOGITS
                     loss = loss_fn(logits.view(-1, trg_vocab_size), Y.view(-1)) 
                     if split == 'val':
                         # Generate sentence
@@ -669,12 +669,12 @@ if __name__ == '__main__':
         import wandb  # NOT IN CONTAINER
         wandb.init(project=wandb_project, name=wandb_run_name, config=config)    
 
-    # training loop
-    X, Y, encoder_mask, decoder_mask, _ = get_batch('train') # fetch the very first batch
-    t0 = time.time()
+    # training loop    
+    X, Y, encoder_mask, decoder_mask, _ = get_batch('train') # fetch the very first batch    
     local_iter_num = 0 # number of iterations in the lifetime of this process
     raw_model = model.module if ddp else model # unwrap DDP container if needed
     running_mfu = -1.0
+    dt = None
 
     if not wandb_log:
         metrics_ls = []    
@@ -706,7 +706,7 @@ if __name__ == '__main__':
                     #"mfu": running_mfu*100, # convert to percentage
                 })
             else:
-                metrics_ls.append([iter_num, lr, losses['train'].item(), losses['val'].item(), bleu['val'].item()])
+                metrics_ls.append([iter_num, lr, losses['train'].item(), losses['val'].item(), bleu['val'].item(), dt])
 
             if losses['val'] < best_val_loss or always_save_checkpoint:
                 best_val_loss = losses['val']
@@ -721,11 +721,18 @@ if __name__ == '__main__':
                     }
                     print(f"saving checkpoint to {out_dir}")
                     torch.save(checkpoint, os.path.join(out_dir, 'ckpt.pt'))
+
+            if master_process:
+                if not wandb_log:
+                    df = pd.DataFrame(metrics_ls, columns=['iter', 'lr', 'train_loss', 'val_loss', 'val_bleu', 'secs_per_eval'])
+                    df.to_csv(njoin(out_dir, '_run_performance.csv'))                    
+
         if iter_num == 0 and eval_only:
             break
 
         # forward backward update, with optional gradient accumulation to simulate larger batch size
         # and using the GradScaler if data type is float16
+        t0 = time.time()
         for micro_step in range(gradient_accumulation_steps):
             if ddp:
                 # in DDP training we only need to sync gradients at the last micro step.
@@ -735,7 +742,7 @@ if __name__ == '__main__':
                 model.require_backward_grad_sync = (micro_step == gradient_accumulation_steps - 1)
             with ctx:
                 ##### CHANGES HERE #####
-                logits, _, _, _ = model(X, Y, encoder_mask, decoder_mask)
+                logits, _, _, _ = model(X, Y, encoder_mask, decoder_mask)  # NOT REALLY LOGITS
                 # logits (bs, seq_len, tgt_vocab_size)
                 loss = loss_fn(logits.view(-1, trg_vocab_size), Y.view(-1)) 
                 loss = loss / gradient_accumulation_steps # scale the loss to account for gradient accumulation
@@ -756,7 +763,7 @@ if __name__ == '__main__':
         # timing and logging
         t1 = time.time()
         dt = t1 - t0
-        t0 = t1
+        
         if iter_num % log_interval == 0 and master_process:
             # get loss as float. note: this is a CPU-GPU sync point
             # scale up to undo the division above, approximating the true total loss (exact would have been a sum)
@@ -773,9 +780,11 @@ if __name__ == '__main__':
         if iter_num > max_iters:
             if master_process:
                 if not wandb_log:
-                    df = pd.DataFrame(metrics_ls, columns=['iter', 'lr', 'train_loss', 'val_loss', 'val_bleu'])
+                    if isfile(njoin(out_dir, '_run_performance.csv')):
+                        os.remove(njoin(out_dir, '_run_performance.csv'))
+                    df = pd.DataFrame(metrics_ls, columns=['iter', 'lr', 'train_loss', 'val_loss', 'val_bleu', 'secs_per_eval'])
                     df.to_csv(njoin(out_dir, 'run_performance.csv'))
-                print(f'Add data saved under {out_dir}')
+                print(f'All data saved under {out_dir}')
                 
             break
 

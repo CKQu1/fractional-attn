@@ -478,7 +478,7 @@ class OPFNSDecoder(nn.Module):
         # Linear layer
         x = self.fc(x)
         # Softmax
-        x = nn.Softmax(dim=-1)(x)
+        #x = nn.Softmax(dim=-1)(x)
         # Return logits and the attention probabilities (optional)
         if not output_attentions:
             return (x, None, None)

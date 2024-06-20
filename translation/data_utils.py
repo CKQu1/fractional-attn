@@ -99,19 +99,7 @@ class BilingualDataset(Dataset):
         assert decoder_input.size(0) == self.seq_len
         assert label.size(0) == self.seq_len
 
-        return {
-            "encoder_input": encoder_input,  # (seq_len)
-            "decoder_input": decoder_input,  # (seq_len)
-            "encoder_mask": (encoder_input != self.pad_token).unsqueeze(0).unsqueeze(0).int(), # (1, 1, seq_len)
-            "decoder_mask": (decoder_input != self.pad_token).unsqueeze(0).int() & causal_mask(decoder_input.size(0)), # (1, seq_len) & (1, seq_len, seq_len),
-            "label": label,  # (seq_len)
-            "src_text": src_text,
-            "tgt_text": tgt_text,
-        }
-
-        #return encoder_input, decoder_input, encoder_mask, decoder_mask, label, src_text, tgt_text
-
-        # data_dict = {
+        # return {
         #     "encoder_input": encoder_input,  # (seq_len)
         #     "decoder_input": decoder_input,  # (seq_len)
         #     "encoder_mask": (encoder_input != self.pad_token).unsqueeze(0).unsqueeze(0).int(), # (1, 1, seq_len)
@@ -121,8 +109,26 @@ class BilingualDataset(Dataset):
         #     "tgt_text": tgt_text,
         # }
 
-        # return data_dict['encoder_input'][idx], data_dict['decoder_input'][idx], data_dict['encoder_mask'][idx], data_dict['decoder_mask'][idx], data_dict['label'][idx], data_dict['src_text'][idx], data_dict['tgt_text'][idx]
+        #return encoder_input, decoder_input, encoder_mask, decoder_mask, label, src_text, tgt_text
 
+        return {
+            "encoder_input": encoder_input,  # (seq_len)
+            "decoder_input": decoder_input,  # (seq_len)
+            "encoder_mask": torch.ones((1, encoder_input.size(0), encoder_input.size(0))).type(torch.int),
+            #"encoder_mask": None,
+            #"encoder_pad_mask": (encoder_input != self.pad_token).unsqueeze(0).unsqueeze(0).int(), # (1, 1, seq_len)
+            "encoder_pad_mask": create_padding_mask(encoder_input, self.pad_token),  # (1, 1, seq_len)
+            "decoder_mask": causal_mask(decoder_input.size(0)), # (1, seq_len) & (1, seq_len, seq_len),
+            #"decoder_pad_mask": (decoder_input != self.pad_token).unsqueeze(0).int(),
+            "decoder_pad_mask": create_padding_mask(decoder_input, self.pad_token),  # (1, 1, seq_len)
+            "label": label,  # (seq_len)
+            "src_text": src_text,
+            "tgt_text": tgt_text,
+        }
+
+
+def create_padding_mask(seq, pad_token_id):
+    return (seq != pad_token_id).unsqueeze(0).unsqueeze(0)
 
 def causal_mask(size):
     mask = torch.triu(torch.ones((1, size, size)), diagonal=1).type(torch.int)

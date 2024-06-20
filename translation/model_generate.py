@@ -237,59 +237,68 @@ if __name__ == '__main__':
             batch_size = eval_batch_size
         ix = torch.randint(len(data), (batch_size,))
 
-        ##### CHAGNES HERE #####
         # this seems slow
         data_points = [data.dataset.__getitem__(i.item()) for i in ix]        
         x = torch.stack([data_points[i]['encoder_input'] for i in range(batch_size)])
         y = torch.stack([data_points[i]['decoder_input'] for i in range(batch_size)])
-        pre_encoder_mask = torch.stack([data_points[i]['encoder_mask'].squeeze() for i in range(batch_size)])
-        encoder_mask = (pre_encoder_mask.unsqueeze(-1)@pre_encoder_mask.unsqueeze(1)).view(batch_size, 1, config["max_length"], config["max_length"]) # (B,1,N,N)
-        decoder_mask = torch.stack([data_points[i]['decoder_mask'] for i in range(batch_size)]) # (B,1,N,N)
+        # pre_encoder_mask = torch.stack([data_points[i]['encoder_mask'].squeeze() for i in range(batch_size)])
+        # encoder_mask = (pre_encoder_mask.unsqueeze(-1)@pre_encoder_mask.unsqueeze(1)).view(batch_size, 1, config["max_length"], config["max_length"]) # (B,1,N,N)
+        # decoder_mask = torch.stack([data_points[i]['decoder_mask'] for i in range(batch_size)]) # (B,1,N,N)
+        encoder_mask = torch.stack([data_points[i]['encoder_mask'] for i in range(batch_size)])
+        #encoder_mask = None
+        encoder_pad_mask = torch.stack([data_points[i]['encoder_pad_mask'] for i in range(batch_size)])  # (B,1,1,N), type 1: non-square mask
+        decoder_mask = torch.stack([data_points[i]['decoder_mask'] for i in range(batch_size)]) # (B,1,N,N), type 2: square mask
+        decoder_pad_mask = torch.stack([data_points[i]['decoder_pad_mask'] for i in range(batch_size)])  # (B,1,1,N), type 1: non-square mask
 
-        tgt_text = [data_points[i]['tgt_text'] for i in range(batch_size)]  # added for BLEU later        
+        tgt_text = [data_points[i]['tgt_text'] for i in range(batch_size)]  # added for BLEU score        
 
         if device_type == 'cuda':
             # pin arrays x,y, which allows us to move them to GPU asynchronously (non_blocking=True)
             x, y = x.pin_memory().to(device, non_blocking=True), y.pin_memory().to(device, non_blocking=True)
             encoder_mask, decoder_mask = encoder_mask.pin_memory().to(device, non_blocking=True), decoder_mask.pin_memory().to(device, non_blocking=True)
+            encoder_pad_mask, decoder_pad_mask = encoder_pad_mask.pin_memory().to(device, non_blocking=True), decoder_pad_mask.pin_memory().to(device, non_blocking=True)
         else:
-            x, y, encoder_mask, decoder_mask = x.to(device), y.to(device), encoder_mask.to(device), decoder_mask.to(device)  
-        return x, y, encoder_mask, decoder_mask, tgt_text    
+            x, y, encoder_mask, decoder_mask = x.to(device), y.to(device), encoder_mask.to(device), decoder_mask.to(device)
+            encoder_pad_mask, decoder_pad_mask = encoder_pad_mask.to(device), decoder_pad_mask.to(device)
+        #return x, y, encoder_mask, decoder_mask    
+        return x, y, encoder_mask, encoder_pad_mask, decoder_mask, decoder_pad_mask, tgt_text
 
     # helps estimate an arbitrarily accurate loss over either split using many batches
-    def greedy_decode(model, source, source_mask, tokenizer_trg, max_len, device):        
+    def greedy_decode(model, source, source_mask, source_pad_mask, tokenizer_trg, max_len, device):        
         sos_idx = tokenizer_trg.get_vocab()['[SOS]']
         eos_idx = tokenizer_trg.get_vocab()['[EOS]']
 
         # Precompute the encoder output and reuse it for every step
         if ddp:
-            encoder_output, _ = model.module.encoder(source, source_mask)
+            encoder_output, _ = model.module.encoder(source, source_mask, source_pad_mask)
         else:
-            encoder_output, _ = model.encoder(source, source_mask)
+            encoder_output, _ = model.encoder(source, source_mask, source_pad_mask)
         # Initialize the decoder input with the sos token
-        #trg_len = max_len
         decoder_input = torch.empty(1, 1).fill_(sos_idx).type_as(source).to(device)            
         while True:
             trg_len = decoder_input.size(1)
             if trg_len == max_len:
                 break
-
+               
             # Decoder self-attention mask
             trg_mask = torch.tril(torch.ones((trg_len, trg_len))).expand(1, 1, trg_len, trg_len)
+            trg_pad_mask = (decoder_input != config['trg_pad_token_id']).unsqueeze(0).unsqueeze(0)
             # trg_mask = trg_mask.type_as(source_mask).to(device)
 
-            ##### CHANGES HERE #####
             # calculate output
             if ddp:
-                out, _, _ = model.module.decoder(decoder_input, encoder_output, src_mask=source_mask, trg_mask=trg_mask)
+                # truncate the src_mask to create the cross-attn mask here
+                out, _, _ = model.module.decoder(decoder_input, encoder_output, src_mask=source_mask[:,:,:trg_len,:], src_pad_mask=source_pad_mask,
+                                                 trg_mask=trg_mask, trg_pad_mask=trg_pad_mask)
             else:
-                out, _, _ = model.decoder(decoder_input, encoder_output, src_mask=source_mask, trg_mask=trg_mask)
+                # truncate the src_mask to create the cross-attn mask here
+                out, _, _ = model.decoder(decoder_input, encoder_output, src_mask=source_mask[:,:,:trg_len,:], src_pad_mask=source_pad_mask,
+                                          trg_mask=trg_mask, trg_pad_mask=trg_pad_mask)
             # get next token
             next_word = out[0,-1,:].argmax(-1)
             decoder_input = torch.cat(
                 [decoder_input, torch.empty(1, 1).type_as(source).fill_(next_word.item()).to(device)], dim=1
             )
-
             if next_word == eos_idx:
                 break
 
@@ -304,17 +313,21 @@ if __name__ == '__main__':
     split = args.split
     model_outs = []
     predicted = []
-
+    expected = []
     model.eval()
     for _ in tqdm(range(eval_iters)):
-        X, Y, encoder_mask, decoder_mask, tgt_text = get_batch(split)
+        X, Y, src_mask, src_pad_mask, trg_mask, trg_pad_mask, tgt_text = get_batch(split)
         bs = X.shape[0]
         for batch_idx in range(bs):
-            model_out = greedy_decode(model, X[batch_idx,None], encoder_mask[batch_idx,None], tokenizer_trg, config["max_length"], device) 
+            model_out = greedy_decode(model, X[batch_idx,None], src_mask[batch_idx,None], src_pad_mask[batch_idx,None], 
+                                      tokenizer_trg, config["max_length"], device) 
             model_out_text = tokenizer_trg.decode(model_out.detach().cpu().numpy())
             model_outs.append(model_out)
-            predicted.append(model_out_text)    
+            predicted.append(model_out_text)   
+            expected.append(tgt_text)
 
     print(model_outs)
     print('\n')
     print(predicted)
+    print('\n')
+    print(expected)

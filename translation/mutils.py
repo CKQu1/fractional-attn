@@ -90,7 +90,7 @@ def structural_model_root(**kwargs):
     use_custom_optim = kwargs.get('use_custom_optim')
     qk_share = kwargs.get('qk_share'); num_encoder_layers = kwargs.get('num_encoder_layers')
     num_decoder_layers = kwargs.get('num_decoder_layers')
-    n_attn_heads = kwargs.get('num_attention_heads'); hidden_size = kwargs.get('hidden_size')
+    n_attn_heads = kwargs.get('num_heads'); hidden_size = kwargs.get('hidden_size')
 
     #lr = kwargs.get('lr'); 
     bs = kwargs.get('bs'); milestones = kwargs.get('milestones'); gamma = kwargs.get('gamma')

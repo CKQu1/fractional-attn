@@ -120,7 +120,7 @@ if __name__ == '__main__':
     parser.add_argument('--wandb_log', default=False, type=bool)
     parser.add_argument("--wandb_project", default='translation-task', type=str)    
 
-    parser.add_argument('--instance', default=None, type=(type(None) or int))
+    parser.add_argument('--instance', default='none', type=str)
     # parser.add_argument('--seed', default=42, type=int)    
     # parser.add_argument('--debug', default=False, type=bool)  # for debuggin
     parser.add_argument('--lr_scheduler_type', default='constant', type=str)
@@ -166,6 +166,7 @@ if __name__ == '__main__':
 
     args = parser.parse_args()    
 
+
     # -----------------------------------------------------------------------------
     # default config values designed to train a gpt2 (124M) on OpenWebText
     # I/O
@@ -201,7 +202,7 @@ if __name__ == '__main__':
         "hidden_size": args.hidden_size,
         "num_encoder_layers": args.num_encoder_layers,
         "num_decoder_layers": args.num_decoder_layers,
-        "num_attention_heads": args.n_attn_heads,
+        "num_heads": args.n_attn_heads,
         #"intermediate_size": 4 * args.hidden_size,
         "intermediate_size": args.hidden_size,
         "hidden_dropout_prob": args.hidden_dropout_prob,
@@ -219,11 +220,13 @@ if __name__ == '__main__':
         "tokenizer_path": args.tokenizer_path,
     }
     # These are not hard constraints, but are used to prevent misconfigurations
-    assert config["hidden_size"] % config["num_attention_heads"] == 0
+    assert config["hidden_size"] % config["num_heads"] == 0
     #assert config['intermediate_size'] == 4 * config['hidden_size']
 
-    instance = int(args.instance) if args.instance is not None else args.instance
-    attn_setup = {'qk_share': args.qk_share, 'qkv_bias': args.qkv_bias, 'instance': instance}
+    instance = int(args.instance) if args.instance.lower() != 'none' else None
+    attn_setup = {'qk_share': args.qk_share, 'qkv_bias': args.qkv_bias}
+    if instance is not None:
+        attn_setup['instance'] = instance
     attn_setup['model_name'] = args.model_name
     attn_setup['dataset_name'] = args.dataset_name    
     if 'fns' in args.model_name:
@@ -231,13 +234,19 @@ if __name__ == '__main__':
         config['a'] = attn_setup['a'] = args.a
         config['bandwidth'] = attn_setup['bandwidth'] = args.bandwidth   
         if args.alpha < 2:            
-            config['d_intrinsic'] = int(config['hidden_size'] / config['num_attention_heads'])  # head_dim
+            config['d_intrinsic'] = int(config['hidden_size'] / config['num_heads'])  # head_dim
             config['sphere_radius'] = ((np.pi**(1/config['d_intrinsic'])-1)/np.pi)                            
         else:
             config['sphere_radius'] = 1
 
         attn_setup['sphere_radius'] = config['sphere_radius']       
         attn_setup['mask_val'] = config['mask_val'] = np.pi * config['sphere_radius']   
+    elif 'rd' in args.model_name:
+        config['alpha'] = attn_setup['alpha'] = args.alpha      
+        config['a'] = attn_setup['a'] = args.a
+        config['bandwidth'] = attn_setup['bandwidth'] = args.bandwidth   
+        if args.alpha < 2:            
+            config['d_intrinsic'] = int(config['hidden_size'] / config['num_heads'])  # head_dim        
     elif args.model_name == 'sinknmt':
         config['n_it'] = attn_setup['n_it'] = args.n_it
         config['bandwidth'] = attn_setup['bandwidth'] = args.bandwidth           
@@ -302,7 +311,7 @@ if __name__ == '__main__':
     
     if args.model_root == '':
         model_root = structural_model_root(qk_share=args.qk_share, num_encoder_layers=args.num_encoder_layers,
-                                           num_decoder_layers=args.num_decoder_layers, num_attention_heads=args.n_attn_heads,
+                                           num_decoder_layers=args.num_decoder_layers, num_heads=args.n_attn_heads,
                                            hidden_size=args.hidden_size,
                                            lr=args.lr, bs=args.train_bs, 
                                            use_custom_optim=args.use_custom_optim,
@@ -428,31 +437,32 @@ if __name__ == '__main__':
             data = testloader
             batch_size = eval_batch_size
         ix = torch.randint(len(data), (batch_size,))
-        # x = torch.tensor([data.dataset["encoder_input"][i] for i in ix]) # (B, N) 
-        # y = torch.tensor([data.dataset["decoder_input"][i] for i in ix]) # (B, N) 
-        # encoder_mask = torch.tensor([data.dataset["attention_mask"][i] for i in ix]) # (B, N) 
-        # encoder_mask = (encoder_mask.unsqueeze(-1)@encoder_mask.unsqueeze(1)).view(batch_size, 1, config["max_length"], config["max_length"]) # (B,1,N,N)
-        # decoder_mask = torch.stack([(torch.tensor(data.dataset["attention_mask"][i] != 0)).unsqueeze(0).int() & causal_mask(config["max_length"]) for i in ix]) # (B,1,N,N)
 
-        ##### CHAGNES HERE #####
         # this seems slow
         data_points = [data.dataset.__getitem__(i.item()) for i in ix]        
         x = torch.stack([data_points[i]['encoder_input'] for i in range(batch_size)])
         y = torch.stack([data_points[i]['decoder_input'] for i in range(batch_size)])
-        pre_encoder_mask = torch.stack([data_points[i]['encoder_mask'].squeeze() for i in range(batch_size)])
-        encoder_mask = (pre_encoder_mask.unsqueeze(-1)@pre_encoder_mask.unsqueeze(1)).view(batch_size, 1, config["max_length"], config["max_length"]) # (B,1,N,N)
-        decoder_mask = torch.stack([data_points[i]['decoder_mask'] for i in range(batch_size)]) # (B,1,N,N)
+        # pre_encoder_mask = torch.stack([data_points[i]['encoder_mask'].squeeze() for i in range(batch_size)])
+        # encoder_mask = (pre_encoder_mask.unsqueeze(-1)@pre_encoder_mask.unsqueeze(1)).view(batch_size, 1, config["max_length"], config["max_length"]) # (B,1,N,N)
+        # decoder_mask = torch.stack([data_points[i]['decoder_mask'] for i in range(batch_size)]) # (B,1,N,N)
+        encoder_mask = torch.stack([data_points[i]['encoder_mask'] for i in range(batch_size)])
+        #encoder_mask = None
+        encoder_pad_mask = torch.stack([data_points[i]['encoder_pad_mask'] for i in range(batch_size)])  # (B,1,1,N), type 1: non-square mask
+        decoder_mask = torch.stack([data_points[i]['decoder_mask'] for i in range(batch_size)]) # (B,1,N,N), type 2: square mask
+        decoder_pad_mask = torch.stack([data_points[i]['decoder_pad_mask'] for i in range(batch_size)])  # (B,1,1,N), type 1: non-square mask
 
-        tgt_text = [data_points[i]['tgt_text'] for i in range(batch_size)]  # added for BLEU later        
+        tgt_text = [data_points[i]['tgt_text'] for i in range(batch_size)]  # added for BLEU score        
 
         if device_type == 'cuda':
             # pin arrays x,y, which allows us to move them to GPU asynchronously (non_blocking=True)
             x, y = x.pin_memory().to(device, non_blocking=True), y.pin_memory().to(device, non_blocking=True)
             encoder_mask, decoder_mask = encoder_mask.pin_memory().to(device, non_blocking=True), decoder_mask.pin_memory().to(device, non_blocking=True)
+            encoder_pad_mask, decoder_pad_mask = encoder_pad_mask.pin_memory().to(device, non_blocking=True), decoder_pad_mask.pin_memory().to(device, non_blocking=True)
         else:
             x, y, encoder_mask, decoder_mask = x.to(device), y.to(device), encoder_mask.to(device), decoder_mask.to(device)
+            encoder_pad_mask, decoder_pad_mask = encoder_pad_mask.to(device), decoder_pad_mask.to(device)
         #return x, y, encoder_mask, decoder_mask    
-        return x, y, encoder_mask, decoder_mask, tgt_text
+        return x, y, encoder_mask, encoder_pad_mask, decoder_mask, decoder_pad_mask, tgt_text
 
     # init these up here, can override if init_from='resume' (i.e. from a checkpoint)
     iter_num = 0
@@ -491,10 +501,16 @@ if __name__ == '__main__':
             model = FNSForNMT(config)    
         elif args.model_name == 'opfnsnmt':
             from models.opfns_translation import OPFNSForNMT
-            model = OPFNSForNMT(config)              
+            model = OPFNSForNMT(config)           
+        elif args.model_name == 'rdfnsnmt':
+            from models.rdfns_translation import RDFNSForNMT
+            model = RDFNSForNMT(config)    
+        elif args.model_name == 'rdopfnsnmt':
+            from models.rdopfns_translation import RDOPFNSForNMT
+            model = RDOPFNSForNMT(config)                   
         else:
             print(f'{args.model_name} does not exist!')
-            quit()
+            quit()    
 
     """
     elif init_from == 'resume':
@@ -569,15 +585,15 @@ if __name__ == '__main__':
         #model = DDP(model, device_ids=[ddp_local_rank], output_device=ddp_local_rank)        
 
     # helps estimate an arbitrarily accurate loss over either split using many batches
-    def greedy_decode(model, source, source_mask, tokenizer_trg, max_len, device):        
+    def greedy_decode(model, source, source_mask, source_pad_mask, tokenizer_trg, max_len, device):        
         sos_idx = tokenizer_trg.get_vocab()['[SOS]']
         eos_idx = tokenizer_trg.get_vocab()['[EOS]']
 
         # Precompute the encoder output and reuse it for every step
         if ddp:
-            encoder_output, _ = model.module.encoder(source, source_mask)
+            encoder_output, _ = model.module.encoder(source, source_mask, source_pad_mask)
         else:
-            encoder_output, _ = model.encoder(source, source_mask)
+            encoder_output, _ = model.encoder(source, source_mask, source_pad_mask)
         # Initialize the decoder input with the sos token
         decoder_input = torch.empty(1, 1).fill_(sos_idx).type_as(source).to(device)            
         while True:
@@ -587,13 +603,18 @@ if __name__ == '__main__':
                
             # Decoder self-attention mask
             trg_mask = torch.tril(torch.ones((trg_len, trg_len))).expand(1, 1, trg_len, trg_len)
+            trg_pad_mask = (decoder_input != config['trg_pad_token_id']).unsqueeze(0).unsqueeze(0)
             # trg_mask = trg_mask.type_as(source_mask).to(device)
 
             # calculate output
             if ddp:
-                out, _, _ = model.module.decoder(decoder_input, encoder_output, src_mask=source_mask, trg_mask=trg_mask)
+                # truncate the src_mask to create the cross-attn mask here
+                out, _, _ = model.module.decoder(decoder_input, encoder_output, src_mask=source_mask[:,:,:trg_len,:], src_pad_mask=source_pad_mask,
+                                                 trg_mask=trg_mask, trg_pad_mask=trg_pad_mask)
             else:
-                out, _, _ = model.decoder(decoder_input, encoder_output, src_mask=source_mask, trg_mask=trg_mask)
+                # truncate the src_mask to create the cross-attn mask here
+                out, _, _ = model.decoder(decoder_input, encoder_output, src_mask=source_mask[:,:,:trg_len,:], src_pad_mask=source_pad_mask,
+                                          trg_mask=trg_mask, trg_pad_mask=trg_pad_mask)
             # get next token
             next_word = out[0,-1,:].argmax(-1)
             decoder_input = torch.cat(
@@ -615,16 +636,17 @@ if __name__ == '__main__':
             #expected = []
             for k in range(eval_iters):
                 #X, Y, encoder_mask, decoder_mask = get_batch(split)
-                X, Y, encoder_mask, decoder_mask, tgt_text = get_batch(split)
+                X, Y, src_mask, src_pad_mask, trg_mask, trg_pad_mask, tgt_text = get_batch(split)
                 with ctx:                    
-                    logits, _, _, _ = model(X, Y, encoder_mask, decoder_mask)  # NOT REALLY LOGITS
+                    logits, _, _, _ = model(X, Y, src_mask, src_pad_mask, trg_mask, trg_pad_mask)  # NOT REALLY LOGITS
                     loss = loss_fn(logits.view(-1, trg_vocab_size), Y.view(-1)) 
                     if split == 'val':
                         # Generate sentence
                         model_outs = []
                         bs = X.shape[0]
                         for batch_idx in range(bs):
-                            model_out = greedy_decode(model, X[batch_idx,None], encoder_mask[batch_idx,None], tokenizer_trg, config["max_length"], device) 
+                            model_out = greedy_decode(model, X[batch_idx,None], src_mask[batch_idx,None], src_pad_mask[batch_idx,None],
+                                                      tokenizer_trg, config["max_length"], device) 
                             model_out_text = tokenizer_trg.decode(model_out.detach().cpu().numpy())
                             model_outs.append(model_out)
                         predicted.append(model_out_text)
@@ -670,7 +692,7 @@ if __name__ == '__main__':
         wandb.init(project=wandb_project, name=wandb_run_name, config=config)    
 
     # training loop    
-    X, Y, encoder_mask, decoder_mask, _ = get_batch('train') # fetch the very first batch    
+    X, Y, src_mask, src_pad_mask, trg_mask, trg_pad_mask, _ = get_batch('train') # fetch the very first batch    
     local_iter_num = 0 # number of iterations in the lifetime of this process
     raw_model = model.module if ddp else model # unwrap DDP container if needed
     running_mfu = -1.0
@@ -680,6 +702,7 @@ if __name__ == '__main__':
         metrics_ls = []    
     while True:
 
+        t0 = time.time()
         # determine and set the learning rate for this iteration
         if args.lr_scheduler_type == 'cosine':
             lr = get_lr(iter_num) if decay_lr else learning_rate
@@ -725,14 +748,17 @@ if __name__ == '__main__':
             if master_process:
                 if not wandb_log:
                     df = pd.DataFrame(metrics_ls, columns=['iter', 'lr', 'train_loss', 'val_loss', 'val_bleu', 'secs_per_eval'])
-                    df.to_csv(njoin(out_dir, '_run_performance.csv'))                    
+                    df.to_csv(njoin(out_dir, '_run_performance.csv'))      
+
+            # timing and logging
+            t1 = time.time()
+            dt = t1 - t0                                  
 
         if iter_num == 0 and eval_only:
             break
 
         # forward backward update, with optional gradient accumulation to simulate larger batch size
-        # and using the GradScaler if data type is float16
-        t0 = time.time()
+        # and using the GradScaler if data type is float16        
         for micro_step in range(gradient_accumulation_steps):
             if ddp:
                 # in DDP training we only need to sync gradients at the last micro step.
@@ -742,12 +768,12 @@ if __name__ == '__main__':
                 model.require_backward_grad_sync = (micro_step == gradient_accumulation_steps - 1)
             with ctx:
                 ##### CHANGES HERE #####
-                logits, _, _, _ = model(X, Y, encoder_mask, decoder_mask)  # NOT REALLY LOGITS
+                logits, _, _, _ = model(X, Y, src_mask, src_pad_mask, trg_mask, trg_pad_mask)  # NOT REALLY LOGITS
                 # logits (bs, seq_len, tgt_vocab_size)
                 loss = loss_fn(logits.view(-1, trg_vocab_size), Y.view(-1)) 
                 loss = loss / gradient_accumulation_steps # scale the loss to account for gradient accumulation
             # immediately async prefetch next batch while model is doing the forward pass on the GPU
-            X, Y, encoder_mask, decoder_mask, _ = get_batch('train')
+            X, Y, src_mask, src_pad_mask, trg_mask, trg_pad_mask, _ = get_batch('train')
             # backward pass, with gradient scaling if training in fp16
             scaler.scale(loss).backward()
         # clip the gradient
@@ -759,10 +785,6 @@ if __name__ == '__main__':
         scaler.update()
         # flush the gradients as soon as we can, no need for this memory anymore
         optimizer.zero_grad(set_to_none=True)
-
-        # timing and logging
-        t1 = time.time()
-        dt = t1 - t0
         
         if iter_num % log_interval == 0 and master_process:
             # get loss as float. note: this is a CPU-GPU sync point

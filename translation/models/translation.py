@@ -31,7 +31,7 @@ class AttentionHead(nn.Module):
     def __init__(self, hidden_size, attention_head_size, dropout, bias=True, is_cross_attention=False):
         super().__init__()
         self.hidden_size = hidden_size
-        self.attention_head_size = attention_head_size
+        self.attention_head_size = attention_head_size        
         # Create the query, key, and value projection layers
         self.query = nn.Linear(hidden_size, attention_head_size, bias=bias)
         self.key = nn.Linear(hidden_size, attention_head_size, bias=bias)
@@ -41,7 +41,7 @@ class AttentionHead(nn.Module):
         
         self.is_cross_attention = is_cross_attention
     
-    def forward(self, x, encoder_output_states=None, attention_mask=None):
+    def forward(self, x, encoder_output_states=None, key_padding_mask=None, attn_mask=None):
         # Project the input into query, key, and value
         # The same input is used to generate the query, key, and value,
         # so it's usually called self-attention.
@@ -59,16 +59,51 @@ class AttentionHead(nn.Module):
         # softmax(Q*K.T/sqrt(head_size))*V
         attention_scores = torch.matmul(query, key.transpose(-1, -2))
         attention_scores = attention_scores / math.sqrt(self.attention_head_size)
-        if attention_mask is not None:
-            # Write a very low value (indicating -inf) to the positions where mask == 0
-            if self.is_cross_attention:
-                attention_mask = attention_mask[:,:,:query.size(1),:key.size(1)] # Feels like a dirty fix...
-            attention_scores.masked_fill_(attention_mask == 0, -1e9)
+
+        # if attn_mask is not None:
+        #     # Write a very low value (indicating -inf) to the positions where mask == 0
+        #     if self.is_cross_attention:
+        #         attn_mask = attn_mask[:,:,:query.size(1),:key.size(1)] # Feels like a dirty fix...
+        #     attention_scores.masked_fill_(attn_mask == 0, -1e9)
+
+        merged_mask, mask_type = self.merge_masks(key_padding_mask, attn_mask, query)
+        # how would the mask_type affect things?
+        if merged_mask is not None:
+            attention_scores.masked_fill_(merged_mask == 0, -1e9)
+
         attention_probs = nn.functional.softmax(attention_scores, dim=-1)
         attention_probs = self.dropout(attention_probs)
         # Calculate the attention output
         attention_output = torch.matmul(attention_probs, value)
         return (attention_output, attention_probs)
+
+    def merge_masks(key_padding_mask, attn_mask, query):
+
+        mask_type, merged_mask = None, None
+        if key_padding_mask is not None:
+            mask_type = 1
+            merged_mask = key_padding_mask
+
+        if attn_mask is not None:
+            # In this branch query can't be a nested tensor, so it has a shape
+            batch_size, seq_len, _, _ = query.shape
+            mask_type = 2
+
+            # Always expands attn_mask to 4D
+            if attn_mask.dim() == 4:
+                attn_mask_expanded = attn_mask            
+            elif attn_mask.dim() == 3:
+                attn_mask_expanded = attn_mask.view(batch_size, -1, seq_len, seq_len)
+            else:  # attn_mask.dim() == 2:
+                attn_mask_expanded = attn_mask.view(1, 1, seq_len, seq_len).expand(batch_size, 1, -1, -1)
+            merged_mask = attn_mask_expanded
+
+            if key_padding_mask is not None:
+                key_padding_mask_expanded = key_padding_mask.view(batch_size, 1, 1, seq_len).expand(-1, 1, -1, -1)
+                merged_mask = attn_mask_expanded + key_padding_mask_expanded
+
+        # no attn_mask and no key_padding_mask, returns None, None
+        return merged_mask, mask_type
 
 
 class MultiHeadAttention(nn.Module):
@@ -82,15 +117,15 @@ class MultiHeadAttention(nn.Module):
         self.is_cross_attention = is_cross_attention
         
         self.hidden_size = config["hidden_size"]
-        self.num_attention_heads = config["num_attention_heads"]
+        self.num_heads = config["num_heads"]
         # The attention head size is the hidden size divided by the number of attention heads
-        self.attention_head_size = self.hidden_size // self.num_attention_heads
-        self.all_head_size = self.num_attention_heads * self.attention_head_size
+        self.attention_head_size = self.hidden_size // self.num_heads
+        self.all_head_size = self.num_heads * self.attention_head_size
         # Whether or not to use bias in the query, key, and value projection layers
         self.qkv_bias = config["qkv_bias"]
         # Create a list of attention heads
         self.heads = nn.ModuleList([])
-        for _ in range(self.num_attention_heads):
+        for _ in range(self.num_heads):
             head = AttentionHead(
                 self.hidden_size,
                 self.attention_head_size,
@@ -104,9 +139,9 @@ class MultiHeadAttention(nn.Module):
         self.output_projection = nn.Linear(self.all_head_size, self.hidden_size)
         self.output_dropout = nn.Dropout(config["hidden_dropout_prob"])
 
-    def forward(self, x, attention_mask=None, output_attentions=False, encoder_output_states=None):
+    def forward(self, x, key_padding_mask, attn_mask=None, output_attentions=False, encoder_output_states=None):
         # Calculate the attention output for each attention head
-        attention_outputs = [head(x, encoder_output_states, attention_mask) for head in self.heads]
+        attention_outputs = [head(x, encoder_output_states, key_padding_mask, attn_mask) for head in self.heads]
         # Concatenate the attention outputs from each attention head
         attention_output = torch.cat([attention_output for attention_output, _ in attention_outputs], dim=-1)
         # Project the concatenated attention output back to the hidden size
@@ -131,10 +166,10 @@ class FasterMultiHeadAttention(nn.Module):
         self.is_cross_attention = is_cross_attention
         
         self.hidden_size = config["hidden_size"]
-        self.num_attention_heads = config["num_attention_heads"]
+        self.num_heads = config["num_heads"]
         # The attention head size is the hidden size divided by the number of attention heads
-        self.attention_head_size = self.hidden_size // self.num_attention_heads
-        self.all_head_size = self.num_attention_heads * self.attention_head_size
+        self.attention_head_size = self.hidden_size // self.num_heads
+        self.all_head_size = self.num_heads * self.attention_head_size
         # Whether or not to use bias in the query, key, and value projection layers
         self.qkv_bias = config["qkv_bias"]
         # Create a linear layer to project the query, key, and value
@@ -149,7 +184,7 @@ class FasterMultiHeadAttention(nn.Module):
         self.output_projection = nn.Linear(self.all_head_size, self.hidden_size)
         self.output_dropout = nn.Dropout(config["hidden_dropout_prob"])
 
-    def forward(self, x, attention_mask=None, output_attentions=False, encoder_output_states=None):
+    def forward(self, x, key_padding_mask=None, attn_mask=None, output_attentions=False, encoder_output_states=None):
         # Project the query, key, and value
         if encoder_output_states is not None:
             assert hasattr(
@@ -164,12 +199,12 @@ class FasterMultiHeadAttention(nn.Module):
             # Split the projected query, key, and value into query, key, and value
             # (batch_size, sequence_length, all_head_size * 3) -> (batch_size, sequence_length, all_head_size)
             query, key, value = torch.chunk(qkv, 3, dim=-1)
-        # Resize the query, key, and value to (batch_size, num_attention_heads, sequence_length, attention_head_size)
+        # Resize the query, key, and value to (batch_size, num_heads, sequence_length, attention_head_size)
         batch_size, src_sequence_length, _ = query.size()
         trg_sequence_length = key.size(1)
-        query = query.view(batch_size, src_sequence_length, self.num_attention_heads, self.attention_head_size).transpose(1, 2)
-        key = key.view(batch_size, trg_sequence_length, self.num_attention_heads, self.attention_head_size).transpose(1, 2)
-        value = value.view(batch_size, trg_sequence_length, self.num_attention_heads, self.attention_head_size).transpose(1, 2)
+        query = query.view(batch_size, src_sequence_length, self.num_heads, self.attention_head_size).transpose(1, 2)
+        key = key.view(batch_size, trg_sequence_length, self.num_heads, self.attention_head_size).transpose(1, 2)
+        value = value.view(batch_size, trg_sequence_length, self.num_heads, self.attention_head_size).transpose(1, 2)
         # Calculate the attention scores
         # softmax(Q*K.T/sqrt(head_size))*V
         attention_scores = torch.matmul(query, key.transpose(-1, -2))
@@ -182,23 +217,29 @@ class FasterMultiHeadAttention(nn.Module):
         # print(f'attention_scores shape: {attention_scores.shape}')
         ##### end{DEBUG} #####
 
-        if attention_mask is not None:
-            ##### begin{DEBUG} #####
-            # print(f'attention_scores shape: {attention_scores.shape}')
-            # print(f'attention_mask shape: {attention_mask.shape}')
-            ##### end{DEBUG} #####
+        # if attn_mask is not None:
+        #     # Write a very low value (indicating -inf) to the positions where mask == 0
+        #     if self.is_cross_attention:
+        #         attn_mask = attn_mask[:,:,:src_sequence_length,:trg_sequence_length] # Feels like a dirty fix...
+        #     attention_scores.masked_fill_(attn_mask == 0, -1e9)
 
-            # Write a very low value (indicating -inf) to the positions where mask == 0
-            if self.is_cross_attention:
-                attention_mask = attention_mask[:,:,:src_sequence_length,:trg_sequence_length] # Feels like a dirty fix...
-            attention_scores.masked_fill_(attention_mask == 0, -1e9)
+        merged_mask, mask_type = self.merge_masks(key_padding_mask, attn_mask, query)
+        ##### begin{DEBUG} #####
+        # print(f'key_padding_mask shape: {key_padding_mask.shape}')
+        # print(f'attn_mask shape: {attn_mask.shape}')
+        # print(f'merged_mask shape: {merged_mask.shape}')
+        # print(f'attention_scores shape: {attention_scores.shape}')
+        ##### end{DEBUG} #####
+        # how would the mask_type affect things?
+        if merged_mask is not None:
+            attention_scores.masked_fill_(merged_mask == 0, -1e9)
 
         attention_probs = nn.functional.softmax(attention_scores, dim=-1)
         attention_probs = self.attn_dropout(attention_probs)
         # Calculate the attention output
         attention_output = torch.matmul(attention_probs, value)
         # Resize the attention output
-        # from (batch_size, num_attention_heads, sequence_length, attention_head_size)
+        # from (batch_size, num_heads, sequence_length, attention_head_size)
         # To (batch_size, sequence_length, all_head_size)
         attention_output = attention_output.transpose(1, 2) \
                                            .contiguous() \
@@ -211,6 +252,37 @@ class FasterMultiHeadAttention(nn.Module):
             return (attention_output, None)
         else:
             return (attention_output, attention_probs)
+
+    def merge_masks(self, key_padding_mask, attn_mask, query):
+
+        mask_type, merged_mask = None, None
+        if key_padding_mask is not None:
+            mask_type = 1
+            merged_mask = key_padding_mask
+
+        if attn_mask is not None:
+            # In this branch query can't be a nested tensor, so it has a shape
+            batch_size, seq_len, _, _ = query.shape
+            mask_type = 2
+
+            # Always expands attn_mask to 4D
+            if attn_mask.dim() == 4:                
+                attn_mask_expanded = attn_mask
+            elif attn_mask.dim() == 3:
+                attn_mask_expanded = attn_mask.view(batch_size, -1, seq_len, seq_len)
+            else:  # attn_mask.dim() == 2:
+                attn_mask_expanded = attn_mask.view(1, 1, seq_len, seq_len).expand(batch_size, self.num_heads, -1, -1)
+            merged_mask = attn_mask_expanded
+
+            if key_padding_mask is not None:
+                if key_padding_mask.dim() == 4:                    
+                    key_padding_mask_expanded = key_padding_mask
+                else:
+                    key_padding_mask_expanded = key_padding_mask.view(batch_size, 1, 1, seq_len).expand(-1, self.num_heads, -1, -1)
+                merged_mask = attn_mask_expanded + key_padding_mask_expanded
+
+        # no attn_mask and no key_padding_mask, returns None, None
+        return merged_mask, mask_type         
 
 
 class MLP(nn.Module):
@@ -249,13 +321,13 @@ class EncoderBlock(nn.Module):
         self.mlp = MLP(config)
         self.layernorm_2 = nn.LayerNorm(config["hidden_size"])
 
-    def forward(self, x, attention_mask=None, output_attentions=False):
+    def forward(self, x, src_mask=None, src_pad_mask=None, output_attentions=False):
         # Self-attention
         ##### begin{DEBUG} #####
         # print('Encoder Att')
         ##### end{DEBUG} #####
         attention_output, attention_probs = \
-            self.attention(x, attention_mask=attention_mask, output_attentions=output_attentions)
+            self.attention(x, key_padding_mask=src_pad_mask, attn_mask=src_mask, output_attentions=output_attentions)
         # Skip connection
         x = self.layernorm_1(x + attention_output)
         # Feed-forward network
@@ -288,13 +360,13 @@ class DecoderBlock(nn.Module):
         self.mlp = MLP(config)
         self.layernorm_3 = nn.LayerNorm(config["hidden_size"])
 
-    def forward(self, x, encoder_output_states, src_mask=None, trg_mask=None, output_attentions=False):
+    def forward(self, x, encoder_output_states, src_mask=None, src_pad_mask=None, trg_mask=None, trg_pad_mask=None, output_attentions=False):
         # Self-attention
         ##### begin{DEBUG} #####
         # print('Decoder Att')
         ##### end{DEBUG} #####
         attention_output, self_attention_probs = \
-            self.self_attention(x, attention_mask=trg_mask, output_attentions=output_attentions)
+            self.self_attention(x, key_padding_mask=trg_pad_mask, attn_mask=trg_mask, output_attentions=output_attentions)
         # Skip connection
         x = self.layernorm_1(x + attention_output)
         # Cross-attention
@@ -302,7 +374,7 @@ class DecoderBlock(nn.Module):
         # print('Decoder Cross Att')
         ##### end{DEBUG} #####
         attention_output, cross_attention_probs = \
-            self.cross_attention(x, attention_mask=src_mask, output_attentions=output_attentions, encoder_output_states=encoder_output_states)
+            self.cross_attention(x, key_padding_mask=src_pad_mask, attn_mask=src_mask, output_attentions=output_attentions, encoder_output_states=encoder_output_states)
         # Skip connection
         x = self.layernorm_2(x + attention_output)
         # Feed-forward network
@@ -341,7 +413,7 @@ class Encoder(nn.Module):
             block = EncoderBlock(config)
             self.blocks.append(block)
 
-    def forward(self, x, attention_mask=None, output_attentions=False):
+    def forward(self, x, src_mask=None, src_pad_mask=None, output_attentions=False):
         # Create the position ids from the input token ids. Any padded tokens remain padded.
         position_ids = torch.arange(0, x.shape[-1]).to(x.device)
         position_embeddings = self.positional_embedding(position_ids)
@@ -351,7 +423,7 @@ class Encoder(nn.Module):
         # Calculate the transformer block's output for each block
         all_attentions = []
         for block in self.blocks:
-            x, attention_probs = block(x, attention_mask=attention_mask, output_attentions=output_attentions)
+            x, attention_probs = block(x, src_mask=src_mask, src_pad_mask=src_pad_mask, output_attentions=output_attentions)
             if output_attentions:
                 all_attentions.append(attention_probs)
         # Return the encoder's output and the attention probabilities (optional)
@@ -388,7 +460,7 @@ class Decoder(nn.Module):
         self.fc = nn.Linear(config["hidden_size"], config["trg_vocab_size"], bias=bias)
         self.fc.weight = self.token_embedding.weight 
         
-    def forward(self, x, embedding_output_states, src_mask=None, trg_mask=None, output_attentions=False):
+    def forward(self, x, embedding_output_states, src_mask=None, src_pad_mask=None, trg_mask=None, trg_pad_mask=None, output_attentions=False):
         # Create the position ids from the input token ids. Any padded tokens remain padded.
         position_ids = torch.arange(0, x.shape[-1]).to(x.device)
         position_embeddings = self.positional_embedding(position_ids)
@@ -400,11 +472,17 @@ class Decoder(nn.Module):
         all_cross_attentions = []
         for block in self.blocks:
             if output_attentions:
-                x, self_attention_probs, cross_attention_probs = block(x, embedding_output_states, src_mask=src_mask, trg_mask=trg_mask, output_attentions=output_attentions)
+                x, self_attention_probs, cross_attention_probs = block(x, embedding_output_states, 
+                                                                       src_mask=src_mask, src_pad_mask=src_pad_mask, 
+                                                                       trg_mask=trg_mask, trg_pad_mask=trg_pad_mask,
+                                                                       output_attentions=output_attentions)
                 all_self_attentions.append(self_attention_probs)
                 all_cross_attentions.append(cross_attention_probs)
             else: 
-                x, _, _ = block(x, embedding_output_states, src_mask=src_mask, trg_mask=trg_mask, output_attentions=output_attentions)              
+                x, _, _ = block(x, embedding_output_states, 
+                                src_mask=src_mask, src_pad_mask=src_pad_mask,
+                                trg_mask=trg_mask, trg_pad_mask=trg_pad_mask,
+                                output_attentions=output_attentions)              
         # Linear layer
         x = self.fc(x)
         # Softmax
@@ -431,17 +509,23 @@ class DPForNMT(nn.Module):
         #self.apply(self._init_weights)
         self._reset_parameters()
 
-    def forward(self, src, trg, encoder_mask, decoder_mask, output_attentions=False):
+    def forward(self, src, trg, src_mask, src_pad_mask, trg_mask, trg_pad_mask, output_attentions=False):
         # Calculate the encoder's output
-        encoder_output, encoder_self_attentions = self.encoder(src, attention_mask = encoder_mask, output_attentions=output_attentions)
+        encoder_output, encoder_self_attentions = self.encoder(src, src_mask=src_mask, src_pad_mask=src_pad_mask, output_attentions=output_attentions)
         # Return the logits and the attention probabilities (optional)
         if not output_attentions:
             # Calculate the decoder's output
-            decoder_output, _, _ = self.decoder(trg, encoder_output, src_mask=encoder_mask, trg_mask=decoder_mask, output_attentions=output_attentions)
+            decoder_output, _, _ = self.decoder(trg, encoder_output, 
+                                                src_mask=src_mask, src_pad_mask=src_pad_mask,
+                                                trg_mask=trg_mask, trg_pad_mask=trg_pad_mask,
+                                                output_attentions=output_attentions)
             return (decoder_output, None, None, None)
         else:
             # Calculate the decoder's output
-            decoder_output, decoder_self_attentions, decoder_cross_attentions = self.decoder(trg, encoder_output, src_mask=encoder_mask, trg_mask=decoder_mask, output_attentions=output_attentions)
+            decoder_output, decoder_self_attentions, decoder_cross_attentions = self.decoder(trg, encoder_output, 
+                                                                                             src_mask=src_mask, src_pad_mask=src_pad_mask, 
+                                                                                             trg_mask=trg_mask, trg_pad_mask=trg_pad_mask,
+                                                                                             output_attentions=output_attentions)
             return (decoder_output, encoder_self_attentions, decoder_self_attentions, decoder_cross_attentions)
 
     # def _init_weights(self, module):

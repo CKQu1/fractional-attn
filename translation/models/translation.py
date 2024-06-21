@@ -100,7 +100,7 @@ class AttentionHead(nn.Module):
 
             if key_padding_mask is not None:
                 key_padding_mask_expanded = key_padding_mask.view(batch_size, 1, 1, seq_len).expand(-1, 1, -1, -1)
-                merged_mask = attn_mask_expanded + key_padding_mask_expanded
+                merged_mask = attn_mask_expanded & key_padding_mask_expanded
 
         # no attn_mask and no key_padding_mask, returns None, None
         return merged_mask, mask_type
@@ -279,10 +279,16 @@ class FasterMultiHeadAttention(nn.Module):
                     key_padding_mask_expanded = key_padding_mask
                 else:
                     key_padding_mask_expanded = key_padding_mask.view(batch_size, 1, 1, seq_len).expand(-1, self.num_heads, -1, -1)
-                merged_mask = attn_mask_expanded + key_padding_mask_expanded
+                #merged_mask = attn_mask_expanded + key_padding_mask_expanded
+                merged_mask = attn_mask_expanded & key_padding_mask_expanded
 
         # no attn_mask and no key_padding_mask, returns None, None
-        return merged_mask, mask_type         
+        return merged_mask, mask_type        
+
+    """
+    fake_query = torch.ones([args.train_bs, args.max_length, config['num_heads'], config['hidden_size']//config['num_heads']])
+    merged_mask, mask_type = model.encoder.blocks[0].attention.merge_masks(src_pad_mask, src_mask, fake_query)
+    """
 
 
 class MLP(nn.Module):

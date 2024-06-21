@@ -128,11 +128,11 @@ class BilingualDataset(Dataset):
 
 
 def create_padding_mask(seq, pad_token_id):
-    return (seq != pad_token_id).unsqueeze(0).unsqueeze(0)
+    return (seq != pad_token_id).unsqueeze(0).unsqueeze(0).type(torch.int)
 
 def causal_mask(size):
-    mask = torch.triu(torch.ones((1, size, size)), diagonal=1).type(torch.int)
-    return mask == 0
+    mask = torch.tril(torch.ones((1, size, size))).type(torch.int)
+    return mask
 
 def preprocess_function(examples, tokenizer_src, src_language, tokenizer_trg, trg_language, max_length):
     inputs = [example[src_language] for example in examples["translation"]]

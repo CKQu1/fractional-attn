@@ -560,7 +560,7 @@ if __name__ == '__main__':
     #     scaler = torch.GradScaler('cpu', enabled=(dtype == 'float16'))
 
     # loss function    
-    loss_fn = nn.CrossEntropyLoss(ignore_index=config["src_pad_token_id"])
+    loss_fn = nn.CrossEntropyLoss(ignore_index=config["trg_pad_token_id"])
     # optimizer
     #optimizer = model.configure_optimizers(weight_decay, learning_rate, (beta1, beta2), device_type)    
     optimizer = AdamW(model.parameters(), lr=learning_rate, betas=(beta1,beta2), weight_decay=args.weight_decay)
@@ -660,12 +660,12 @@ if __name__ == '__main__':
             if split == 'val':
                 # Compute the BLEU metric
                 # # option 1             
-                metric = torchmetrics.text.BLEUScore()
-                bleu_score = metric(predicted, [tgt_text])
+                # metric = torchmetrics.text.BLEUScore()
+                # bleu_score = metric(predicted, [tgt_text]).item()
                 # option 2
-                # hyp = [tgt_text[idx].split(' ') for idx in range(len(tgt_text))]
-                # ref = [[tgt_text[idx].split(' ')] for idx in range(len(tgt_text))]  # reference translation directly from dataset                   
-                # bleu_score = corpus_bleu(ref, hyp)  
+                hyp = [tgt_text[idx].split(' ') for idx in range(len(tgt_text))]
+                ref = [[model_out_text[idx].split(' ')] for idx in range(len(tgt_text))]  # reference translation directly from dataset                   
+                bleu_score = corpus_bleu(ref, hyp)  
                 # option 3
                 # bleu_score = sentence_bleu(ref, hyp)
                 out_bleu[split] = bleu_score
@@ -691,7 +691,8 @@ if __name__ == '__main__':
         import wandb  # NOT IN CONTAINER
         wandb.init(project=wandb_project, name=wandb_run_name, config=config)    
 
-    # training loop    
+    # training loop 
+    t0 = time.time()   
     X, Y, src_mask, src_pad_mask, trg_mask, trg_pad_mask, _ = get_batch('train') # fetch the very first batch    
     local_iter_num = 0 # number of iterations in the lifetime of this process
     raw_model = model.module if ddp else model # unwrap DDP container if needed
@@ -702,7 +703,6 @@ if __name__ == '__main__':
         metrics_ls = []    
     while True:
 
-        t0 = time.time()
         # determine and set the learning rate for this iteration
         if args.lr_scheduler_type == 'cosine':
             lr = get_lr(iter_num) if decay_lr else learning_rate
@@ -729,7 +729,7 @@ if __name__ == '__main__':
                     #"mfu": running_mfu*100, # convert to percentage
                 })
             else:
-                metrics_ls.append([iter_num, lr, losses['train'].item(), losses['val'].item(), bleu['val'].item(), dt])
+                metrics_ls.append([iter_num, lr, losses['train'].item(), losses['val'].item(), bleu['val'], dt])
 
             if losses['val'] < best_val_loss or always_save_checkpoint:
                 best_val_loss = losses['val']
@@ -752,7 +752,8 @@ if __name__ == '__main__':
 
             # timing and logging
             t1 = time.time()
-            dt = t1 - t0                                  
+            dt = t1 - t0
+            t0 = t1                                
 
         if iter_num == 0 and eval_only:
             break

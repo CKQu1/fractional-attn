@@ -114,7 +114,7 @@ class RDFNSAttentionHead(nn.Module):
 
             if key_padding_mask is not None:
                 key_padding_mask_expanded = key_padding_mask.view(batch_size, 1, 1, seq_len).expand(-1, 1, -1, -1)
-                merged_mask = attn_mask_expanded + key_padding_mask_expanded
+                merged_mask = attn_mask_expanded & key_padding_mask_expanded
 
         # no attn_mask and no key_padding_mask, returns None, None
         return merged_mask, mask_type
@@ -305,10 +305,11 @@ class FasterRDFNSMultiHeadAttention(nn.Module):
                     key_padding_mask_expanded = key_padding_mask
                 else:
                     key_padding_mask_expanded = key_padding_mask.view(batch_size, 1, 1, seq_len).expand(-1, self.num_heads, -1, -1)
-                merged_mask = attn_mask_expanded + key_padding_mask_expanded
+                #merged_mask = attn_mask_expanded + key_padding_mask_expanded
+                merged_mask = attn_mask_expanded & key_padding_mask_expanded
 
         # no attn_mask and no key_padding_mask, returns None, None
-        return merged_mask, mask_type         
+        return merged_mask, mask_type          
 
 
 class MLP(nn.Module):

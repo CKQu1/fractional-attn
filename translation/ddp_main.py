@@ -602,8 +602,8 @@ if __name__ == '__main__':
                 break
                
             # Decoder self-attention mask
-            trg_mask = torch.tril(torch.ones((trg_len, trg_len))).expand(1, 1, trg_len, trg_len)
-            trg_pad_mask = (decoder_input != config['trg_pad_token_id']).unsqueeze(0).unsqueeze(0)
+            trg_mask = torch.tril(torch.ones((trg_len, trg_len))).expand(1, 1, trg_len, trg_len).type(torch.int)
+            trg_pad_mask = (decoder_input != config['trg_pad_token_id']).unsqueeze(0).unsqueeze(0).type(torch.int)
             # trg_mask = trg_mask.type_as(source_mask).to(device)
 
             # calculate output
@@ -630,45 +630,29 @@ if __name__ == '__main__':
         out_loss = {}
         out_bleu = {}
         model.eval()
+        metric = torchmetrics.text.BLEUScore()
         for split in ['train', 'val']:
             losses = torch.zeros(eval_iters)
-            predicted = []
-            #expected = []
+            bleu_scores = []
             for k in range(eval_iters):
                 #X, Y, encoder_mask, decoder_mask = get_batch(split)
                 X, Y, src_mask, src_pad_mask, trg_mask, trg_pad_mask, tgt_text = get_batch(split)
                 with ctx:                    
                     logits, _, _, _ = model(X, Y, src_mask, src_pad_mask, trg_mask, trg_pad_mask)  # NOT REALLY LOGITS
                     loss = loss_fn(logits.view(-1, trg_vocab_size), Y.view(-1)) 
-                    if split == 'val':
-                        # Generate sentence
-                        model_outs = []
+                    if split == 'val':                        
+                        # Generate sentence                        
                         bs = X.shape[0]
                         for batch_idx in range(bs):
                             model_out = greedy_decode(model, X[batch_idx,None], src_mask[batch_idx,None], src_pad_mask[batch_idx,None],
                                                       tokenizer_trg, config["max_length"], device) 
-                            model_out_text = tokenizer_trg.decode(model_out.detach().cpu().numpy())
-                            model_outs.append(model_out)
-                        predicted.append(model_out_text)
-                        model_out = model_out.detach().cpu().numpy()
-                        for batch_idx in range(model_out.shape[0]):
-                            model_out_text = tokenizer_trg.decode(model_out)
-                            predicted.append(model_out_text)                                                
-                        #expected.append(tokenizer_trg.decode(Y.squeeze().tolist())) # Probably better to just get target text
-                losses[k] = loss.item()
+                            model_out_text = tokenizer_trg.decode(model_out.detach().cpu().numpy())                            
+                            bleu_scores.append(metric(model_out_text, [tgt_text[batch_idx]]).item())                                              
+                losses[k] = loss.item()            
             out_loss[split] = losses.mean()
             if split == 'val':
-                # Compute the BLEU metric
-                # # option 1             
-                # metric = torchmetrics.text.BLEUScore()
-                # bleu_score = metric(predicted, [tgt_text]).item()
-                # option 2
-                hyp = [tgt_text[idx].split(' ') for idx in range(len(tgt_text))]
-                ref = [[model_out_text[idx].split(' ')] for idx in range(len(tgt_text))]  # reference translation directly from dataset                   
-                bleu_score = corpus_bleu(ref, hyp)  
-                # option 3
-                # bleu_score = sentence_bleu(ref, hyp)
-                out_bleu[split] = bleu_score
+                out_bleu[split] = np.mean(bleu_scores)
+
         model.train()
         return out_loss, out_bleu
 

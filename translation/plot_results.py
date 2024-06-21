@@ -25,12 +25,8 @@ colors = list(mcl.TABLEAU_COLORS.keys())
 
 
 # Plots average of metrics over ensembles
-"""
-
-"""
-
 def plot_ensembles(model_root_dir, datasets=['iwslt14'],  
-                   metrics=['val_loss','val_bleu'], 
+                   metrics=['train_loss','val_loss','val_bleu'], 
                    mod_rows=1,display=False):
     global df, df_setting, df_filtered, fig_file, axs
     global subdir, dirname

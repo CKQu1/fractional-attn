@@ -38,48 +38,11 @@ from tokenizers.pre_tokenizers import Whitespace
 from pathlib import Path
 
 import torchmetrics
-from nltk.translate.bleu_score import corpus_bleu, sentence_bleu
+from nltk.translate.bleu_score import corpus_bleu, sentence_bleu, SmoothingFunction
 
 """
-This training script can be run both on a single gpu in debug mode,
-and also in a larger training run with distributed data parallel (ddp).
-
-To run with DDP on 4 gpus on 1 node, example:
-$ torchrun --standalone --nproc_per_node=4 train.py
-
-To run with DDP on 4 gpus across 2 nodes, example:
-- Run on the first (master) node with example IP 123.456.123.456:
-$ torchrun --nproc_per_node=8 --nnodes=2 --node_rank=0 --master_addr=123.456.123.456 --master_port=1234 train.py
-- Run on the worker node:
-$ torchrun --nproc_per_node=8 --nnodes=2 --node_rank=1 --master_addr=123.456.123.456 --master_port=1234 train.py
-(If your cluster does not have Infiniband interconnect prepend NCCL_IB_DISABLE=1)
-"""
-
-# single-core
-"""
-# training based on steps
-python -i ddp_main.py --model_name=dpnmt --n_attn_heads=2\
- --max_iters=50 --eval_interval=5 --eval_iters=10 --weight_decay=0 --model_root=.droot/debug_mode
-
-python -i ddp_main.py --model_name=sinknmt --n_attn_heads=2\
- --max_iters=1 --eval_interval=1 --eval_iters=1 --weight_decay=0 --model_root=.droot/debug_mode 
-
-# training based on epochs
-python -i ddp_main.py --model_name=dpnmt --n_attn_heads=2\
- --epochs=1 --weight_decay=0 --model_root=.droot/debug_mode
-
-python -i ddp_main.py --model_name=fnsnmt --alpha=1.2 --n_attn_heads=1\
- --max_iters=10 --eval_interval=5 --eval_iters=200 --weight_decay=0 --model_root=.droot/single-core 
-
-python -i ddp_main.py --model_name=fnsnmt --alpha=1.2\
- --num_encoder_layers=2 --num_decoder_layers=2\
- --max_iters=10 --eval_interval=5 --eval_iters=10 --weight_decay=0 --model_root=.droot/single-core  
-"""
-
-# multi-core
-"""
-torchrun --nnodes=1 --nproc_per_node=4 ddp_main.py --model_name=fnsnmt --alpha=1.5\
- --max_iters=10 --eval_interval=5 --eval_iters=200 --weight_decay=0 --model_root=.droot/multi-core 
+python -i model_generate.py\
+ --out_dir=.droot/test-run-v1/en_layers\=2-de_layers\=2-heads\=None-hidden\=128-qkv/dpnmt-iwslt14-qkv/model\=0/ --split=train --eval_iters=5
 """
 
 if __name__ == '__main__':
@@ -88,8 +51,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='translation/ddp_main.py training arguments')   
     
     parser.add_argument('--out_dir', default='', type=str, help='model dir')
-    parser.add_argument('--eval_iters', default=10, type=int, help='number of sentences to translate')
-    parser.add_argument('--split', default='val', type=str)
+    parser.add_argument('--eval_iters', default=5, type=int, help='number of sentences to translate')
+    parser.add_argument('--split', default='val', type=str)    
 
     # Dataset settings
     parser.add_argument('--dataset_name', default='iwslt14', type=str)
@@ -113,7 +76,8 @@ if __name__ == '__main__':
 
     # data
     dataset = attn_setup['dataset_name']
-    train_batch_size = int(train_setting.loc[0,'batch_size'])
+    #train_batch_size = int(train_setting.loc[0,'batch_size'])
+    train_batch_size = 1
     eval_batch_size = 1
     # model
     model_name = attn_setup['model_name']
@@ -299,6 +263,10 @@ if __name__ == '__main__':
                 # truncate the src_mask to create the cross-attn mask here
                 out, _, _ = model.decoder(decoder_input, encoder_output, src_mask=source_mask[:,:,:trg_len,:], src_pad_mask=source_pad_mask,
                                           trg_mask=trg_mask, trg_pad_mask=trg_pad_mask)
+            
+            #out[0,-1,config['trg_pad_token_id']] = float('-Inf')            
+            #out[0,-1,sos_idx] = float('-Inf')
+
             # get next token
             next_word = out[0,-1,:].argmax(-1)
             decoder_input = torch.cat(
@@ -318,22 +286,46 @@ if __name__ == '__main__':
     split = args.split
     model_outs = []
     predicted = []
-    expected = []
-    model.eval()
+    expected = []  # greedy decoded
+    decoded_texts = []
+    losses = []
+    loss_fn = nn.CrossEntropyLoss(ignore_index=config["trg_pad_token_id"])
+
+    def get_bleu_score(ref_sentence, pred_sentence):
+        hyp = [pred_sentence.split(' ')]
+        ref = [ref_sentence.split(' ')]               
+        bleu_score = corpus_bleu(ref, hyp, smoothing_function=SmoothingFunction().method4)     
+        return bleu_score
+
+    model.eval()    
     for _ in tqdm(range(eval_iters)):
         X, Y, src_mask, src_pad_mask, trg_mask, trg_pad_mask, tgt_text = get_batch(split)
+        logits, _, _, _ = model(X, Y, src_mask, src_pad_mask, trg_mask, trg_pad_mask)        
+        loss = loss_fn(logits.view(-1, trg_vocab_size), Y.view(-1))
+        losses.append(loss)
         bs = X.shape[0]
         for batch_idx in range(bs):
             model_out = greedy_decode(model, X[batch_idx,None], src_mask[batch_idx,None], src_pad_mask[batch_idx,None], 
                                       tokenizer_trg, config["max_length"], device) 
-            model_out_text = tokenizer_trg.decode(model_out.detach().cpu().numpy())
             model_outs.append(model_out)
-            predicted.append(model_out_text)   
-            expected.append(tgt_text)
+
+            model_out_text = tokenizer_trg.decode(model_out.detach().cpu().numpy())
+            predicted.append(model_out_text)            
+
+            decoded_text = tokenizer_trg.decode(logits.argmax(-1).detach().cpu().numpy()[batch_idx])   
+            decoded_texts.append(decoded_text)
+
+            expected.append(tgt_text[batch_idx])
 
     print(model_outs)
     print('\n')
-    print('-'*15 + 'Translation results' + '-'*15 + '\n')
-    for ii in range(len(predicted)):        
-        print(f'Sentence {ii+1}: {expected[ii][0]} \n')
-        print(f'Result {ii+1}: {predicted[ii]} \n')
+    print('-'*15 + ' Translation results ' + '-'*15 + '\n')
+    for ii in range(len(predicted)):  
+        print('<'*40)      
+        print(f'Case {ii+1} \n')
+        print(f'SENTENCE --> {expected[ii]} \n')
+        print(f'DECODED --> {decoded_texts[ii]} \n')  
+        print(f'Bleu score: {get_bleu_score(expected[ii], decoded_texts[ii])} \n ')
+        print(f'GREEDY DECODED --> {predicted[ii]} \n')    
+        print(f'Bleu score: {get_bleu_score(expected[ii], predicted[ii])} \n ')    
+        print('>'*40 + '\n')

@@ -219,9 +219,14 @@ if __name__ == '__main__':
         model = FNSForNMT(config)    
     elif model_name == 'opfnsnmt':
         from models.opfns_translation import OPFNSForNMT
-        model = OPFNSForNMT(config)              
+        model = OPFNSForNMT(config)       
+    elif model_name == 'rdfnsnmt':
+        from models.rdfns_translation import RDFNSForNMT
+        model = RDFNSForNMT(config)    
+    elif model_name == 'rdopfnsnmt':
+        from models.rdopfns_translation import RDOPFNSForNMT               
     else:
-        print(f'{args.model_name} does not exist!')
+        print(f'{model_name} does not exist!')
         quit()    
 
     model.load_state_dict(checkpoint['model'])
@@ -328,6 +333,7 @@ if __name__ == '__main__':
 
     print(model_outs)
     print('\n')
-    print(predicted)
-    print('\n')
-    print(expected)
+    print('-'*15 + 'Translation results' + '-'*15 + '\n')
+    for ii in range(len(predicted)):        
+        print(f'Sentence {ii+1}: {expected[ii][0]} \n')
+        print(f'Result {ii+1}: {predicted[ii]} \n')

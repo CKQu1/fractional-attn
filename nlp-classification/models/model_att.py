@@ -477,9 +477,14 @@ class DPSelfAttention(nn.Module):
 
         # obtained from class Model in models/model.py
         #bool_mask = (attention_mask>=0).long()
-        bool_mask = (attention_mask>0).long()
-        #attention_mask_expanded = torch.bmm(bool_mask.unsqueeze(-1), bool_mask.unsqueeze(1))
-        attention_mask_expanded = (bool_mask.unsqueeze(-1)@bool_mask.unsqueeze(1)).view(batch_size, 1, seq_len, seq_len).expand(-1, num_heads, -1, -1)     
+
+        # type 1: key_pad_mask
+        attention_mask_expanded = attention_mask.unsqueeze(1).unsqueeze(2).expand([-1,self.num_heads,1,-1])
+
+        # type 2: symmetrical mask
+        #bool_mask = (attention_mask>=0).long()
+        # bool_mask = (attention_mask>0).long()
+        # attention_mask_expanded = (bool_mask.unsqueeze(-1)@bool_mask.unsqueeze(1)).view(batch_size, 1, seq_len, seq_len).expand(-1, num_heads, -1, -1)     
 
         # ---------- \begin{delete} ----------
         # print('-'*10)
@@ -488,14 +493,17 @@ class DPSelfAttention(nn.Module):
         # print(f'query_vectors shape: {query_vectors.shape}')
         # print(f'value_vectors shape: {value_vectors.shape}')
         # print(f'attention_mask shape: {attention_mask.shape}')        
-        # print(f'attention_mask_expanded shape: {attention_mask_expanded.shape}')        
+        # print(f'attention_mask_expanded shape: {attention_mask_expanded.shape}')      
+        # print(f'attention_mask[0]: {attention_mask[0]}') 
+        # print(f'attention_mask max: {attention_mask.max()}, min: {attention_mask.min()}') 
+        # print(f'attention_mask zeros: {(attention_mask==0).sum()}')
         # print(attention_mask)
         # print('\n')
         # torch.set_printoptions(profile='full')
         # print(torch.diagonal(attention_mask_expanded[0,0]))
         # print(f'att shape: {att.shape}')        
         # print('-'*10)
-        # quit()
+        #quit()
         # ---------- \end{delete} ---------- 
                     
         #att = att.masked_fill(attention_mask_expanded==0, float('-inf'))  # CHECK!!!
@@ -608,11 +616,15 @@ class FNSSelfAttention(nn.Module):
         else:                         
             euclidean_dist = torch.cdist(query_vectors, query_vectors) # (B,H,N,N)     
 
-        # attention_mask obtained from class Model in models/model.py
+        # attention_mask obtained from class Model in models/model.py    
+
+        # type 1: key_pad_mask
+        attention_mask_expanded = attention_mask.unsqueeze(1).unsqueeze(2).expand([-1,self.num_heads,1,-1])
+
+        # type 2: symmetrical mask
         #bool_mask = (attention_mask>=0).long()
-        bool_mask = (attention_mask>0).long()
-        #attention_mask_expanded = torch.bmm(bool_mask.unsqueeze(-1), bool_mask.unsqueeze(1))
-        attention_mask_expanded = (bool_mask.unsqueeze(-1)@bool_mask.unsqueeze(1)).view(batch_size, 1, seq_len, seq_len).expand(-1, num_heads, -1, -1)      
+        # bool_mask = (attention_mask>0).long()
+        # attention_mask_expanded = (bool_mask.unsqueeze(-1)@bool_mask.unsqueeze(1)).view(batch_size, 1, seq_len, seq_len).expand(-1, num_heads, -1, -1)   
 
         #euclidean_dist = euclidean_dist.masked_fill(attention_mask_expanded==0, float('inf'))  # CHECK!!!  
         euclidean_dist = euclidean_dist.masked_fill(attention_mask_expanded==0, 1e9)
@@ -767,9 +779,13 @@ class V2FNSSelfAttention(nn.Module):
         #print(f'Distance percentiles: {torch.quantile(euclidean_dist.flatten(), q)}')
 
         # obtained from class Model in models/model.py
+        # type 1: key_pad_mask
+        attention_mask_expanded = attention_mask.unsqueeze(1).unsqueeze(2).expand([-1,self.num_heads,1,-1])
+
+        # type 2: symmetrical mask
         #bool_mask = (attention_mask>=0).long()
-        bool_mask = (attention_mask>0).long()
-        attention_mask_expanded = (bool_mask.unsqueeze(-1)@bool_mask.unsqueeze(1)).view(batch_size, 1, seq_len, seq_len).expand(-1, num_heads, -1, -1)      
+        # bool_mask = (attention_mask>0).long()
+        # attention_mask_expanded = (bool_mask.unsqueeze(-1)@bool_mask.unsqueeze(1)).view(batch_size, 1, seq_len, seq_len).expand(-1, num_heads, -1, -1)    
 
         euclidean_dist = euclidean_dist.masked_fill(attention_mask_expanded==0, 1e9)  # 1e9
         #euclidean_dist = euclidean_dist.masked_fill(attention_mask_expanded==0, 2)  # further is capped by 2 on an d-sphere
@@ -927,9 +943,13 @@ class V3FNSSelfAttention(nn.Module):
         #print(f'Distance percentiles: {torch.quantile(g_dist.flatten(), q)}')
 
         # obtained from class Model in models/model.py
+        # type 1: key_pad_mask
+        attention_mask_expanded = attention_mask.unsqueeze(1).unsqueeze(2).expand([-1,self.num_heads,1,-1])
+
+        # type 2: symmetrical mask
         #bool_mask = (attention_mask>=0).long()
-        bool_mask = (attention_mask>0).long()
-        attention_mask_expanded = (bool_mask.unsqueeze(-1)@bool_mask.unsqueeze(1)).view(batch_size, 1, seq_len, seq_len).expand(-1, num_heads, -1, -1)      
+        # bool_mask = (attention_mask>0).long()
+        # attention_mask_expanded = (bool_mask.unsqueeze(-1)@bool_mask.unsqueeze(1)).view(batch_size, 1, seq_len, seq_len).expand(-1, num_heads, -1, -1)    
 
         g_dist = g_dist.masked_fill(attention_mask_expanded==0, self.mask_val)  # 1e9
 
@@ -1088,9 +1108,13 @@ class OPFNSSelfAttention(nn.Module):
         #print(f'Distance percentiles: {torch.quantile(g_dist.flatten(), q)}')
 
         # obtained from class Model in models/model.py
+        # type 1: key_pad_mask
+        attention_mask_expanded = attention_mask.unsqueeze(1).unsqueeze(2).expand([-1,self.num_heads,1,-1])
+
+        # type 2: symmetrical mask
         #bool_mask = (attention_mask>=0).long()
-        bool_mask = (attention_mask>0).long()
-        attention_mask_expanded = (bool_mask.unsqueeze(-1)@bool_mask.unsqueeze(1)).view(batch_size, 1, seq_len, seq_len).expand(-1, num_heads, -1, -1)      
+        # bool_mask = (attention_mask>0).long()
+        # attention_mask_expanded = (bool_mask.unsqueeze(-1)@bool_mask.unsqueeze(1)).view(batch_size, 1, seq_len, seq_len).expand(-1, num_heads, -1, -1)      
 
         g_dist = g_dist.masked_fill(attention_mask_expanded==0, self.mask_val)  # 1e9
 
@@ -1248,9 +1272,13 @@ class V4FNSSelfAttention(nn.Module):
         #print(f'Distance percentiles: {torch.quantile(g_dist.flatten(), q)}')
 
         # obtained from class Model in models/model.py
+        # type 1: key_pad_mask
+        attention_mask_expanded = attention_mask.unsqueeze(1).unsqueeze(2).expand([-1,self.num_heads,1,-1])
+
+        # type 2: symmetrical mask
         #bool_mask = (attention_mask>=0).long()
-        bool_mask = (attention_mask>0).long()
-        attention_mask_expanded = (bool_mask.unsqueeze(-1)@bool_mask.unsqueeze(1)).view(batch_size, 1, seq_len, seq_len).expand(-1, num_heads, -1, -1)      
+        # bool_mask = (attention_mask>0).long()
+        # attention_mask_expanded = (bool_mask.unsqueeze(-1)@bool_mask.unsqueeze(1)).view(batch_size, 1, seq_len, seq_len).expand(-1, num_heads, -1, -1)      
 
         g_dist = g_dist.masked_fill(attention_mask_expanded==0, self.mask_val)  # 1e9
 
@@ -1410,9 +1438,13 @@ class RDFNSSelfAttention(nn.Module):
         #print(f'Distance percentiles: {torch.quantile(g_dist.flatten(), q)}')
 
         # obtained from class Model in models/model.py
+        # type 1: key_pad_mask
+        attention_mask_expanded = attention_mask.unsqueeze(1).unsqueeze(2).expand([-1,self.num_heads,1,-1])
+
+        # type 2: symmetrical mask
         #bool_mask = (attention_mask>=0).long()
-        bool_mask = (attention_mask>0).long()
-        attention_mask_expanded = (bool_mask.unsqueeze(-1)@bool_mask.unsqueeze(1)).view(batch_size, 1, seq_len, seq_len).expand(-1, num_heads, -1, -1)      
+        # bool_mask = (attention_mask>0).long()
+        # attention_mask_expanded = (bool_mask.unsqueeze(-1)@bool_mask.unsqueeze(1)).view(batch_size, 1, seq_len, seq_len).expand(-1, num_heads, -1, -1)     
 
         if alpha < 2:
             attn_score = (1 + g_dist/bandwidth**0.5)**(-d_intrinsic-alpha)
@@ -1577,9 +1609,13 @@ class V2OPFNSSelfAttention(nn.Module):
         #print(f'Distance percentiles: {torch.quantile(g_dist.flatten(), q)}')
 
         # obtained from class Model in models/model.py
+        # type 1: key_pad_mask
+        attention_mask_expanded = attention_mask.unsqueeze(1).unsqueeze(2).expand([-1,self.num_heads,1,-1])
+
+        # type 2: symmetrical mask
         #bool_mask = (attention_mask>=0).long()
-        bool_mask = (attention_mask>0).long()
-        attention_mask_expanded = (bool_mask.unsqueeze(-1)@bool_mask.unsqueeze(1)).view(batch_size, 1, seq_len, seq_len).expand(-1, num_heads, -1, -1)      
+        # bool_mask = (attention_mask>0).long()
+        # attention_mask_expanded = (bool_mask.unsqueeze(-1)@bool_mask.unsqueeze(1)).view(batch_size, 1, seq_len, seq_len).expand(-1, num_heads, -1, -1)      
 
         g_dist = g_dist.masked_fill(attention_mask_expanded==0, self.mask_val)  # 1e9
 
@@ -1740,9 +1776,13 @@ class RDOPFNSSelfAttention(nn.Module):
         #print(f'Distance percentiles: {torch.quantile(g_dist.flatten(), q)}')
 
         # obtained from class Model in models/model.py
+        # type 1: key_pad_mask
+        attention_mask_expanded = attention_mask.unsqueeze(1).unsqueeze(2).expand([-1,self.num_heads,1,-1])
+
+        # type 2: symmetrical mask
         #bool_mask = (attention_mask>=0).long()
-        bool_mask = (attention_mask>0).long()
-        attention_mask_expanded = (bool_mask.unsqueeze(-1)@bool_mask.unsqueeze(1)).view(batch_size, 1, seq_len, seq_len).expand(-1, num_heads, -1, -1)      
+        # bool_mask = (attention_mask>0).long()
+        # attention_mask_expanded = (bool_mask.unsqueeze(-1)@bool_mask.unsqueeze(1)).view(batch_size, 1, seq_len, seq_len).expand(-1, num_heads, -1, -1)     
 
         if alpha < 2:
             attn_score = (1 + g_dist/bandwidth**0.5)**(-d_intrinsic-alpha)
@@ -1854,12 +1894,16 @@ class SINKSelfAttention(nn.Module):
         ), f"hidden_states should have embed_dim = {self.embed_dim}, but has {embed_dim}"
 
         n_it = self.n_it; bandwidth = self.bandwidth
+        mask_val = self.mask_val
 
         # obtained from class Model in models/model.py        
+        # type 1: key_pad_mask
+        attention_mask_expanded = attention_mask.unsqueeze(1).unsqueeze(2).expand([-1,self.num_heads,1,-1])
+
+        # type 2: symmetrical mask
         #bool_mask = (attention_mask>=0).long()
-        bool_mask = (attention_mask>0).long()
-        attention_mask_expanded = (bool_mask.unsqueeze(-1)@bool_mask.unsqueeze(1)).view(batch_size, 1, seq_len, seq_len).expand(-1, num_heads, -1, -1)      
-        mask_val = self.mask_val
+        # bool_mask = (attention_mask>0).long()
+        # attention_mask_expanded = (bool_mask.unsqueeze(-1)@bool_mask.unsqueeze(1)).view(batch_size, 1, seq_len, seq_len).expand(-1, num_heads, -1, -1)                   
 
         # (B, N, H, D) = (batch_size, seq_len, num_heads, head_dim)        
         query_vectors = query_vectors.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2)  # (B,N,H,D)        

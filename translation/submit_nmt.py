@@ -75,7 +75,7 @@ if __name__ == '__main__':
     debug_mode = False
     print(f'---------- debug_mode = {debug_mode} ---------- \n')
     
-    instances = [None]
+    instances = ['none']
     #instances = [0,1]
     #instances = [0,1,2]    
     #instances = [0,1,2,3,4]
@@ -86,33 +86,36 @@ if __name__ == '__main__':
                 select = 1; ngpus, ncpus = 0, 1            
                 walltime, mem = '23:59:59', '6GB'    
                 num_proc = ngpus if ngpus > 1 else ncpus                                                                       
-
-                #{'model_name':'sinknmt', 'n_it': 1}, {'model_name':'sinknmt', 'n_it': 3}, 
-                # kwargss = [{'model_name':'fnsnmt', 'alpha': 1.2, 'a': 0}, {'model_name':'fnsnmt', 'alpha': 2, 'a': 0}, 
-                #            {'model_name':'opfnsnmt', 'alpha': 1.2, 'a': 0}, {'model_name':'opfnsnmt', 'alpha': 2, 'a': 0},                                                     
-                #            {'model_name':'dpnmt'}] 
-                kwargss = [{'model_name':'dpnmt'}, 
-                           {'model_name':'fnsnmt','alpha':1.2,'a':1,'bandwidth':0.5},{'model_name':'fnsnmt','alpha':2,'a':1,'bandwidth':0.5},
-                           {'model_name':'opfnsnmt','alpha':1.2,'a':1,'bandwidth':0.5},{'model_name':'opfnsnmt','alpha':2,'a':1,'bandwidth':0.5}]
+                          
+                # {'model_name':'dpnmt'}
+                kwargss = [{'model_name':'dpnmt'},
+                           {'model_name':'rdfnsnmt','alpha':1.2,'a':0,'bandwidth':1},
+                           {'model_name':'rdopfnsnmt','alpha':1.2,'a':0,'bandwidth':1},]
 
                 epochs = 30
                 common_kwargs = {'num_encoder_layers':          2,
                                  'num_decoder_layers':          2,
                                  'n_attn_heads':                4,
                                  'hidden_size':                 128,    
-                                 'max_iters':                   200,
-                                 'eval_interval':               10,
-                                 'eval_iters':                  10, 
-                                 'max_lr':                      1e-4,                    
-                                 'lr_scheduler_type':           'constant',
+                                 'eval_iters':                  200, 
+                                #  'max_lr':                      1e-4,                    
+                                #  'min_lr':                      1e-5,
+                                #  'lr_scheduler_type':           'cosine',
+                                 'max_lr':                      5e-5,                    
+                                 'lr_scheduler_type':           'constant',                                
                                  'train_bs':                    16,                                                                          
                                  'weight_decay':                0
                                  }  
                 if instance is not None:
                     common_kwargs['instance'] = instance
+
                 if epochs is not None:       
-                    common_kwargs['epochs'] = epochs
-                    
+                    common_kwargs['epochs'] = epochs      
+                else:
+                    common_kwargs['max_iters'] = 200
+                    common_kwargs['eval_interval'] = 20
+                    common_kwargs['log_interval'] = 20
+
                 if num_proc > 1:
                     common_kwargs['grad_accum_step'] = num_proc
 
@@ -121,29 +124,49 @@ if __name__ == '__main__':
 
                 model_root_dirname = structural_model_root(qk_share=qk_share, num_encoder_layers=common_kwargs['num_encoder_layers'],
                                                            num_decoder_layers=common_kwargs['num_decoder_layers'], 
-                                                           num_attention_heads=common_kwargs['n_attn_heads'], hidden_size=common_kwargs['hidden_size']
+                                                           num_heads=common_kwargs['n_attn_heads'], hidden_size=common_kwargs['hidden_size']
                                                            )       
-                model_root = njoin(DROOT, 'formers_trained_v6exit()', model_root_dirname)
+                model_root = njoin(DROOT, 'test-run-v7', model_root_dirname)
 
             else:                         
                 ngpus, ncpus = 0, 1
                 select = 1  
-                walltime, mem = '23:59:59', '8GB'                
+                walltime, mem = '23:59:59', '16GB'   
+                num_proc = ngpus if ngpus > 1 else ncpus             
         
-                kwargss = [{'model_name':'sinknmt', 'n_it': 1}, {'model_name':'sinknmt', 'n_it': 3},                           
-                           {'model_name':'dpnmt'}]        
-                common_kwargs = {'instance':                    instance,
-                                 'num_encoder_layers':          1,
-                                 'num_decoder_layers':          1,
-                                 'n_attn_heads':                1,    
-                                 'max_iters':                   10,
-                                 'eval_interval':               5,
-                                 'eval_iters':                  5,                     
+                kwargss = [{'model_name':'dpnmt'}, 
+                           {'model_name':'fnsnmt','alpha':1.2,'a':1,'bandwidth':0.5},{'model_name':'fnsnmt','alpha':2,'a':1,'bandwidth':0.5},
+                           {'model_name':'opfnsnmt','alpha':1.2,'a':1,'bandwidth':0.5},{'model_name':'opfnsnmt','alpha':2,'a':1,'bandwidth':0.5}]
+
+                epochs = 1
+                common_kwargs = {'num_encoder_layers':          4,
+                                 'num_decoder_layers':          4,
+                                 'n_attn_heads':                4,
+                                 'hidden_size':                 256,    
+                                 'max_iters':                   200,
+                                 'eval_interval':               10,
+                                 'eval_iters':                  10, 
+                                 'max_lr':                      5e-5,                    
+                                 'lr_scheduler_type':           'constant',
                                  'train_bs':                    16,                                                                          
                                  'weight_decay':                0
                                  }      
+                                 
+                if instance is not None:
+                    common_kwargs['instance'] = instance
+                if epochs is not None:       
+                    common_kwargs['epochs'] = epochs                    
+                if num_proc > 1:
+                    common_kwargs['grad_accum_step'] = num_proc                                 
                                                                             
-                model_root = njoin(DROOT, 'ddp_test_stage', f'select={select}-ncpus={ncpus}-ngpus={ngpus}')
+                qk_share = False if 'qk_share' not in common_kwargs.keys() else common_kwargs['qk_share']
+                use_custom_optim = False if 'use_custom_optim' not in common_kwargs.keys() else common_kwargs['use_custom_optim']                                 
+
+                model_root_dirname = structural_model_root(qk_share=qk_share, num_encoder_layers=common_kwargs['num_encoder_layers'],
+                                                           num_decoder_layers=common_kwargs['num_decoder_layers'], 
+                                                           num_heads=common_kwargs['n_attn_heads'], hidden_size=common_kwargs['hidden_size']
+                                                           )       
+                model_root = njoin(DROOT, 'speedtest', model_root_dirname)
             
             for idx in range(len(kwargss)):
                 # function automatically creates dir
@@ -153,8 +176,8 @@ if __name__ == '__main__':
             kwargss = add_common_kwargs(kwargss, common_kwargs)
             kwargss_all += kwargss
 
-    #print(kwargss_all)  
-    #quit()  # delete      
+    # print(kwargss_all)  
+    # quit()  # delete      
     train_submit(script_name, kwargss_all,
                  ncpus=ncpus,
                  ngpus=ngpus,

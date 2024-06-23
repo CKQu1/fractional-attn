@@ -118,7 +118,7 @@ class FNSAttentionHead(nn.Module):
         if alpha < 2:
             attn_score = (1 + g_dist/bandwidth**0.5)**(-d_intrinsic-alpha)
         else:
-            attn_score = torch.exp((-g_dist/bandwidth**0.5)**(alpha/(alpha-1)))
+            attn_score = torch.exp(-(g_dist/bandwidth**0.5)**(alpha/(alpha-1)))
         attn_score_shape = attn_score.shape
         D_inv = torch.diag_embed(attn_score.sum(-1)**(-1))  # inverse of degree matrix of attn_score
         K_tilde = D_inv @ attn_score @ D_inv
@@ -242,7 +242,7 @@ class FasterFNSMultiHeadAttention(nn.Module):
         if alpha < 2:
             attn_score = (1 + g_dist/bandwidth**0.5)**(-d_intrinsic-alpha)
         else:
-            attn_score = torch.exp((-g_dist/bandwidth**0.5)**(alpha/(alpha-1)))
+            attn_score = torch.exp(-(g_dist/bandwidth**0.5)**(alpha/(alpha-1)))
         attn_score_shape = attn_score.shape
         D_inv = torch.diag_embed(attn_score.sum(-1)**(-1))  # inverse of degree matrix of attn_score
         K_tilde = D_inv @ attn_score @ D_inv

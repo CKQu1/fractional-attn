@@ -59,12 +59,13 @@ class RDOPFNSAttentionHead(nn.Module):
             value = self.value(x)
 
         # Euclidean dist
+        # g_dist = torch.cdist(query, key, p=2) / math.sqrt(self.hidden_size / self.attention_head_size)
         g_dist = torch.cdist(query, key, p=2)
         # Calculate the attention scores
         if alpha < 2:
             attn_score = (1 + g_dist/bandwidth**0.5)**(-d_intrinsic-alpha)
         else:
-            attn_score = torch.exp((-g_dist/bandwidth**0.5)**(alpha/(alpha-1)))
+            attn_score = torch.exp(-(g_dist/bandwidth**0.5)**(alpha/(alpha-1)))
 
         # if attn_mask is not None:
         #     # Write a very low value (indicating -inf) to the positions where mask == 0
@@ -77,15 +78,21 @@ class RDOPFNSAttentionHead(nn.Module):
         if merged_mask is not None:
             attn_score.masked_fill_(merged_mask == 0, -1e9)
 
+        min_bound = 1e-9
         if a == 0:            
             #attn_score = attn_score.masked_fill_(attention_mask==0, -1e9) # Mask
             attention_probs = F.normalize(attn_score,p=1,dim=3)  # can do this as the attn weights are always positive
         else:
-            D_inv_row = torch.diag_embed(attn_score.sum(-1)**(-a))  # inverse of degree matrix of attn_score
-            D_inv_col = torch.diag_embed(attn_score.sum(-2)**(-a))  # inverse of degree matrix of attn_score
-            K_tilde = D_inv_row @ attn_score @ D_inv_col            
-            #K_tilde = K_tilde.masked_fill_(attention_mask==0, -1e9) # Mask
+            # D_inv_row = torch.diag_embed(attn_score.sum(-1)**(-a))  # inverse of degree matrix of attn_score
+            # D_inv_col = torch.diag_embed(attn_score.sum(-2)**(-a))  # inverse of degree matrix of attn_score
+            # K_tilde = D_inv_row @ attn_score @ D_inv_col            
+            # #K_tilde = K_tilde.masked_fill_(attention_mask==0, -1e9) # Mask
+
+            N_R = torch.clamp(attn_score.sum(-1), min=min_bound, max=None)  # row sum
+            N_C = torch.clamp(attn_score.sum(-2), min=min_bound, max=None)  # col sum
+            K_tilde = (N_R**(-a)).unsqueeze(-1) * attn_score * (N_C**(-a)).unsqueeze(-2)
             attention_probs = F.normalize(K_tilde,p=1,dim=3)  # can do this as the attn weights are always positive
+
         attention_probs = self.attn_dropout(attention_probs)
 
         # Calculate the attention output
@@ -248,12 +255,13 @@ class FasterRDOPFNSMultiHeadAttention(nn.Module):
         value = value.view(batch_size, trg_sequence_length, self.num_heads, self.attention_head_size).transpose(1, 2)
 
         # Euclidean dist
+        # g_dist = torch.cdist(query, key, p=2) / math.sqrt(self.hidden_size / self.attention_head_size)
         g_dist = torch.cdist(query, key, p=2)
         # Calculate the attention scores
         if alpha < 2:
             attn_score = (1 + g_dist/bandwidth**0.5)**(-d_intrinsic-alpha)
         else:
-            attn_score = torch.exp((-g_dist/bandwidth**0.5)**(alpha/(alpha-1)))
+            attn_score = torch.exp(-(g_dist/bandwidth**0.5)**(alpha/(alpha-1)))
 
         # if attn_mask is not None:
         #     # Write a very low value (indicating -inf) to the positions where mask == 0
@@ -266,15 +274,21 @@ class FasterRDOPFNSMultiHeadAttention(nn.Module):
         if merged_mask is not None:
             attn_score.masked_fill_(merged_mask == 0, -1e9)
 
+        min_bound = 1e-9
         if a == 0:            
             #attn_score = attn_score.masked_fill_(attention_mask==0, -1e9) # Mask
             attention_probs = F.normalize(attn_score,p=1,dim=3)  # can do this as the attn weights are always positive
         else:
-            D_inv_row = torch.diag_embed(attn_score.sum(-1)**(-a))  # inverse of degree matrix of attn_score
-            D_inv_col = torch.diag_embed(attn_score.sum(-2)**(-a))  # inverse of degree matrix of attn_score
-            K_tilde = D_inv_row @ attn_score @ D_inv_col            
-            #K_tilde = K_tilde.masked_fill_(attention_mask==0, -1e9) # Mask
-            attention_probs = F.normalize(K_tilde,p=1,dim=3)  # can do this as the attn weights are always positive
+            # D_inv_row = torch.diag_embed(attn_score.sum(-1)**(-a))  # inverse of degree matrix of attn_score
+            # D_inv_col = torch.diag_embed(attn_score.sum(-2)**(-a))  # inverse of degree matrix of attn_score
+            # K_tilde = D_inv_row @ attn_score @ D_inv_col            
+            # #K_tilde = K_tilde.masked_fill_(attention_mask==0, -1e9) # Mask
+
+            N_R = torch.clamp(attn_score.sum(-1), min=min_bound, max=None)  # row sum
+            N_C = torch.clamp(attn_score.sum(-2), min=min_bound, max=None)  # col sum
+            K_tilde = (N_R**(-a)).unsqueeze(-1) * attn_score * (N_C**(-a)).unsqueeze(-2)
+            attention_probs = F.normalize(K_tilde,p=1,dim=3)  # can do this as the attn weights are always positive            
+            
         attention_probs = self.attn_dropout(attention_probs)
 
         # Calculate the attention output

@@ -130,7 +130,7 @@ class DMFNSAttentionHead(nn.Module):
         if alpha < 2:
             attn_score = (1 + g_dist/bandwidth**0.5)**(-d_intrinsic-alpha)
         else:
-            attn_score = torch.exp((-g_dist/bandwidth**0.5)**(alpha/(alpha-1)))
+            attn_score = torch.exp(-(g_dist/bandwidth**0.5)**(alpha/(alpha-1)))
         attn_score_shape = attn_score.shape
 
         # print(f'hidden_size = {self.hidden_size}, attention_head_size = {self.attention_head_size}')
@@ -268,7 +268,7 @@ class FasterDMFNSMultiHeadAttention(nn.Module):
         if alpha < 2:
             attn_score = (1 + g_dist/bandwidth**0.5)**(-d_intrinsic-alpha)
         else:
-            attn_score = torch.exp((-g_dist/bandwidth**0.5)**(alpha/(alpha-1)))
+            attn_score = torch.exp(-(g_dist/bandwidth**0.5)**(alpha/(alpha-1)))
         attn_score_shape = attn_score.shape
         if a > 0:
             K_tilde = torch.diag_embed(attn_score.sum(-1)**(-a)) @ attn_score @ torch.diag_embed(attn_score.sum(-2)**(-a))

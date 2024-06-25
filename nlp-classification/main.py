@@ -1,4 +1,5 @@
 import argparse
+import json
 import numpy as np
 import os
 import pandas as pd
@@ -33,24 +34,25 @@ warnings.simplefilter(action='ignore', category=FutureWarning)
 python -i main.py --n_layers=1 --n_attn_heads=2 --model_name=dpformer\
  --max_len=256 --max_steps=2 --logging_steps=2 --save_steps=2 --eval_steps=2\
  --divider=1 --warmup_steps=0 --grad_accum_step=1 --dataset_name=rotten_tomatoes\
- --model_root=.droot/speedtest
+ --model_root=.droot/debug-mode
 
-python -i main.py --n_layers=1 --n_attn_heads=2 --model_name=opfnsformer --alpha=1.5\
+python -i main.py --n_layers=1 --n_attn_heads=2 --model_name=rdfnsformer\
+ --alpha=1.5 --bandwidth=0.5 --a=1\
  --max_len=256 --max_steps=2 --logging_steps=2 --save_steps=2 --eval_steps=2\
  --divider=1 --warmup_steps=0 --grad_accum_step=1 --dataset_name=rotten_tomatoes\
- --model_root=.droot/speedtest
+ --model_root=.droot/debug-mode
 
 python -i main.py --n_layers=1 --n_attn_heads=2 --model_name=sinkformer --n_it=1\
  --max_len=256 --max_steps=2 --logging_steps=2 --save_steps=2 --eval_steps=2\
  --divider=1 --warmup_steps=0 --grad_accum_step=1 --dataset_name=rotten_tomatoes\
- --model_root=.droot/speedtest  
+ --model_root=.droot/debug-mode  
 """
 
 """
 torchrun --nnodes=1 --nproc_per_node=4 main.py --n_layers=1 --n_attn_heads=2 --model_name=v3fnsformer --alpha=1.5\
  --max_len=256 --max_steps=2 --logging_steps=2 --save_steps=2 --eval_steps=2\
  --divider=1 --warmup_steps=0 --grad_accum_step=1 --dataset_name=rotten_tomatoes\
- --model_root=.droot/speedtest
+ --model_root=.droot/debug-mode
 """
 
 #torch.autograd.set_detect_anomaly(True)  # delete
@@ -224,10 +226,36 @@ if __name__ == '__main__':
         model_root = args.model_root   
     #if not isdir(model_root): makedirs(model_root)
 
-    config = ModelConfig.from_json_file(f"{repo_dir}/models/config_simple.json")
-    config.num_labels = len(set(train_dataset['label']))   
-    config.qk_share = args.qk_share
-    config.qkv_bias = args.qkv_bias
+    #config = ModelConfig.from_json_file(f"{repo_dir}/models/config_simple.json")
+    config = {"attention_mode": "fnsformer",
+              "attention_probs_dropout_prob": 0.1,
+              #"attention_window": [64],
+              "bos_token_id": 0,
+              "eos_token_id": 2,
+              "gradient_checkpointing": False,
+              "hidden_act": "gelu",
+              "hidden_dropout_prob": 0.1,
+              "hidden_size": 768,
+              "ignore_attention_mask": False,
+              "initializer_range": 0.02,
+              "intermediate_size": 3072,
+              "layer_norm_eps": 1e-05,
+              "max_position_embeddings": 4098,
+              "model_type": "fnsformer",
+              "num_attention_heads": 2,
+              "num_hidden_layers": 1,
+              "pad_token_id": 1,
+              "sep_token_id": 2,
+              "type_vocab_size": 1,
+              "vocab_size": 50265,
+              "num_labels": len(set(train_dataset['label'])),
+              "qk_share": args.qk_share,
+              "qkv_bias": args.qkv_bias,
+              "num_hidden_layers": args.n_layers,
+              "num_attention_heads": args.n_attn_heads,
+              "hidden_size": args.hidden_size,
+              "attention_window": args.max_len  # full attn, no sliding windows
+              }         
 
     attn_setup = {'qk_share': args.qk_share, 'qkv_bias': args.qkv_bias}
     attn_setup['model_name'] = args.model_name
@@ -239,57 +267,47 @@ if __name__ == '__main__':
         if args.model_name in ['v2fnsformer', 'v3fnsformer', 'v4fnsformer', 'opfnsformer', 'v2opfnsformer']:
 
             if args.alpha < 2:
-                config.d_intrinsic = int(args.hidden_size/args.n_attn_heads)  # head_dim
-                config.sphere_radius = ((np.pi**(1/config.d_intrinsic)-1)/np.pi)   
-                #config.sphere_radius = 1
-                attn_setup['d_intrinsic'] = config.d_intrinsic
+                config['d_intrinsic'] = attn_setup['d_intrinsic'] = int(args.hidden_size//args.n_attn_heads - 1)  # head_dim
+                config['sphere_radius'] = ((np.pi**(1/config.d_intrinsic)-1)/np.pi)   
+                #config.sphere_radius = 1                
             elif args.alpha >= 2:
-                config.sphere_radius = 1
-
-            # degree index
-            attn_setup['a'] = args.a      
-            config.a = args.a  
+                config['sphere_radius'] = attn_setup['d_intrinsic'] = 1                 
         
             # mask for distance
-            config.mask_val = config.sphere_radius * np.pi
-            attn_setup['sphere_radius'] = config.sphere_radius       
-            attn_setup['mask_val'] = np.pi * config.sphere_radius   
+            config['mask_val'] = attn_setup['mask_val'] = config.sphere_radius * np.pi
+            attn_setup['sphere_radius'] = config.sphere_radius                      
 
         elif args.model_name in ['rdfnsformer', 'rdopfnsformer']:
 
             if args.alpha < 2:
-                config.d_intrinsic = int(args.hidden_size/args.n_attn_heads)  # head_dim
-                config.sphere_radius = ((np.pi**(1/config.d_intrinsic)-1)/np.pi)   
-                #config.sphere_radius = 1
-                attn_setup['d_intrinsic'] = config.d_intrinsic
-            elif args.alpha >= 2:
-                config.sphere_radius = 1
+                config['d_intrinsic'] = attn_setup['d_intrinsic'] = int(args.hidden_size/args.n_attn_heads)  # head_dim                
 
-            # degree index
-            attn_setup['a'] = args.a      
-            config.a = args.a          
+        # degree index
+        config['a'] = attn_setup['a'] = args.a      
 
     elif args.model_name == 'sinkformer':
         n_it = args.n_it
         attn_setup['n_it'] = n_it
         attn_setup['bandwidth'] = args.bandwidth
         # mask for DP
-        config.mask_val = -1e-9
-        attn_setup['mask_val'] = config.mask_val
-
-    config.num_hidden_layers = args.n_layers
-    config.num_attention_heads = args.n_attn_heads
-    config.hidden_size = args.hidden_size
-    config.attention_window = args.max_len  # full attn, no sliding windows                    
-
-    model = FNSFormerForSequenceClassification(config, **attn_setup).to(dev)    
-    ########## add other model options here ##########
+        config['mask_val'] = attn_setup['mask_val'] = -1e-9                         
 
     models_dir, model_dir = create_model_dir(model_root, **attn_setup)
     if master_process:
         if not os.path.isdir(models_dir): os.makedirs(models_dir)
-        if not os.path.isdir(model_dir): os.makedirs(model_dir)                
-    
+        if not os.path.isdir(model_dir): os.makedirs(model_dir) 
+          
+    # save config
+    with open(njoin(model_dir,"config.json"), "w") as ofile: 
+        json.dump(config, ofile)   
+    # save attn_setup
+    with open(njoin(model_dir,"attn_setup.json"), "w") as ofile: 
+        json.dump(attn_setup, ofile)        
+
+    model_config = ModelConfig.from_json_file(njoin(model_dir, 'config.json'))
+    model = FNSFormerForSequenceClassification(model_config, **attn_setup).to(dev)        
+    ########## add other model options here ##########            
+            
     if args.lr_scheduler_type in ['linear', 'cosine']:
         if args.warmup_steps is None:
             warmup_steps = 100   
@@ -469,7 +487,7 @@ if __name__ == '__main__':
             top_names += [e for e in col_names if e not in top_names]
             run_perf = run_perf[top_names]
             run_perf.to_csv(njoin(model_dir, "run_performance.csv"))
-
+        
         model_settings = attn_setup # model_settings['sparsify_type'] = args.sparsify_type
         model_settings['train_secs'] = train_secs
         model_settings.update(trainer.state.log_history[-1])

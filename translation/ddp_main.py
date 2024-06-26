@@ -130,6 +130,7 @@ if __name__ == '__main__':
     # Model settings
     parser.add_argument('--model_name', default='fnsnmt', type=str)
     # FNS
+    parser.add_argument('--manifold', default='sphere', type=str)
     parser.add_argument('--alpha', default=1, type=float)
     parser.add_argument('--a', default=0, type=float)
     # SINK
@@ -166,6 +167,12 @@ if __name__ == '__main__':
 
     args = parser.parse_args()    
 
+    # assertions
+    model_name = args.model_name.lower()
+    if 'fns' in model_name:
+        assert args.manifold in ['sphere', 'rd'], 'FNS manifold: sphere or rd'   
+        assert 1 <= args.alpha <= 2, 'FNS alpha must be between [1,2]'
+        assert args.a in [0,0.5,1], 'Normalization index must be 0 or 0.5 or 1'             
 
     # -----------------------------------------------------------------------------
     # default config values designed to train a gpt2 (124M) on OpenWebText
@@ -181,7 +188,7 @@ if __name__ == '__main__':
     # wandb logging
     wandb_log = args.wandb_log # disabled by default
     wandb_project = args.wandb_project
-    wandb_run_name = f'{args.model_name}-{args.dataset_name}' # 'run' + str(time.time())
+    wandb_run_name = f'{model_name}-{args.dataset_name}' # 'run' + str(time.time())
 
     # data
     dataset = args.dataset_name
@@ -226,30 +233,40 @@ if __name__ == '__main__':
     instance = int(args.instance) if args.instance.lower() != 'none' else None
     attn_setup = {'qk_share': args.qk_share, 'qkv_bias': args.qkv_bias}
     if instance is not None:
-        attn_setup['instance'] = instance
-    attn_setup['model_name'] = args.model_name
+        attn_setup['instance'] = instance    
     attn_setup['dataset_name'] = args.dataset_name    
-    if 'fns' in args.model_name:
+    if 'fns' in model_name:
+        attn_setup['manifold'] = args.manifold
         config['alpha'] = attn_setup['alpha'] = args.alpha      
-        config['a'] = attn_setup['a'] = args.a
-        config['bandwidth'] = attn_setup['bandwidth'] = args.bandwidth   
-        if args.alpha < 2:            
-            config['d_intrinsic'] = int(config['hidden_size'] / config['num_heads'])  # head_dim
-            config['sphere_radius'] = ((np.pi**(1/config['d_intrinsic'])-1)/np.pi)                            
-        else:
-            config['sphere_radius'] = 1
+        config['bandwidth'] = attn_setup['bandwidth'] = args.bandwidth          
+        if args.manifold == 'sphere':
 
-        attn_setup['sphere_radius'] = config['sphere_radius']       
-        attn_setup['mask_val'] = config['mask_val'] = np.pi * config['sphere_radius']   
-    elif 'rd' in args.model_name:
-        config['alpha'] = attn_setup['alpha'] = args.alpha      
-        config['a'] = attn_setup['a'] = args.a
-        config['bandwidth'] = attn_setup['bandwidth'] = args.bandwidth   
-        if args.alpha < 2:            
-            config['d_intrinsic'] = int(config['hidden_size'] / config['num_heads'])  # head_dim        
-    elif args.model_name == 'sinknmt':
+            if args.alpha < 2:
+                config['d_intrinsic'] = attn_setup['d_intrinsic'] = args.hidden_size//args.n_attn_heads - 1
+                config['sphere_radius'] = ((np.pi**(1/config['d_intrinsic'])-1)/np.pi)   
+                #config.sphere_radius = 1                
+            elif args.alpha >= 2:
+                config['sphere_radius'] = attn_setup['d_intrinsic'] = 1                 
+        
+            # mask for distance
+            config['mask_val'] = attn_setup['mask_val'] = config['sphere_radius'] * np.pi
+            attn_setup['sphere_radius'] = config['sphere_radius']   
+
+            model_name = 'sp' + model_name
+
+        elif args.manifold == 'rd':
+            if args.alpha < 2:
+                config['d_intrinsic'] = attn_setup['d_intrinsic'] = args.hidden_size//args.n_attn_heads  # head_dim                
+
+            model_name = 'rd' + model_name
+
+        # degree index
+        config['a'] = attn_setup['a'] = args.a       
+    elif model_name == 'sinknmt':
         config['n_it'] = attn_setup['n_it'] = args.n_it
         config['bandwidth'] = attn_setup['bandwidth'] = args.bandwidth           
+
+    attn_setup['model_name'] = model_name
 
     # adamw optimizer
     learning_rate = args.max_lr  # max learning rate
@@ -483,33 +500,33 @@ if __name__ == '__main__':
     if init_from == 'scratch':
         # init a new model from scratch
         if master_process:
-            print(f'Initializing a new {args.model_name} from scratch \n')
+            print(f'Initializing a new {model_name} from scratch \n')
         # determine the vocab size we'll use for from-scratch training
         # if meta_vocab_size is None:
         #     print("defaulting to vocab_size of GPT-2 to 50304 (50257 rounded up for efficiency)")
         # model_args['vocab_size'] = meta_vocab_size if meta_vocab_size is not None else 50304
         # gptconf = GPTConfig(**model_args)
         # model = GPT(gptconf)
-        if args.model_name == 'dpnmt':
+        if model_name == 'dpnmt':
             from models.translation import DPForNMT
             model = DPForNMT(config)
-        elif args.model_name == 'sinknmt':
+        elif model_name == 'sinknmt':
             from models.sink_translation import SINKForNMT
             model = SINKForNMT(config)            
-        elif args.model_name == 'fnsnmt':
+        elif model_name == 'spfnsnmt':
             from models.fns_translation import FNSForNMT
             model = FNSForNMT(config)    
-        elif args.model_name == 'opfnsnmt':
+        elif model_name == 'spopfnsnmt':
             from models.opfns_translation import OPFNSForNMT
             model = OPFNSForNMT(config)           
-        elif args.model_name == 'rdfnsnmt':
+        elif model_name == 'rdfnsnmt':
             from models.rdfns_translation import RDFNSForNMT
             model = RDFNSForNMT(config)    
-        elif args.model_name == 'rdopfnsnmt':
+        elif model_name == 'rdopfnsnmt':
             from models.rdopfns_translation import RDOPFNSForNMT
             model = RDOPFNSForNMT(config)                   
         else:
-            print(f'{args.model_name} does not exist!')
+            print(f'{model_name} does not exist!')
             quit()    
 
     """
@@ -729,10 +746,9 @@ if __name__ == '__main__':
                     print(f"saving checkpoint to {out_dir}")
                     torch.save(checkpoint, os.path.join(out_dir, 'ckpt.pt'))
 
-            if master_process:
-                if not wandb_log:
-                    df = pd.DataFrame(metrics_ls, columns=['iter', 'lr', 'train_loss', 'val_loss', 'val_bleu', 'secs_per_eval'])
-                    df.to_csv(njoin(out_dir, '_run_performance.csv'))      
+            if not wandb_log:
+                df = pd.DataFrame(metrics_ls, columns=['iter', 'lr', 'train_loss', 'val_loss', 'val_bleu', 'secs_per_eval'])
+                df.to_csv(njoin(out_dir, '_run_performance.csv'))      
 
             # timing and logging
             t1 = time.time()

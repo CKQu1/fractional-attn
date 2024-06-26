@@ -94,6 +94,7 @@ if __name__ == '__main__':
     parser.add_argument('--n_attn_heads', default=2, type=int)
     parser.add_argument('--hidden_size', default=768, type=int)    
     parser.add_argument('--model_name', default='fnsformer', type=str, help='v3fnsformer | sinkformer | dpformer') 
+    parser.add_argument('--manifold', default='sphere', type=str, help='sphere | rd') 
     # FNSformer
     parser.add_argument('--alpha', default=1, type=float)
     parser.add_argument('--bandwidth', default=1, type=float) 
@@ -109,6 +110,14 @@ if __name__ == '__main__':
     parser.add_argument('--model_root', default='', type=str, help='root dir of storing the model')
 
     args = parser.parse_args()    
+
+    # ---------------------------------------- 0. Assertions ----------------------------------------
+    assert args.hidden_size % args.n_attn_heads == 0, 'hidden_size must be divisible by n_attn_heads'
+    model_name = args.model_name.lower()
+    if 'fns' in model_name:
+        assert args.manifold in ['sphere', 'rd'], 'FNS manifold: sphere or rd'   
+        assert 1 <= args.alpha <= 2, 'FNS alpha must be between [1,2]'
+        assert args.a in [0,0.5,1], 'Normalization index must be 0 or 0.5 or 1
 
     if not args.wandb_log:
         os.environ["WANDB_DISABLED"] = "true"
@@ -128,10 +137,7 @@ if __name__ == '__main__':
         master_process = global_rank == 0 # this process will do logging, checkpointing etc.             
     else:        
         device_total = 1       
-        master_process = True
-
-    args.model_name = args.model_name.lower()
-    assert args.model_name in MODEL_NAMES, f'{args.model_name} does not exist in {MODEL_NAMES}'
+        master_process = True        
 
     logging.set_verbosity_debug()
     logger = logging.get_logger()
@@ -227,7 +233,7 @@ if __name__ == '__main__':
     #if not isdir(model_root): makedirs(model_root)
 
     #config = ModelConfig.from_json_file(f"{repo_dir}/models/config_simple.json")
-    config = {"attention_mode": "fnsformer",
+    config = {"attention_mode": model_name,
               "attention_probs_dropout_prob": 0.1,
               #"attention_window": [64],
               "bos_token_id": 0,
@@ -257,40 +263,45 @@ if __name__ == '__main__':
               "attention_window": args.max_len  # full attn, no sliding windows
               }         
 
-    attn_setup = {'qk_share': args.qk_share, 'qkv_bias': args.qkv_bias}
-    attn_setup['model_name'] = args.model_name
+    attn_setup = {'qk_share': args.qk_share, 'qkv_bias': args.qkv_bias}    
     attn_setup['dataset_name'] = args.dataset_name
-    if 'fnsformer' in args.model_name:
+    if 'fns' in model_name:
+        attn_setup['manifold'] = args.manifold
         attn_setup['alpha'] = args.alpha      
         attn_setup['bandwidth'] = args.bandwidth          
-
-        if args.model_name in ['v2fnsformer', 'v3fnsformer', 'v4fnsformer', 'opfnsformer', 'v2opfnsformer']:
+        if args.manifold == 'sphere':
 
             if args.alpha < 2:
-                config['d_intrinsic'] = attn_setup['d_intrinsic'] = int(args.hidden_size//args.n_attn_heads - 1)  # head_dim
-                config['sphere_radius'] = ((np.pi**(1/config.d_intrinsic)-1)/np.pi)   
+                config['d_intrinsic'] = attn_setup['d_intrinsic'] = args.hidden_size//args.n_attn_heads - 1
+                config['sphere_radius'] = ((np.pi**(1/config['d_intrinsic'])-1)/np.pi)   
                 #config.sphere_radius = 1                
             elif args.alpha >= 2:
                 config['sphere_radius'] = attn_setup['d_intrinsic'] = 1                 
         
             # mask for distance
-            config['mask_val'] = attn_setup['mask_val'] = config.sphere_radius * np.pi
-            attn_setup['sphere_radius'] = config.sphere_radius                      
+            config['mask_val'] = attn_setup['mask_val'] = config['sphere_radius'] * np.pi
+            attn_setup['sphere_radius'] = config['sphere_radius']   
 
-        elif args.model_name in ['rdfnsformer', 'rdopfnsformer']:
+            model_name = 'sp' + model_name
 
+        elif args.manifold == 'rd':
             if args.alpha < 2:
-                config['d_intrinsic'] = attn_setup['d_intrinsic'] = int(args.hidden_size/args.n_attn_heads)  # head_dim                
+                config['d_intrinsic'] = attn_setup['d_intrinsic'] = args.hidden_size//args.n_attn_heads  # head_dim                
+
+            model_name = 'rd' + model_name
 
         # degree index
         config['a'] = attn_setup['a'] = args.a      
 
-    elif args.model_name == 'sinkformer':
+    elif model_name == 'sinkformer':
         n_it = args.n_it
         attn_setup['n_it'] = n_it
         attn_setup['bandwidth'] = args.bandwidth
         # mask for DP
-        config['mask_val'] = attn_setup['mask_val'] = -1e-9                         
+        config['mask_val'] = attn_setup['mask_val'] = -1e-9     
+
+    assert model_name in MODEL_NAMES, f'{model_name} does not exist in {MODEL_NAMES}'
+    attn_setup['model_name'] = model_name
 
     models_dir, model_dir = create_model_dir(model_root, **attn_setup)
     if master_process:
@@ -382,8 +393,9 @@ if __name__ == '__main__':
             print(f'milestones: {args.milestones}')
             print(f'gamma: {args.gamma}')
         print('\n')
-        print(f'model: {args.model_name}')
-        if 'fnsformer' in args.model_name:
+        print(f'model: {model_name}')
+        if 'fnsformer' in model_name:
+            print(f'Manifold: {args.manifold}')
             print(f'alpha = {args.alpha}, bandwidth = {args.bandwidth}, a = {args.a}')
         print(f'dataset: {args.dataset_name}')
         print(attn_setup)           

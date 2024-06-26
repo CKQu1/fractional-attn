@@ -4,8 +4,7 @@ from torch import nn
 from transformers.modeling_utils import PreTrainedModel,apply_chunking_to_forward
 from transformers.models.roberta.configuration_roberta import RobertaConfig
 from typing import Optional, Tuple, Union, List
-from models.model_att import DPAttention, FNSAttention, V2FNSAttention, V3FNSAttention, V4FNSAttention, OPFNSAttention, V2OPFNSAttention, SINKAttention
-from models.model_att import RDFNSAttention, RDOPFNSAttention
+from models.model_att import DPAttention, FNSAttention, SPFNSAttention, SPOPFNSAttention, SINKAttention
 from models.model_utils import *
 #from models.model_utils import BaseModelOutput
 
@@ -312,28 +311,23 @@ class Block(nn.Module):
         assert model_name in MODEL_NAMES
         if model_name == 'fnsformer':
             self.attention = FNSAttention(config,  layer_id, **kwargs)
-        elif model_name == 'v2fnsformer':
-            self.attention = V2FNSAttention(config, layer_id, **kwargs)
-        elif model_name == 'v3fnsformer':
-            self.attention = V3FNSAttention(config, layer_id, **kwargs)   
-        elif model_name == 'v4fnsformer':
-            self.attention = V4FNSAttention(config, layer_id, **kwargs)               
-        elif model_name == 'opfnsformer':
-            self.attention = OPFNSAttention(config, layer_id, **kwargs)
-        elif model_name == 'v2opfnsformer':
-            self.attention = V2OPFNSAttention(config, layer_id, **kwargs)   
-
+        elif model_name == 'spfnsformer':
+            self.attention = SPFNSAttention(config, layer_id, **kwargs)             
+        elif model_name == 'spopfnsformer':
+            self.attention = SPOPFNSAttention(config, layer_id, **kwargs)   
         elif model_name == 'rdfnsformer':
             self.attention = RDFNSAttention(config, layer_id, **kwargs)  
         elif model_name == 'rdopfnsformer':
             self.attention = RDOPFNSAttention(config, layer_id, **kwargs)  
-
         elif model_name == 'sinkformer':
             self.attention = SINKAttention(config, layer_id, **kwargs)            
         elif model_name == 'dpformer':
             self.attention = DPAttention(config,  layer_id, **kwargs)
         elif model_name == 'l2former':
             pass
+        else:
+            print(f'{model_name} does not exist!')
+            quit()
         self.intermediate = FNSFormerIntermediate(config)
         self.output = FNSFormerOutput(config)
         self.chunk_size_feed_forward = config.chunk_size_feed_forward

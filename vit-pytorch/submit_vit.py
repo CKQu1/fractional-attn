@@ -83,7 +83,7 @@ if __name__ == '__main__':
         for didx, dataset_name in enumerate(dataset_names):
             if not debug_mode:
                 select = 1; ngpus, ncpus = 0, 1                            
-                walltime, mem = '23:59:59', '8GB'                             
+                walltime, mem = '24:59:59', '8GB'                             
 
                 if ngpus > 1:
                     num_proc = ngpus
@@ -104,19 +104,14 @@ if __name__ == '__main__':
                 #            {'model_name':'opdmfnsvit', 'alpha': 2, 'a': 1}
                 #            ]    
 
-                kwargss = [{'model_name':'dmfnsvit', 'alpha': 1.2, 'a': 0}, 
-                           {'model_name':'dmfnsvit', 'alpha': 2, 'a': 0},                             
-                           {'model_name':'opdmfnsvit', 'alpha': 1.2, 'a': 0}, 
-                           {'model_name':'opdmfnsvit', 'alpha': 2, 'a': 0},
+                kwargss = [{'model_name':'fnsvit', 'alpha': 1.2, 'a': 0,'bandwidth':0.5,'manifold':'sphere'}, 
+                           {'model_name':'fnsvit', 'alpha': 2, 'a': 0,'bandwidth':0.5,'manifold':'sphere'},                             
+                           {'model_name':'fnsvit', 'alpha': 1.2, 'a': 0,'bandwidth':0.5,'manifold':'rd'}, 
+                           {'model_name':'fnsvit', 'alpha': 2, 'a': 0,'bandwidth':0.5,'manifold':'rd'},
                            {'model_name':'sinkvit', 'n_it': 1},                             
                            {'model_name':'sinkvit', 'n_it': 3},
                            {'model_name':'dpvit'}
                            ] 
-
-                # test
-                # kwargss = [{'model_name':'dmfnsvit', 'alpha': 1.2, 'a': 0}, 
-                #            {'model_name':'dmfnsvit', 'alpha': 2, 'a': 0}
-                #            ] 
 
                 epochs = 50                                              
                 common_kwargs = {'instance':          instance,
@@ -142,7 +137,7 @@ if __name__ == '__main__':
                     common_kwargs['log_interval'] = steps_per_epoch  # for mfu
                     
                 if num_proc > 1:
-                    common_kwargs['grad_accum_step'] = num_proc
+                    common_kwargs['grad_accum_step'] = num_proc * 2
 
                 qk_share = False if 'qk_share' not in common_kwargs.keys() else common_kwargs['qk_share']
                 use_custom_optim = False if 'use_custom_optim' not in common_kwargs.keys() else common_kwargs['use_custom_optim']                                 
@@ -150,7 +145,7 @@ if __name__ == '__main__':
                 model_root_dirname = structural_model_root(qk_share=qk_share, n_layers=common_kwargs['n_layers'],
                                                            n_attn_heads=common_kwargs['n_attn_heads'], hidden_size=common_kwargs['hidden_size']
                                                            )       
-                model_root = njoin(DROOT, 'formers_trained', model_root_dirname)
+                model_root = njoin(DROOT, 'fine-tune-v3', model_root_dirname)
                 #model_root = njoin(DROOT, f'ncpus={ncpus}-formers_trained', model_root_dirname)
 
             else:                         

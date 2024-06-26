@@ -43,8 +43,8 @@ $ torchrun --nproc_per_node=8 --nnodes=2 --node_rank=1 --master_addr=123.456.123
 
 # single-core
 """
-python ddp_main.py --model_name=v2dmfnsvit --alpha=1.5 --a=0 --max_iters=100 --eval_interval=5\
- --eval_iters=200 --weight_decay=0 --n_layers=1 --n_attn_heads=2 --model_root=.droot/debug-mode 
+python ddp_main.py --model_name=v2dmfnsvit --alpha=1.5 --a=0 --max_iters=1000 --eval_interval=200 --log_interval=200\
+ --eval_iters=200 --weight_decay=0 --n_layers=2 --n_attn_heads=2 --model_root=.droot/debug-mode 
 
 python ddp_main.py --model_name=opfnsvit --alpha=1.5 --max_iters=100 --eval_interval=5\
  --lr_scheduler_type=binary --max_lr=5e-5 --max_lr=5e-6\
@@ -103,6 +103,7 @@ if __name__ == '__main__':
     # Model settings
     parser.add_argument('--model_name', default='dpvit', type=str)    
     # fnsvit type
+    parser.add_argument('--manifold', default='sphere', type=str)
     parser.add_argument('--alpha', default=1, type=float)
     parser.add_argument('--bandwidth', default=1, type=float)  
     parser.add_argument('--a', default=1, type=float)
@@ -132,6 +133,13 @@ if __name__ == '__main__':
 
     args = parser.parse_args()    
 
+    # assertions
+    model_name = args.model_name.lower()
+    if 'fns' in model_name:
+        assert args.manifold in ['sphere', 'rd'], 'FNS manifold: sphere or rd'   
+        assert 1 <= args.alpha <= 2, 'FNS alpha must be between [1,2]'
+        assert args.a in [0,0.5,1], 'Normalization index must be 0 or 0.5 or 1'   
+
     # -----------------------------------------------------------------------------
     # default config values designed to train a gpt2 (124M) on OpenWebText
     # I/O
@@ -146,7 +154,7 @@ if __name__ == '__main__':
     # wandb logging
     wandb_log = args.wandb_log # disabled by default
     wandb_project = args.wandb_project
-    wandb_run_name = f'{args.model_name}-{args.dataset_name}' # 'run' + str(time.time())
+    wandb_run_name = f'{model_name}-{args.dataset_name}' # 'run' + str(time.time())
 
     # data
     dataset = args.dataset_name
@@ -179,26 +187,41 @@ if __name__ == '__main__':
     assert config['intermediate_size'] == 4 * config['hidden_size']
     assert config['image_size'] % config['patch_size'] == 0
 
-    attn_setup = {'qk_share': args.qk_share, 'qkv_bias': args.qkv_bias, 'instance': args.instance}
-    attn_setup['model_name'] = args.model_name
+    attn_setup = {'qk_share': args.qk_share, 'qkv_bias': args.qkv_bias, 'instance': args.instance}    
     attn_setup['dataset_name'] = args.dataset_name    
-    if 'fns' in args.model_name:
+    if 'fns' in model_name:
+        attn_setup['manifold'] = args.manifold
         config['alpha'] = attn_setup['alpha'] = args.alpha      
-        config['bandwidth'] = attn_setup['bandwidth'] = args.bandwidth
-        if 'dm' in args.model_name:
-            config['a'] = attn_setup['a'] = args.a   
-        if args.alpha < 2:            
-            config['d_intrinsic'] = int(config["hidden_size"] / config["num_attention_heads"])  # head_dim
-            config['sphere_radius'] = ((np.pi**(1/config['d_intrinsic'])-1)/np.pi)                            
-        else:
-            config['sphere_radius'] = 1
+        config['bandwidth'] = attn_setup['bandwidth'] = args.bandwidth          
+        if args.manifold == 'sphere':
 
-        attn_setup['sphere_radius'] = config['sphere_radius']       
-        attn_setup['mask_val'] = np.pi * config['sphere_radius']   
+            if args.alpha < 2:
+                config['d_intrinsic'] = attn_setup['d_intrinsic'] = args.hidden_size//args.n_attn_heads - 1
+                config['sphere_radius'] = ((np.pi**(1/config['d_intrinsic'])-1)/np.pi)   
+                #config.sphere_radius = 1                
+            elif args.alpha >= 2:
+                config['sphere_radius'] = attn_setup['d_intrinsic'] = 1                 
+        
+            # mask for distance
+            config['mask_val'] = attn_setup['mask_val'] = config['sphere_radius'] * np.pi
+            attn_setup['sphere_radius'] = config['sphere_radius']   
 
-    elif args.model_name == 'sinkvit':
+            model_name = 'sp' + model_name
+
+        elif args.manifold == 'rd':
+            if args.alpha < 2:
+                config['d_intrinsic'] = attn_setup['d_intrinsic'] = args.hidden_size//args.n_attn_heads  # head_dim                
+
+            model_name = 'rd' + model_name
+
+        # degree index
+        config['a'] = attn_setup['a'] = args.a      
+
+    elif model_name == 'sinkvit':
         config['n_it'] = attn_setup['n_it'] = args.n_it
         config['bandwidth'] = attn_setup['bandwidth'] = args.bandwidth
+
+    attn_setup['model_name'] = model_name        
 
     # adamw optimizer
     learning_rate = args.max_lr  # max learning rate
@@ -220,11 +243,6 @@ if __name__ == '__main__':
     dtype = 'bfloat16' if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else 'float16' # 'float32', 'bfloat16', or 'float16', the latter will auto implement a GradScaler
     #compile = True # use PyTorch 2.0 to compile the model to be faster
     compile = False
-    # -----------------------------------------------------------------------------
-    # CONFIGS FOR GPT2
-    # config_keys = [k for k,v in globals().items() if not k.startswith('_') and isinstance(v, (int, float, bool, str))]
-    # exec(open('configurator.py').read()) # overrides from command line or config file
-    # config = {k: globals()[k] for k in config_keys} # will be useful for logging
     # -----------------------------------------------------------------------------
 
     # DDP settings
@@ -297,7 +315,6 @@ if __name__ == '__main__':
                                   ]
         train_settings.to_csv(njoin(out_dir, "train_setting.csv"))        
 
-
         print('-'*25)
         print(f'ddp = {ddp}')
         if ddp and args.train_with_ddp:        
@@ -324,24 +341,6 @@ if __name__ == '__main__':
     if dataset == 'cifar10':
         #data_dir = njoin(DROOT,'DATA','cifar-10-batches-py')
         trainloader, testloader, _ = prepare_data(batch_size=batch_size, num_workers=ddp_world_size)    
-
-    # only for large datasets
-    # def get_batch(split):
-    #     # We recreate np.memmap every batch to avoid a memory leak, as per
-    #     # https://stackoverflow.com/questions/45132940/numpy-memmap-memory-usage-want-to-iterate-once/61472122#61472122
-    #     if split == 'train':
-    #         data = np.memmap(os.path.join(data_dir, 'train.bin'), dtype=np.uint16, mode='r')
-    #     else:
-    #         data = np.memmap(os.path.join(data_dir, 'val.bin'), dtype=np.uint16, mode='r')
-    #     ix = torch.randint(len(data) - block_size, (batch_size,))
-    #     x = torch.stack([torch.from_numpy((data[i:i+block_size]).astype(np.int64)) for i in ix])
-    #     y = torch.stack([torch.from_numpy((data[i+1:i+1+block_size]).astype(np.int64)) for i in ix])
-    #     if device_type == 'cuda':
-    #         # pin arrays x,y, which allows us to move them to GPU asynchronously (non_blocking=True)
-    #         x, y = x.pin_memory().to(device, non_blocking=True), y.pin_memory().to(device, non_blocking=True)
-    #     else:
-    #         x, y = x.to(device), y.to(device)
-    #     return x, y
 
     def get_batch(split):
         if split == 'train':
@@ -378,36 +377,30 @@ if __name__ == '__main__':
     if init_from == 'scratch':
         # init a new model from scratch
         if master_process:
-            print(f'Initializing a new {args.model_name} from scratch \n')
-        # determine the vocab size we'll use for from-scratch training
-        # if meta_vocab_size is None:
-        #     print("defaulting to vocab_size of GPT-2 to 50304 (50257 rounded up for efficiency)")
-        # model_args['vocab_size'] = meta_vocab_size if meta_vocab_size is not None else 50304
-        # gptconf = GPTConfig(**model_args)
-        # model = GPT(gptconf)
-        if args.model_name == 'dpvit':
+            print(f'Initializing a new {model_name} from scratch \n')
+
+        if model_name == 'dpvit':
             from vit_pytorch.vit import ViTForClassfication
             model = ViTForClassfication(config)
-        elif args.model_name == 'fnsvit':
-            from vit_pytorch.fns_vit import FNSViTForClassfication
-            model = FNSViTForClassfication(config)    
-        elif args.model_name == 'opfnsvit':
-            from vit_pytorch.opfns_vit import OPFNSViTForClassfication
-            model = OPFNSViTForClassfication(config)     
-        elif args.model_name == 'dmfnsvit':
+        # elif model_name == 'fnsvit':
+        #     from vit_pytorch.fns_vit import FNSViTForClassfication
+        #     model = FNSViTForClassfication(config)    
+        # elif model_name == 'opfnsvit':
+        #     from vit_pytorch.opfns_vit import OPFNSViTForClassfication
+        #     model = OPFNSViTForClassfication(config)     
+        elif model_name == 'spfnsvit':
             from vit_pytorch.dmfns_vit import DMFNSViTForClassfication
             model = DMFNSViTForClassfication(config)    
-        elif args.model_name == 'opdmfnsvit':
+        elif model_name == 'spopdmfnsvit':
             from vit_pytorch.opdmfns_vit import OPDMFNSViTForClassfication
             model = OPDMFNSViTForClassfication(config)      
-        elif args.model_name == 'v2dmfnsvit':
+        elif model_name == 'rdfnsvit':
             from vit_pytorch.v2dmfns_vit import V2DMFNSViTForClassfication
             model = V2DMFNSViTForClassfication(config)    
-        elif args.model_name == 'v2opdmfnsvit':
+        elif model_name == 'rdopfnsvit':
             from vit_pytorch.v2opdmfns_vit import V2OPDMFNSViTForClassfication
             model = V2OPDMFNSViTForClassfication(config)               
-
-        elif args.model_name == 'sinkvit':
+        elif model_name == 'sinkvit':
             from vit_pytorch.sink_vit import SINKViTForClassfication
             model = SINKViTForClassfication(config)               
 
@@ -585,6 +578,12 @@ if __name__ == '__main__':
                     }
                     print(f"saving checkpoint to {out_dir}")
                     torch.save(checkpoint, os.path.join(out_dir, 'ckpt.pt'))
+
+
+            if not wandb_log:
+                df = pd.DataFrame(metrics_ls, columns=['iter', 'lr', 'train_loss', 'val_loss', 'val_bleu', 'secs_per_eval'])
+                df.to_csv(njoin(out_dir, '_run_performance.csv'))   
+
         if iter_num == 0 and eval_only:
             break
 
@@ -638,9 +637,11 @@ if __name__ == '__main__':
         if iter_num > max_iters:
             if master_process:
                 if not wandb_log:
-                    df = pd.DataFrame(metrics_ls, columns=['iter', 'lr', 'train_loss', 'val_loss', 'train_acc', 'val_acc'])
+                    if isfile(njoin(out_dir, '_run_performance.csv')):
+                        os.remove(njoin(out_dir, '_run_performance.csv'))
+                    df = pd.DataFrame(metrics_ls, columns=['iter', 'lr', 'train_loss', 'val_loss', 'val_bleu', 'secs_per_eval'])
                     df.to_csv(njoin(out_dir, 'run_performance.csv'))
-                print(f'Add data saved under {out_dir}')
+                print(f'All data saved under {out_dir}')                
             
             break
 

@@ -9,14 +9,16 @@ FIGS_DIR = njoin(DROOT, 'figs_dir')
 BPATH = njoin('/project')  # path for binding to singularity container
 SPATH = njoin('/project/frac_attn/built_containers/FaContainer_v3.sif')  # singularity container path
 
-MODEL_NAMES = ['fnsformer', 'v2fnsformer', 'v3fnsformer', 'v4fnsformer', 
-               'opfnsformer', 'v2opfnsformer',
+MODEL_NAMES = ['fnsformer', 
+               'spfnsformer','spopfnsformer',
+               'rdfnsformer', 'rdopfnsformer',
                'sinkformer',
                'dpformer', 
                'l2former']  # model str names
                
-NAMES_DICT = {'fnsformer': 'FNS', 'v2fnsformer': 'FNS', 'v3fnsformer': 'FNS', 'v4fnsformer': 'FNS',
-              'opfnsformer': 'OPFNS', 'v2opfnsformer': 'OPFNS',
+NAMES_DICT = {'fnsformer': 'FNS', 
+              'spfnsformer': r'FNS (\mathbb{S}^{{d-1}})', 'spopfnsformer': r'OPFNS (\mathbb{S}^{{d-1}})',               
+              'rdfnsformer': r'FNS (\mathbb{R}^{{d}})', 'rdopfnsformer': r'OPFNS (\mathbb{R}^{{d}})',
               'sinkformer': 'SINK',
               'dpformer': 'DP',
               'imdb': 'IMDb', 'rotten_tomatoes': 'Rotten Tomatoes',

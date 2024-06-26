@@ -265,6 +265,7 @@ if __name__ == '__main__':
         attn_weights = F.dropout(attn_weights, p=model.transformer.encoder.layer[0].attention.self.dropout, 
                                 training=model.transformer.encoder.layer[0].attention.self.training)   
 
+        attn_output = attn_weights @ value_vectors  
 
     # ---------------------------------------- 3. Diagonalization ----------------------------------------
 

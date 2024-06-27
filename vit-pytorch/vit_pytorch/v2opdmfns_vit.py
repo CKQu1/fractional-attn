@@ -81,7 +81,8 @@ class OPDMFNSAttentionHead(nn.Module):
     This module is used in the OPDMFNSMultiHeadAttention module.
 
     """
-    def __init__(self, alpha, bandwidth, a, sphere_radius, hidden_size, attention_head_size, dropout, bias=True):
+    # , sphere_radius
+    def __init__(self, alpha, bandwidth, a, hidden_size, attention_head_size, dropout, bias=True):
         super().__init__()
         self.hidden_size = hidden_size        
         self.attention_head_size = attention_head_size
@@ -96,7 +97,7 @@ class OPDMFNSAttentionHead(nn.Module):
         self.alpha, self.bandwidth = alpha, bandwidth
         self.a = a
 
-        self.sphere_radius = sphere_radius
+        #self.sphere_radius = sphere_radius
 
     def forward(self, x):
         # Project the input into query, key, and value
@@ -116,7 +117,7 @@ class OPDMFNSAttentionHead(nn.Module):
 
         alpha, bandwidth = self.alpha, self.bandwidth
         a = self.a
-        sphere_radius = self.sphere_radius
+        #sphere_radius = self.sphere_radius
         d_intrinsic = self.attention_head_size
 
         # Euclidean dist in R^d
@@ -130,7 +131,10 @@ class OPDMFNSAttentionHead(nn.Module):
         attn_score_shape = attn_score.shape
 
         if a > 0:
-            K_tilde = torch.diag_embed(attn_score.sum(-1)**(-a)) @ attn_score @ torch.diag_embed(attn_score.sum(-2)**(-a))
+            # K_tilde = torch.diag_embed(attn_score.sum(-1)**(-a)) @ attn_score @ torch.diag_embed(attn_score.sum(-2)**(-a))
+            N_R = attn_score.sum(-1)  # row sum
+            N_C = attn_score.sum(-2)  # col sum
+            K_tilde = (N_R**(-a)).unsqueeze(-1) * attn_score * (N_C**(-a)).unsqueeze(-2)            
             attention_probs = F.normalize(K_tilde,p=1,dim=3)  # can do this as the attn weights are always positive
         else:
             attention_probs = F.normalize(attn_score,p=1,dim=3)  # can do this as the attn weights are always positive
@@ -164,14 +168,14 @@ class OPDMFNSMultiHeadAttention(nn.Module):
         self.alpha = config['alpha']
         self.bandwidth = config['bandwidth']
         self.a = config['a']
-        self.sphere_radius = config['sphere_radius']     
+        #self.sphere_radius = config['sphere_radius']     
 
         for _ in range(self.num_attention_heads):
             head = OPDMFNSAttentionHead(
                 self.alpha,
                 self.bandwidth,
                 self.a,
-                self.sphere_radius,
+                #self.sphere_radius,
                 self.hidden_size,
                 self.attention_head_size,
                 config["attention_probs_dropout_prob"],
@@ -229,7 +233,7 @@ class FasterOPDMFNSMultiHeadAttention(nn.Module):
         self.alpha = config['alpha']
         self.bandwidth = config['bandwidth']
         self.a = config['a']
-        self.sphere_radius = config['sphere_radius']
+        #self.sphere_radius = config['sphere_radius']
 
     def forward(self, x, output_attentions=False):
         # Project the query, key, and value
@@ -250,7 +254,7 @@ class FasterOPDMFNSMultiHeadAttention(nn.Module):
 
         alpha, bandwidth = self.alpha, self.bandwidth
         a = self.a
-        sphere_radius = self.sphere_radius
+        #sphere_radius = self.sphere_radius
         d_intrinsic = attention_head_size
 
         query = F.normalize(query.view(batch_size, sequence_length, num_attention_heads, attention_head_size).transpose(1, 2), p=2, dim=-1)
@@ -270,7 +274,10 @@ class FasterOPDMFNSMultiHeadAttention(nn.Module):
             attn_score = torch.exp(-(g_dist/bandwidth**0.5)**(alpha/(alpha-1)))
         attn_score_shape = attn_score.shape
         if a > 0:
-            K_tilde = torch.diag_embed(attn_score.sum(-1)**(-a)) @ attn_score @ torch.diag_embed(attn_score.sum(-2)**(-a))
+            # K_tilde = torch.diag_embed(attn_score.sum(-1)**(-a)) @ attn_score @ torch.diag_embed(attn_score.sum(-2)**(-a))
+            N_R = attn_score.sum(-1)  # row sum
+            N_C = attn_score.sum(-2)  # col sum
+            K_tilde = (N_R**(-a)).unsqueeze(-1) * attn_score * (N_C**(-a)).unsqueeze(-2)            
             attention_probs = F.normalize(K_tilde,p=1,dim=3)  # can do this as the attn weights are always positive
         else:
             attention_probs = F.normalize(attn_score,p=1,dim=3)  # can do this as the attn weights are always positive
@@ -393,7 +400,7 @@ class OPDMFNSEncoder(nn.Module):
             return (x, all_attentions)
 
 
-class V2OPDMFNSViTForClassfication(nn.Module):
+class RPOPDMFNSViTForClassfication(nn.Module):
     """
     The ViT model for classification.
     """

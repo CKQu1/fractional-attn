@@ -60,17 +60,17 @@ $ torchrun --nproc_per_node=8 --nnodes=2 --node_rank=1 --master_addr=123.456.123
 # single-core
 """
 # training based on steps
-python -i ddp_main.py --model_name=dpnmt --n_attn_heads=2\
+python -i ddp_main.py --model_name=dpnmt --num_heads=2\
  --max_iters=50 --eval_interval=10 --log_interval=10 --eval_iters=10 --weight_decay=0 --model_root=.droot/debug_mode
 
-python -i ddp_main.py --model_name=sinknmt --n_attn_heads=2\
+python -i ddp_main.py --model_name=sinknmt --num_heads=2\
  --max_iters=50 --eval_interval=10 --log_interval=10 --eval_iters=1 --weight_decay=0 --model_root=.droot/debug_mode 
 
 # training based on epochs
-python -i ddp_main.py --model_name=dpnmt --n_attn_heads=2\
+python -i ddp_main.py --model_name=dpnmt --num_heads=2\
  --epochs=1 --weight_decay=0 --model_root=.droot/debug_mode
 
-python -i ddp_main.py --model_name=fnsnmt --alpha=1.2 --n_attn_heads=2\
+python -i ddp_main.py --model_name=fnsnmt --manifold=sphere --alpha=1.2 --num_heads=2\
  --max_iters=50 --eval_interval=10 --log_interval=10 --eval_iters=10 --weight_decay=0 --model_root=.droot/debug_mode 
 
 python -i ddp_main.py --model_name=fnsnmt --alpha=1.2\
@@ -150,7 +150,7 @@ if __name__ == '__main__':
     # parser.add_argument('--intermediate_size', default=4 * 48, type=int)    
     parser.add_argument('--num_encoder_layers', default=1, type=int)
     parser.add_argument('--num_decoder_layers', default=1, type=int)
-    parser.add_argument('--n_attn_heads', default=2, type=int)
+    parser.add_argument('--num_heads', default=2, type=int)
     parser.add_argument('--hidden_dropout_prob', default=0.0, type=float)
     parser.add_argument('--encoder_dropout_prob', default=0.0, type=float)
     parser.add_argument('--decoder_dropout_prob', default=0.0, type=float)
@@ -209,7 +209,7 @@ if __name__ == '__main__':
         "hidden_size": args.hidden_size,
         "num_encoder_layers": args.num_encoder_layers,
         "num_decoder_layers": args.num_decoder_layers,
-        "num_heads": args.n_attn_heads,
+        "num_heads": args.num_heads,
         #"intermediate_size": 4 * args.hidden_size,
         "intermediate_size": args.hidden_size,
         "hidden_dropout_prob": args.hidden_dropout_prob,
@@ -242,7 +242,7 @@ if __name__ == '__main__':
         if args.manifold == 'sphere':
 
             if args.alpha < 2:
-                config['d_intrinsic'] = attn_setup['d_intrinsic'] = args.hidden_size//args.n_attn_heads - 1
+                config['d_intrinsic'] = attn_setup['d_intrinsic'] = args.hidden_size//args.num_heads - 1
                 config['sphere_radius'] = ((np.pi**(1/config['d_intrinsic'])-1)/np.pi)   
                 #config.sphere_radius = 1                
             elif args.alpha >= 2:
@@ -256,7 +256,7 @@ if __name__ == '__main__':
 
         elif args.manifold == 'rd':
             if args.alpha < 2:
-                config['d_intrinsic'] = attn_setup['d_intrinsic'] = args.hidden_size//args.n_attn_heads  # head_dim                
+                config['d_intrinsic'] = attn_setup['d_intrinsic'] = args.hidden_size//args.num_heads  # head_dim                
 
             model_name = 'rd' + model_name
 
@@ -328,7 +328,7 @@ if __name__ == '__main__':
     
     if args.model_root == '':
         model_root = structural_model_root(qk_share=args.qk_share, num_encoder_layers=args.num_encoder_layers,
-                                           num_decoder_layers=args.num_decoder_layers, num_heads=args.n_attn_heads,
+                                           num_decoder_layers=args.num_decoder_layers, num_heads=args.num_heads,
                                            hidden_size=args.hidden_size,
                                            lr=args.lr, bs=args.train_bs, 
                                            use_custom_optim=args.use_custom_optim,
@@ -513,12 +513,18 @@ if __name__ == '__main__':
         elif model_name == 'sinknmt':
             from models.sink_translation import SINKForNMT
             model = SINKForNMT(config)            
+        # elif model_name == 'spfnsnmt':
+        #     from models.fns_translation import FNSForNMT
+        #     model = FNSForNMT(config)    
+        # elif model_name == 'spopfnsnmt':
+        #     from models.opfns_translation import OPFNSForNMT
+        #     model = OPFNSForNMT(config)     
         elif model_name == 'spfnsnmt':
-            from models.fns_translation import FNSForNMT
-            model = FNSForNMT(config)    
+            from models.spfns_translation import SPFNSForNMT
+            model = SPFNSForNMT(config)    
         elif model_name == 'spopfnsnmt':
-            from models.opfns_translation import OPFNSForNMT
-            model = OPFNSForNMT(config)           
+            from models.spopfns_translation import SPOPFNSForNMT
+            model = SPOPFNSForNMT(config)                
         elif model_name == 'rdfnsnmt':
             from models.rdfns_translation import RDFNSForNMT
             model = RDFNSForNMT(config)    

@@ -100,10 +100,10 @@ class FNSMultiHeadAttention(nn.Module):
     def __init__(self, config, is_cross_attention=False):
         super().__init__()
         self.hidden_size = config["hidden_size"]
-        self.num_attention_heads = config["num_attention_heads"]
+        self.num_heads = config["num_heads"]
         # The attention head size is the hidden size divided by the number of attention heads
-        self.attention_head_size = self.hidden_size // self.num_attention_heads
-        self.all_head_size = self.num_attention_heads * self.attention_head_size
+        self.attention_head_size = self.hidden_size // self.num_heads
+        self.all_head_size = self.num_heads * self.attention_head_size
         # Whether or not to use bias in the query, key, and value projection layers
         self.qkv_bias = config["qkv_bias"]
         # Create a list of attention heads
@@ -116,7 +116,7 @@ class FNSMultiHeadAttention(nn.Module):
         self.a = config['a']
         self.sphere_radius = config['sphere_radius']     
 
-        for _ in range(self.num_attention_heads):
+        for _ in range(self.num_heads):
             head = FNSAttentionHead(
                 self.alpha,
                 self.a,
@@ -161,10 +161,10 @@ class FasterFNSMultiHeadAttention(nn.Module):
         self.is_cross_attention = is_cross_attention
         
         self.hidden_size = config["hidden_size"]
-        self.num_attention_heads = config["num_attention_heads"]
+        self.num_heads = config["num_heads"]
         # The attention head size is the hidden size divided by the number of attention heads
-        self.attention_head_size = self.hidden_size // self.num_attention_heads
-        self.all_head_size = self.num_attention_heads * self.attention_head_size
+        self.attention_head_size = self.hidden_size // self.num_heads
+        self.all_head_size = self.num_heads * self.attention_head_size
         # Whether or not to use bias in the query, key, and value projection layers
         self.qkv_bias = config["qkv_bias"]
         # Create a linear layer to project the query, key, and value
@@ -201,10 +201,10 @@ class FasterFNSMultiHeadAttention(nn.Module):
             # Split the projected query, key, and value into query, key, and value
             # (batch_size, sequence_length, all_head_size * 3) -> (batch_size, sequence_length, all_head_size)
             query, key, value = torch.chunk(qkv, 3, dim=-1)
-        # Resize the query, key, and value to (batch_size, num_attention_heads, sequence_length, attention_head_size)
+        # Resize the query, key, and value to (batch_size, num_heads, sequence_length, attention_head_size)
         batch_size, src_sequence_length, _ = query.size()
         trg_sequence_length = key.size(1)
-        num_attention_heads, attention_head_size = self.num_attention_heads, self.attention_head_size
+        num_heads, attention_head_size = self.num_heads, self.attention_head_size
 
         alpha, bandwidth = self.alpha, self.bandwidth
         a = self.a
@@ -212,9 +212,9 @@ class FasterFNSMultiHeadAttention(nn.Module):
         mask_val = self.mask_val
         d_intrinsic = attention_head_size
 
-        query = F.normalize(query.view(batch_size, src_sequence_length, num_attention_heads, attention_head_size).transpose(1, 2), p=2, dim=-1)
-        key = F.normalize(key.view(batch_size, trg_sequence_length, num_attention_heads, attention_head_size).transpose(1, 2), p=2, dim=-1)
-        value = value.view(batch_size, trg_sequence_length, num_attention_heads, attention_head_size).transpose(1, 2)      
+        query = F.normalize(query.view(batch_size, src_sequence_length, num_heads, attention_head_size).transpose(1, 2), p=2, dim=-1)
+        key = F.normalize(key.view(batch_size, trg_sequence_length, num_heads, attention_head_size).transpose(1, 2), p=2, dim=-1)
+        value = value.view(batch_size, trg_sequence_length, num_heads, attention_head_size).transpose(1, 2)      
 
         # geodesic distance on sphere
         eps = 1e-7  # for limiting the divergence from acos
@@ -236,13 +236,13 @@ class FasterFNSMultiHeadAttention(nn.Module):
             attn_score = torch.exp((-g_dist/bandwidth**0.5)**(alpha/(alpha-1)))
 
         if a == 0:
-            #attn_score = attn_score.masked_fill_(attention_mask.expand(-1,self.num_attention_heads,-1,-1)==0, -1e9) # Mask
+            #attn_score = attn_score.masked_fill_(attention_mask.expand(-1,self.num_heads,-1,-1)==0, -1e9) # Mask
             attention_probs = F.normalize(attn_score,p=1,dim=3)  # can do this as the attn weights are always positive
         else:
             D_inv_row = torch.diag_embed(attn_score.sum(-1)**(-a))  # inverse of degree matrix of attn_score
             D_inv_col = torch.diag_embed(attn_score.sum(-2)**(-a))  # inverse of degree matrix of attn_score
             K_tilde = D_inv_row @ attn_score @ D_inv_col        
-            #K_tilde = K_tilde.masked_fill_(attention_mask.expand(-1,self.num_attention_heads,-1,-1)==0, -1e9) # Mask
+            #K_tilde = K_tilde.masked_fill_(attention_mask.expand(-1,self.num_heads,-1,-1)==0, -1e9) # Mask
             attention_probs = F.normalize(K_tilde,p=1,dim=3)  # can do this as the attn weights are always positive
         attention_probs = self.attn_dropout(attention_probs)
 
@@ -257,7 +257,7 @@ class FasterFNSMultiHeadAttention(nn.Module):
         # print('\n')
 
         # Resize the attention output
-        # from (batch_size, num_attention_heads, sequence_length, attention_head_size)
+        # from (batch_size, num_heads, sequence_length, attention_head_size)
         # To (batch_size, sequence_length, all_head_size)
         attention_output = attention_output.transpose(1, 2) \
                                            .contiguous() \

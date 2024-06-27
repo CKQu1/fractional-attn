@@ -99,7 +99,7 @@ class DMFNSAttentionHead(nn.Module):
         self.bandwidth = config['bandwidth']
         self.a = config['a']
 
-        self.sphere_radius = config['sphere_radius']
+        #self.sphere_radius = config['sphere_radius']
 
     def forward(self, x):
         # Project the input into query, key, and value
@@ -120,7 +120,7 @@ class DMFNSAttentionHead(nn.Module):
         alpha, bandwidth = self.alpha, self.bandwidth
         a = self.a
 
-        sphere_radius = self.sphere_radius
+        #sphere_radius = self.sphere_radius
         d_intrinsic = self.attention_head_size
 
         # Euclidean dist in R^d   
@@ -143,7 +143,10 @@ class DMFNSAttentionHead(nn.Module):
         # print(f'diag shape: {torch.diag_embed(attn_score.sum(-1)**(-a)).shape}')
 
         if a > 0:
-            K_tilde = torch.diag_embed(attn_score.sum(-1)**(-a)) @ attn_score @ torch.diag_embed(attn_score.sum(-2)**(-a))
+            # K_tilde = torch.diag_embed(attn_score.sum(-1)**(-a)) @ attn_score @ torch.diag_embed(attn_score.sum(-2)**(-a))
+            N_R = attn_score.sum(-1)  # row sum
+            N_C = attn_score.sum(-2)  # col sum
+            K_tilde = (N_R**(-a)).unsqueeze(-1) * attn_score * (N_C**(-a)).unsqueeze(-2)            
             attention_probs = F.normalize(K_tilde,p=1,dim=3)  # can do this as the attn weights are always positive
         else:
             attention_probs = F.normalize(attn_score,p=1,dim=3)  # can do this as the attn weights are always positive
@@ -181,7 +184,7 @@ class DMFNSMultiHeadAttention(nn.Module):
         self.bandwidth = config['bandwidth']
         self.a = config['a']
 
-        self.sphere_radius = config['sphere_radius']     
+        #self.sphere_radius = config['sphere_radius']     
 
         for _ in range(self.num_attention_heads):
             head = DMFNSAttentionHead(
@@ -235,7 +238,7 @@ class FasterDMFNSMultiHeadAttention(nn.Module):
         self.alpha = config['alpha']
         self.bandwidth = config['bandwidth']
         self.a = config['a']
-        self.sphere_radius = config['sphere_radius']
+        #self.sphere_radius = config['sphere_radius']
 
     def forward(self, x, output_attentions=False):
         # Project the query, key, and value
@@ -251,7 +254,7 @@ class FasterDMFNSMultiHeadAttention(nn.Module):
         alpha, bandwidth = self.alpha, self.bandwidth
         a = self.a
 
-        sphere_radius = self.sphere_radius
+        #sphere_radius = self.sphere_radius
         d_intrinsic = attention_head_size
 
         query = query.view(batch_size, sequence_length, num_attention_heads, attention_head_size).transpose(1, 2)
@@ -271,7 +274,11 @@ class FasterDMFNSMultiHeadAttention(nn.Module):
             attn_score = torch.exp(-(g_dist/bandwidth**0.5)**(alpha/(alpha-1)))
         attn_score_shape = attn_score.shape
         if a > 0:
-            K_tilde = torch.diag_embed(attn_score.sum(-1)**(-a)) @ attn_score @ torch.diag_embed(attn_score.sum(-2)**(-a))
+            # K_tilde = torch.diag_embed(attn_score.sum(-1)**(-a)) @ attn_score @ torch.diag_embed(attn_score.sum(-2)**(-a))
+            N_R = attn_score.sum(-1)  # row sum
+            N_C = attn_score.sum(-2)  # col sum
+            K_tilde = (N_R**(-a)).unsqueeze(-1) * attn_score * (N_C**(-a)).unsqueeze(-2)
+
             attention_probs = F.normalize(K_tilde,p=1,dim=3)  # can do this as the attn weights are always positive
         else:                      
             attention_probs = F.normalize(attn_score,p=1,dim=3)  # can do this as the attn weights are always positive
@@ -393,7 +400,7 @@ class DMFNSEncoder(nn.Module):
             return (x, all_attentions)
 
 
-class V2DMFNSViTForClassfication(nn.Module):
+class RDFNSViTForClassfication(nn.Module):
     """
     The ViT model for classification.
     """

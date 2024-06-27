@@ -28,7 +28,7 @@ class RDFNSAttentionHead(nn.Module):
     This module is used in the RDFNSMultiHeadAttention module.
 
     """
-    def __init__(self, alpha, a, bandwidth, hidden_size, attention_head_size, dropout, bias=True, is_cross_attention=False):
+    def __init__(self, alpha, a, bandwidth, d_intrinsic, hidden_size, attention_head_size, dropout, bias=True, is_cross_attention=False):
         super().__init__()
         self.hidden_size = hidden_size
         self.attention_head_size = attention_head_size        
@@ -41,10 +41,13 @@ class RDFNSAttentionHead(nn.Module):
         
         self.is_cross_attention = is_cross_attention
     
+        self.alpha, self.a, self.bandwidth = alpha, a, bandwidth
+        self.d_intrinsic = d_intrinsic
+
     def forward(self, x, encoder_output_states=None, key_padding_mask=None, attn_mask=None):
 
         alpha, a, bandwidth = self.alpha, self.a, self.bandwidth
-        d_intrinsic = self.attention_head_size
+        d_intrinsic = self.d_intrinsic
 
         # (batch_size, sequence_length, hidden_size) -> (batch_size, sequence_length, attention_head_size)
         if encoder_output_states is not None:
@@ -140,6 +143,7 @@ class RDFNSMultiHeadAttention(nn.Module):
         self.alpha = config['alpha']
         self.a = config['a']
         self.bandwidth = config['bandwidth']
+        self.d_intrinsic = config['d_intrinsic']
 
         self.hidden_size = config["hidden_size"]
         self.num_heads = config["num_heads"]
@@ -155,6 +159,7 @@ class RDFNSMultiHeadAttention(nn.Module):
                 self.alpha, 
                 self.a, 
                 self.bandwidth,
+                self.d_intrinsic,
                 self.hidden_size,
                 self.attention_head_size,
                 config["attention_probs_dropout_prob"],
@@ -194,6 +199,7 @@ class FasterRDFNSMultiHeadAttention(nn.Module):
         self.is_cross_attention = is_cross_attention
         
         self.alpha, self.a, self.bandwidth = config['alpha'], config['a'], config['bandwidth']
+        self.d_intrinsic = config['d_intrinsic']
 
         self.hidden_size = config["hidden_size"]
         self.num_heads = config["num_heads"]
@@ -216,8 +222,10 @@ class FasterRDFNSMultiHeadAttention(nn.Module):
 
     def forward(self, x, key_padding_mask=None, attn_mask=None, output_attentions=False, encoder_output_states=None):
 
+        num_heads, attention_head_size = self.num_heads, self.attention_head_size
+
         alpha, a, bandwidth = self.alpha, self.a, self.bandwidth
-        d_intrinsic = self.attention_head_size
+        d_intrinsic = self.d_intrinsic
         # Project the query, key, and value
         if encoder_output_states is not None:
             assert hasattr(
@@ -235,9 +243,9 @@ class FasterRDFNSMultiHeadAttention(nn.Module):
         # Resize the query, key, and value to (batch_size, num_heads, sequence_length, attention_head_size)
         batch_size, src_sequence_length, _ = query.size()
         trg_sequence_length = key.size(1)
-        query = query.view(batch_size, src_sequence_length, self.num_heads, self.attention_head_size).transpose(1, 2)
-        key = key.view(batch_size, trg_sequence_length, self.num_heads, self.attention_head_size).transpose(1, 2)
-        value = value.view(batch_size, trg_sequence_length, self.num_heads, self.attention_head_size).transpose(1, 2)
+        query = query.view(batch_size, src_sequence_length, num_heads, attention_head_size).transpose(1, 2)
+        key = key.view(batch_size, trg_sequence_length, num_heads, attention_head_size).transpose(1, 2)
+        value = value.view(batch_size, trg_sequence_length, num_heads, attention_head_size).transpose(1, 2)
 
         # Euclidean dist
         # g_dist = torch.cdist(query, key, p=2) / math.sqrt(self.hidden_size / self.attention_head_size)

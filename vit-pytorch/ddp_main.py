@@ -43,10 +43,10 @@ $ torchrun --nproc_per_node=8 --nnodes=2 --node_rank=1 --master_addr=123.456.123
 
 # single-core
 """
-python ddp_main.py --model_name=v2dmfnsvit --alpha=1.5 --a=0 --max_iters=1000 --eval_interval=200 --log_interval=200\
+python -i ddp_main.py --model_name=fnsvit --manifold=sphere --alpha=1.5 --a=0 --max_iters=1000 --eval_interval=200 --log_interval=200\
  --eval_iters=200 --weight_decay=0 --n_layers=2 --n_attn_heads=2 --model_root=.droot/debug-mode 
 
-python ddp_main.py --model_name=opfnsvit --alpha=1.5 --max_iters=100 --eval_interval=5\
+python -i ddp_main.py --model_name=opfnsvit --manifold=rd --alpha=1.5 --max_iters=100 --eval_interval=5\
  --lr_scheduler_type=binary --max_lr=5e-5 --max_lr=5e-6\
  --eval_iters=200 --weight_decay=0 --n_layers=1 --n_attn_heads=2 --model_root=.droot/single-core  
 """
@@ -389,17 +389,17 @@ if __name__ == '__main__':
         #     from vit_pytorch.opfns_vit import OPFNSViTForClassfication
         #     model = OPFNSViTForClassfication(config)     
         elif model_name == 'spfnsvit':
-            from vit_pytorch.dmfns_vit import DMFNSViTForClassfication
-            model = DMFNSViTForClassfication(config)    
-        elif model_name == 'spopdmfnsvit':
-            from vit_pytorch.opdmfns_vit import OPDMFNSViTForClassfication
-            model = OPDMFNSViTForClassfication(config)      
+            from vit_pytorch.spfns_vit import SPFNSViTForClassfication
+            model = SPFNSViTForClassfication(config)    
+        elif model_name == 'spopfnsvit':
+            from vit_pytorch.spopfns_vit import SPOPFNSViTForClassfication
+            model = SPOPFNSViTForClassfication(config)      
         elif model_name == 'rdfnsvit':
-            from vit_pytorch.v2dmfns_vit import V2DMFNSViTForClassfication
-            model = V2DMFNSViTForClassfication(config)    
+            from vit_pytorch.rdfns_vit import RDFNSViTForClassfication
+            model = RDFNSViTForClassfication(config)    
         elif model_name == 'rdopfnsvit':
-            from vit_pytorch.v2opdmfns_vit import V2OPDMFNSViTForClassfication
-            model = V2OPDMFNSViTForClassfication(config)               
+            from vit_pytorch.rdopdmfns_vit import RPOPDMFNSViTForClassfication
+            model = RPOPDMFNSViTForClassfication(config)               
         elif model_name == 'sinkvit':
             from vit_pytorch.sink_vit import SINKViTForClassfication
             model = SINKViTForClassfication(config)               

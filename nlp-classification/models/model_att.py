@@ -621,7 +621,7 @@ class SPFNSSelfAttention(nn.Module):
         if alpha < 2:
             d_intrinsic = self.d_intrinsic
 
-        #hidden_states = F.normalize(hidden_states, p=2, dim=-1)
+        hidden_states = F.normalize(hidden_states, p=2, dim=-1)
         query_vectors = self.query(hidden_states)
         value_vectors = self.value(hidden_states)   # (N,B,HD)
 
@@ -734,9 +734,9 @@ class RDFNSSelfAttention(nn.Module):
         self.qk_share = config.qk_share
         self.bias = config.qkv_bias
 
-        self.query = orthogonal(nn.Linear(config.hidden_size, self.embed_dim, bias=self.bias))
+        self.query = nn.Linear(config.hidden_size, self.embed_dim, bias=self.bias)
         if not self.qk_share:          
-            self.key = orthogonal(nn.Linear(config.hidden_size, self.embed_dim, bias=self.bias))
+            self.key = nn.Linear(config.hidden_size, self.embed_dim, bias=self.bias)
         self.value = nn.Linear(config.hidden_size, self.embed_dim, bias=self.bias)
 
         if self.alpha < 2:
@@ -957,7 +957,7 @@ class SPOPFNSSelfAttention(nn.Module):
         if alpha < 2:
             d_intrinsic = self.d_intrinsic
 
-        #hidden_states = F.normalize(hidden_states, p=2, dim=-1)
+        hidden_states = F.normalize(hidden_states, p=2, dim=-1)
         query_vectors = self.query(hidden_states)
         value_vectors = self.value(hidden_states)   # (N,B,HD)
 

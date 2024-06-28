@@ -86,6 +86,7 @@ if __name__ == '__main__':
     # conditions for diffusion maps
     assert config['qk_share'], 'QK weight-tying is required!'
     assert 'op' in attn_setup['model_name'], 'Orthogonal projection matrix is required!'
+    assert config['num_attention_heads'] == 1, 'Number of attention heads must be 1!'
 
     # ---------------------------------------- 1. Dataset setup ----------------------------------------
     print('---------- Dataset setup ----------')
@@ -149,8 +150,15 @@ if __name__ == '__main__':
     print('---------- Load pretrained model ----------')
 
     # model
-    model_name = attn_setup['model_name']
+    model_name = attn_setup['model_name']    
     assert model_name in MODEL_NAMES, f'{model_name} does not exist in {MODEL_NAMES}'
+
+    if 'fns' in model_name:
+        manifold = attn_setup['manifold']
+        sphere_radius = config['sphere_radius']
+        mask_val = config['mask_val']
+    else:
+        manifold = None
 
     model_config = ModelConfig.from_json_file(njoin(model_dir, 'config.json'))
     model = FNSFormerForSequenceClassification(model_config, **attn_setup).to(dev)
@@ -168,7 +176,9 @@ if __name__ == '__main__':
     
     for batch_idx in range(N_batch):
 
+        # extract single data-point only
         X = train_dataset['input_ids'][batch_idx * train_bs : (batch_idx+1) * train_bs]  # batch_size must be one if jask is set to None
+        Y = train_dataset['label'][batch_idx * train_bs : (batch_idx+1) * train_bs]
         bool_mask = train_dataset['attention_mask'][batch_idx * train_bs : (batch_idx+1) * train_bs]        
         if train_bs == 1:
             # remove padding
@@ -176,6 +186,8 @@ if __name__ == '__main__':
             X = X[:,:X_len]  
 
         hidden_states = model.transformer.embeddings(X)
+        if manifold == 'sphere':
+            hidden_states = F.normalize(hidden_states,p=2,dim=-1)
 
         alpha = attn_setup['alpha']
         bandwidth = attn_setup['bandwidth']
@@ -196,25 +208,29 @@ if __name__ == '__main__':
         ), f"hidden_states should have embed_dim = {model.transformer.encoder.layer[0].attention.self.embed_dim}, but has {embed_dim}"
 
 
-        # (B, N, H, D) = (batch_size, seq_len, num_heads, head_dim)        
-        if alpha < 2:
-            query_vectors = query_vectors.view(batch_size, seq_len, num_heads, d_intrinsic).transpose(1, 2)
-        else:
-            query_vectors = query_vectors.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2)  # (B,N,H,D)
-        #query_vectors = query_vectors.view(batch_size, seq_len, num_heads, head_dim)                                            # (B,N,H,D)        
+        # (B, N, H, D) = (batch_size, seq_len, num_heads, head_dim)                
+        query_vectors = query_vectors.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2)  # (B,N,H,D)       
         value_vectors = value_vectors.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2)                            # (B,H,N,D)                 
 
         # pairwise Euclidean distance (H,BN,D) @ (H,D,BN)
         if not config['qk_share']:
-            key_vectors = model.transformer.encoder.layer[0].attention.self.key(hidden_states)
-            if alpha < 2:
-                key_vectors = key_vectors.view(batch_size, seq_len, num_heads, d_intrinsic).transpose(1, 2)
-            else:      
-                key_vectors = key_vectors.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2)      # (B,H,N,D)   
+            key_vectors = model.transformer.encoder.layer[0].attention.self.key(hidden_states)    
+            key_vectors = key_vectors.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2)      # (B,H,N,D)   
 
-            Dist = torch.cdist(query_vectors, key_vectors, p=2)
+            if manifold == 'rd':
+                Dist = torch.cdist(query_vectors, key_vectors, p=2)
+            elif manifold == 'sphere':
+                eps = 1e-7  # for limiting the divergence from acos
+                query_vectors = F.normalize(query_vectors, p=2, dim=-1)
+                key_vectors = F.normalize(key_vectors, p=2, dim=-1)
+                Dist = torch.acos(torch.clamp(query_vectors @ key_vectors.transpose(-2, -1), -1+eps, 1-eps)) * sphere_radius                
         else:
-            Dist = torch.cdist(query_vectors, query_vectors, p=2)        
+            if manifold == 'rd':
+                Dist = torch.cdist(query_vectors, query_vectors, p=2)        
+            elif manifold == 'sphere':
+                eps = 1e-7  # for limiting the divergence from acos
+                query_vectors = F.normalize(query_vectors, p=2, dim=-1)
+                Dist = torch.acos(torch.clamp(query_vectors @ query_vectors.transpose(-2, -1), -1+eps, 1-eps)) * sphere_radius                 
 
         # type 1: key_pad_mask
         # bool_mask = (attention_mask>=0).long()
@@ -231,10 +247,16 @@ if __name__ == '__main__':
 
         if alpha < 2:
             # g_dist = Dist / head_dim  # (H,B,N,N)
-            g_dist = Dist * (2**(1/head_dim) - 1) / head_dim
+            if manifold == 'rd':
+                g_dist = Dist * (2**(1/head_dim) - 1) / head_dim    
+            elif manifold == 'sphere':
+                g_dist = Dist
             attn_score = (1 + g_dist/bandwidth**0.5)**(-d_intrinsic-alpha)
         else:
-            g_dist = Dist / head_dim**0.5  # (H,B,N,N)
+            if manifold == 'rd':
+                g_dist = Dist / head_dim**0.5  # (H,B,N,N)
+            elif manifold == 'sphere':
+                g_dist = Dist                
             attn_score = torch.exp(-(g_dist/bandwidth**0.5)**(alpha/(alpha-1)))
         #attn_score = attn_score.masked_fill(attention_mask_expanded==0, -1e9)
 

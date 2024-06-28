@@ -86,7 +86,11 @@ def get_dataset(dataset_name, cache_dir):
     elif dataset_name == "newsgroup":
         dataset = load_dataset(dataset_name, '18828_alt.atheism', cache_dir=cache_dir)   
     elif dataset_name == "cola":
-        dataset = load_dataset('glue', 'cola', cache_dir=cache_dir) 
+        dataset = load_dataset('glue', 'cola', cache_dir=cache_dir)
+    elif dataset_name == "orca_dpo_pairs":
+        dataset = load_dataset("HuggingFaceH4/orca_dpo_pairs")    
+    elif dataset_name == "emotion":
+        dataset = load_dataset("dair-ai/emotion", "split")
     else:
         raise NameError(f"{dataset_name} not applicable!")
     return dataset

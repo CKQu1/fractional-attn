@@ -1,3 +1,4 @@
+import argparse
 import os
 import pandas as pd
 from ast import literal_eval
@@ -8,13 +9,17 @@ from os.path import join, normpath, isdir
 def njoin(*args):
     return normpath(join(*args))
 
-def str_to_bool(s):
+def str2bool(s):
     if isinstance(s, bool):
         return s
+    if s.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif s.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
     else:
-        literal_eval(s)
+        raise argparse.ArgumentTypeError('Boolean value expected.')
 
-def str_to_ls(s):
+def str2ls(s):
     if isinstance(s, list):
         return s
     elif isinstance(s, str):
@@ -83,15 +88,18 @@ def create_model_dir(model_root_dir, **kwargs):
 
 # creates structural model_root based on model/training setting
 def structural_model_root(**kwargs):
-
-    use_custom_optim = kwargs.get('use_custom_optim')
-    qk_share = kwargs.get('qk_share'); n_layers = kwargs.get('n_layers')
+    
+    # model config
+    qk_share = str2bool(kwargs.get('qk_share')); n_layers = kwargs.get('n_layers')
     n_attn_heads = kwargs.get('n_attn_heads'); hidden_size = kwargs.get('hidden_size')
-
-    lr = kwargs.get('lr'); bs = kwargs.get('bs'); milestones = kwargs.get('milestones'); gamma = kwargs.get('gamma')
+    # dataset
+    ds = kwargs.get('dataset_name')
+    # train settings
+    use_custom_optim = kwargs.get('use_custom_optim')
+    lr = kwargs.get('lr'); bs = kwargs.get('train_bs'); milestones = kwargs.get('milestones'); gamma = kwargs.get('gamma')
     epochs = kwargs.get('epochs')
 
-    affix = 'qqv' if qk_share==True else 'qkv'
+    affix = 'qqv' if qk_share is True else 'qkv'
     # if isinstance(milestones, str):
     #     milestones_str = milestones
     # else:
@@ -99,11 +107,11 @@ def structural_model_root(**kwargs):
     if use_custom_optim is True:
         # model_root = njoin(f'layers={n_layers}-heads={n_attn_heads}-hidden={hidden_size}-{affix}',
         #                    f'lr={lr}-bs={bs}-milestones={milestones_str}-gamma={gamma}-epochs={epochs}')    
-        model_root = njoin(f'layers={n_layers}-heads={n_attn_heads}-hidden={hidden_size}-epochs={epochs}-{affix}')                              
+        model_root = njoin(f'ds={ds}-layers={n_layers}-heads={n_attn_heads}-hidden={hidden_size}-epochs={epochs}-prj={affix}')                              
     else:
         # model_root = njoin(f'layers={n_layers}-heads={n_attn_heads}-hidden={hidden_size}-{affix}',
         #                    f'lr={lr}-bs={bs}-epochs={epochs}')            
-        model_root = njoin(f'layers={n_layers}-heads={n_attn_heads}-hidden={hidden_size}-epochs={epochs}-{affix}')             
+        model_root = njoin(f'ds={ds}-layers={n_layers}-heads={n_attn_heads}-hidden={hidden_size}-epochs={epochs}-prj={affix}')             
 
     return model_root    
 

@@ -1,4 +1,5 @@
 import argparse
+import datasets
 import json
 import numpy as np
 import os
@@ -9,6 +10,7 @@ from time import time, sleep
 from typing import Union
 from constants import DROOT, MODEL_NAMES
 from mutils import njoin, create_model_dir, convert_train_history, structural_model_root
+from mutils import str2bool
 from data_utils import get_dataset, get_dataset_cols, process_dataset_cols
 
 from os import makedirs
@@ -36,8 +38,10 @@ python -i main.py --n_layers=1 --n_attn_heads=2 --model_name=dpformer\
  --divider=1 --warmup_steps=0 --grad_accum_step=1 --dataset_name=rotten_tomatoes\
  --model_root=.droot/debug-mode
 
-python -i main.py --n_layers=1 --n_attn_heads=2 --model_name=rdfnsformer\
+python -i main.py --n_layers=1 --n_attn_heads=2\
+ --model_name=fnsformer --manifold=rd --qk_share=True\
  --alpha=1.5 --bandwidth=0.5 --a=1\
+ --lr_scheduler_type=constant\
  --max_len=256 --max_steps=2 --logging_steps=2 --save_steps=2 --eval_steps=2\
  --divider=1 --warmup_steps=0 --grad_accum_step=1 --dataset_name=rotten_tomatoes\
  --model_root=.droot/debug-mode
@@ -88,7 +92,7 @@ if __name__ == '__main__':
     # Model settings    
     # General
     #parser.add_argument('--sparsify_type', default=None, type=str)
-    parser.add_argument('--qk_share', default=False, type=bool)
+    parser.add_argument('--qk_share', type=str2bool, nargs='?', const=True, default=False)
     parser.add_argument('--qkv_bias', default=False, type=bool)
     parser.add_argument('--n_layers', default=1, type=int)
     parser.add_argument('--n_attn_heads', default=2, type=int)
@@ -117,7 +121,7 @@ if __name__ == '__main__':
     if 'fns' in model_name:
         assert args.manifold in ['sphere', 'rd'], 'FNS manifold: sphere or rd'   
         assert 1 <= args.alpha <= 2, 'FNS alpha must be between [1,2]'
-        assert args.a in [0,0.5,1], 'Normalization index must be 0 or 0.5 or 1
+        assert args.a in [0,0.5,1], 'Normalization index must be 0 or 0.5 or 1'
 
     if not args.wandb_log:
         os.environ["WANDB_DISABLED"] = "true"
@@ -145,8 +149,12 @@ if __name__ == '__main__':
     # ---------------------------------------- 1. Dataset setup ----------------------------------------
 
     max_length = args.max_len    
-    def preprocess_function(examples):
-        return tokenizer(examples['text'], padding='max_length', truncation=True, max_length=max_length)
+    if args.dataset_name in ['imdb', 'emotion']:
+        def preprocess_function(examples):
+            return tokenizer(examples['text'], padding='max_length', truncation=True, max_length=max_length)
+    else:
+        def preprocess_function(examples):
+            return tokenizer(examples['sentence'], padding='max_length', truncation=True, max_length=max_length)        
 
     def preprocess_logits_for_metrics(logits, labels):
         preds = logits.argmax(dim=-1)
@@ -168,6 +176,14 @@ if __name__ == '__main__':
         #return {"accuracy":acc,"f1_score":f1_score,"precision":precision,"recall":recall}
         #return {"accuracy":acc,"f1_score":f1_score}
         return {"accuracy":acc}
+
+    # import evaluate
+    # metric = evaluate.load("accuracy")
+
+    # def compute_metrics(eval_pred):
+    #     logits, labels = eval_pred
+    #     predictions = np.argmax(logits, axis=-1)
+    #     return metric.compute(predictions=predictions, references=labels)    
     
     tokenizer = RobertaTokenizer(tokenizer_file = f"{repo_dir}/roberta-tokenizer/tokenizer.json",
                                  vocab_file     = f"{repo_dir}/roberta-tokenizer/vocab.json",
@@ -180,8 +196,7 @@ if __name__ == '__main__':
     if not isdir(tokenized_dataset_dir):         
         print("Downloading data!") if master_process else None
         # create cache for dataset
-        dataset = get_dataset(args.dataset_name, njoin(DROOT, "DATASETS"))
-
+        dataset = get_dataset(args.dataset_name, njoin(DROOT, "DATASETS"))        
         tokenized_dataset = dataset.map(preprocess_function, batched=True)
         column_names = get_dataset_cols(tokenized_dataset)
         if 'text' in column_names:
@@ -198,8 +213,18 @@ if __name__ == '__main__':
     keys = list(tokenized_dataset.keys())
     if len(keys) == 1:
         tokenized_dataset = tokenized_dataset[keys[0]].train_test_split(0.5)
-    train_dataset = tokenized_dataset["train"]
-    eval_dataset = tokenized_dataset["test"]
+    split_strs = list(tokenized_dataset.keys())
+    #assert len(split_strs) == 2, 'There are more than 2 splits in this dataset {args.dataset_name}'
+    eval_dataset = None
+    for split_str in split_strs:
+        if 'train' in split_str:
+            train_dataset = tokenized_dataset[split_str]
+        else:
+            if eval_dataset is not None:
+                eval_dataset = datasets.concatenate_datasets([eval_dataset, tokenized_dataset[split_str]])
+            else:
+                eval_dataset = tokenized_dataset[split_str]
+                test_split_str = split_str
     #del tokenized_dataset  # alleviate memory         
 
     # convert to torch.Tensor from list
@@ -254,7 +279,8 @@ if __name__ == '__main__':
               "sep_token_id": 2,
               "type_vocab_size": 1,
               "vocab_size": 50265,
-              "num_labels": len(set(train_dataset['label'])),
+              #"num_labels": len(set(train_dataset['label'])),
+              "num_labels": len(train_dataset['label'].unique()),
               "qk_share": args.qk_share,
               "qkv_bias": args.qkv_bias,
               "num_hidden_layers": args.n_layers,

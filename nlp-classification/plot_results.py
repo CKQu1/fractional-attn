@@ -9,7 +9,7 @@ from os.path import isdir, isfile
 from time import time
 from tqdm import tqdm
 from constants import *
-from mutils import njoin, str_to_bool, str_to_ls, create_model_dir, convert_train_history
+from mutils import njoin, str2bool, str2ls, create_model_dir, convert_train_history
 
 # ---------- Global plot settings ----------
 font_type = {'family' : 'sans-serif'}
@@ -35,9 +35,9 @@ def plot_ensembles(model_root_dir, datasets=['imdb'],
     global model_dir, config_dict, final_metrics, ensemble_metrics, metric_plot   
     global model_dirs, subpath 
 
-    datasets = str_to_ls(datasets)
-    metrics = str_to_ls(metrics)
-    display = str_to_bool(display)
+    datasets = str2ls(datasets)
+    metrics = str2ls(metrics)
+    display = str2bool(display)
 
     model_root_dir = model_root_dir.replace('\\','')
     dirnames = sorted([dirname for dirname in os.listdir(model_root_dir) if 'former' in dirname])
@@ -46,7 +46,10 @@ def plot_ensembles(model_root_dir, datasets=['imdb'],
     print(f'model_root_dir = {model_root_dir}')
     # prompt to reorder file names
     for dirname_idx, dirname in enumerate(dirnames):
-        print(f'Index {dirname_idx}: {dirname}')
+        for subdir in os.listdir(njoin(model_root_dir, dirname)):
+            if isfile(njoin(model_root_dir, dirname, subdir, 'run_performance.csv')):
+                print(f'Index {dirname_idx}: {dirname}')
+                break        
     dirname_idxs = input('Order of dirnames:')
     dirname_idxs = [int(dirname_idx) for dirname_idx in dirname_idxs.split(',')]
     assert len(dirname_idxs) <= len(dirnames), 'dirname_idxs cannot exceed dirnames'
@@ -231,13 +234,13 @@ def plot_model(model_root_dir, dirnames, instances,
     global df, df_setting, df_filtered, fig_file, axs
     global model_dir, config_dict, metric_plot    
     # for local_keys in ['dirnames', 'datasets', 'metrics']:
-    #     locals()[local_keys] = str_to_ls(locals()[local_keys])
+    #     locals()[local_keys] = str2ls(locals()[local_keys])
 
-    dirnames = str_to_ls(dirnames)
-    datasets = str_to_ls(datasets)
-    instances = str_to_ls(instances)
-    metrics = str_to_ls(metrics)
-    display = str_to_bool(display)
+    dirnames = str2ls(dirnames)
+    datasets = str2ls(datasets)
+    instances = str2ls(instances)
+    metrics = str2ls(metrics)
+    display = str2bool(display)
 
     model_root_dir = model_root_dir.replace('\\','')
     print(f'model_root_dir = {model_root_dir}')

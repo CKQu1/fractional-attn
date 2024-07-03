@@ -1,5 +1,7 @@
+import matplotlib as mpl
 import os
 from mutils import njoin
+from matplotlib.cm import get_cmap
 
 PROJECTS = ['phys_DL','PDLAI','dnn_maths','dyson','vortex_dl','frac_attn']
 #DROOT = njoin(os.path.abspath(os.getcwd()), 'droot')
@@ -23,6 +25,11 @@ NAMES_DICT = {'fnsformer': 'FNS',
               'dpformer': 'DP',
               'imdb': 'IMDb', 'rotten_tomatoes': 'Rotten Tomatoes',
               'eval_loss': 'Loss', 'eval_accuracy': 'Accuracy', 'eval_f1_score': r'$F_1$ score'}
+
+# color for models
+MODEL_CM = 'gist_ncar'
+MODEL_CMAP = get_cmap(MODEL_CM)
+MODEL_CNORM = mpl.colors.Normalize(vmin=1, vmax=len(MODEL_NAMES))
 
 # NAMES_DICT = {'fnsformer': 'FNS', 
 #               'spfnsformer': rf'FNS ($\mathbb{S}^{{d-1}}$)', 'spopfnsformer': rf'OPFNS ($\mathbb{S}^{{d-1}}$)',               

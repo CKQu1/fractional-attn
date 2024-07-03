@@ -582,9 +582,9 @@ class SPFNSSelfAttention(nn.Module):
         self.mask_val = config.mask_val
         self.bias = config.qkv_bias
 
-        self.query = orthogonal(nn.Linear(config.hidden_size, self.embed_dim, bias=self.bias))
+        self.query = nn.Linear(config.hidden_size, self.embed_dim, bias=self.bias)
         if not self.qk_share:          
-            self.key = orthogonal(nn.Linear(config.hidden_size, self.embed_dim, bias=self.bias))
+            self.key = nn.Linear(config.hidden_size, self.embed_dim, bias=self.bias)
         self.value = nn.Linear(config.hidden_size, self.embed_dim, bias=self.bias)
 
         if self.alpha < 2:

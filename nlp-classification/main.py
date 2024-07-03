@@ -221,10 +221,11 @@ if __name__ == '__main__':
             train_dataset = tokenized_dataset[split_str]
         else:
             if eval_dataset is not None:
-                eval_dataset = datasets.concatenate_datasets([eval_dataset, tokenized_dataset[split_str]])
+                if 'test' in split_str or 'val' in split_str:
+                    eval_dataset = datasets.concatenate_datasets([eval_dataset, tokenized_dataset[split_str]])
             else:
-                eval_dataset = tokenized_dataset[split_str]
-                test_split_str = split_str
+                if 'test' in split_str or 'val' in split_str:
+                    eval_dataset = tokenized_dataset[split_str]
     #del tokenized_dataset  # alleviate memory         
 
     # convert to torch.Tensor from list

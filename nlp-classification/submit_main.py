@@ -61,11 +61,12 @@ if __name__ == '__main__':
     config_files = ['config_qqv.json', 'config_qkv.json']  # 'config_qkv.json'
     # add or change datasets here
     dataset_names = ['rotten_tomatoes','imdb','emotion']
-    max_lens = [128, 512, 128]        
+    max_lens = [128, 1024, 128]        
     
     kwargss_all = []        
     #for didx in [0,1]:
-    for didx in [0]:
+    #for didx in [0]:
+    for didx in [1]:
 
         dataset_name = dataset_names[didx]
 
@@ -76,10 +77,8 @@ if __name__ == '__main__':
 
         seeds = [0]                                             
         for config_file in config_files:
-            kwargss = [{'model_name':'fnsformer','alpha':1.5,'a': 0,'bandwidth':0.1,'manifold':'sphere'},                      
-                       {'model_name':'fnsformer','alpha':2,'a': 0,'bandwidth':0.1,'manifold':'sphere'},      
-                       {'model_name':'opfnsformer','alpha':1.5,'a': 0,'bandwidth':0.1,'manifold':'sphere'},                      
-                       {'model_name':'opfnsformer','alpha':2,'a': 0,'bandwidth':0.1,'manifold':'sphere'}                                         
+            kwargss = [{'model_name':'fnsformer','alpha':1.5,'a': 0,'bandwidth':1,'manifold':'sphere'},                      
+                       {'model_name':'fnsformer','alpha':2,'a': 0,'bandwidth':1,'manifold':'sphere'}                                       
                        ] 
 
             # {'model_name':'fnsformer','alpha':1.5,'a': 0,'bandwidth':1,'manifold':'rd'},                      
@@ -99,7 +98,8 @@ if __name__ == '__main__':
 
                 #model_root = njoin(DROOT, 'finetune-v5', model_root_dirname)                
                 #model_root = njoin(DROOT, config_file.split('.')[0], model_root_dirname)
-                model_root = njoin(DROOT, 'bs+eps-finetune-v4', config_file.split('.')[0], model_root_dirname)
+                job_path = njoin(DROOT, 'trained_models')
+                model_root = njoin(job_path, config_file.split('.')[0], model_root_dirname)
 
                 for idx in range(len(kwargss)):                    
                     kwargss[idx]["dataset"] = dataset_name    
@@ -118,4 +118,4 @@ if __name__ == '__main__':
                  select=select, 
                  walltime=walltime,
                  mem=mem,
-                 job_path=model_root)
+                 job_path=job_path)

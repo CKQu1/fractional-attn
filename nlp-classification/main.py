@@ -534,14 +534,20 @@ if __name__ == '__main__':
         final_perf = pd.DataFrame()
         final_perf = final_perf.append(model_settings, ignore_index=True)    
         final_perf.to_csv(njoin(model_dir, "final_performance.csv"))
-        train_settings = pd.DataFrame(columns=["lr", "lr_scheduler_type", "train_bs", "eval_bs",
+        train_settings = pd.DataFrame(columns=["device_total",
+                                               "lr", "lr_scheduler_type", 
+                                               "train_size", "eval_size", "train_bs", "eval_bs",
                                                "epochs", "weight_decay", "eval_strat", "eval_steps",
-                                               "log_strat", "logging_steps", "save_steps",                          
+                                               "log_strat", "logging_steps", "save_steps",  
+                                               "steps_per_train_epoch",                        
                                                "seed", "warmup_steps",  "grad_accum_step", 
                                                "milestones", "gamma"], index=range(1))
-        train_settings.iloc[0] = [args.lr, args.lr_scheduler_type, args.train_bs, args.eval_bs,
+        train_settings.iloc[0] = [device_total,
+                                  args.lr, args.lr_scheduler_type, 
+                                  len(train_dataset), len(eval_dataset), args.train_bs, args.eval_bs,
                                   args.epochs, args.weight_decay, args.eval_strat, args.eval_steps,
                                   args.log_strat, args.logging_steps, args.save_steps, 
+                                  steps_per_train_epoch,
                                   args.seed, args.warmup_steps, args.grad_accum_step, args.milestones,
                                   args.gamma]
         train_settings.to_csv(njoin(model_dir, "train_setting.csv"))

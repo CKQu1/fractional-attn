@@ -39,8 +39,8 @@ python -i main.py --n_layers=1 --n_attn_heads=2 --model_name=dpformer\
  --model_root=.droot/debug-mode
 
 python -i main.py --n_layers=1 --n_attn_heads=2\
- --model_name=fnsformer --manifold=rd --qk_share=True\
- --alpha=1.5 --bandwidth=0.5 --a=1\
+ --model_name=fnsformer --manifold=rd --qk_share=False\
+ --alpha=1.5 --bandwidth=0.5 --a=0\
  --lr_scheduler_type=constant\
  --max_len=256 --max_steps=2 --logging_steps=2 --save_steps=2 --eval_steps=2\
  --divider=1 --warmup_steps=0 --grad_accum_step=1 --dataset_name=rotten_tomatoes\
@@ -102,7 +102,7 @@ if __name__ == '__main__':
     # FNSformer
     parser.add_argument('--alpha', default=1, type=float)
     parser.add_argument('--bandwidth', default=1, type=float) 
-    parser.add_argument('--a', default=1, type=float, help='0 | 0.5 | 1')
+    parser.add_argument('--a', default=0, type=float, help='0 | 0.5 | 1')
     # Sinkformer      
     parser.add_argument('--n_it', default=1, type=int)
 
@@ -129,6 +129,7 @@ if __name__ == '__main__':
     repo_dir = os.getcwd()  # main dir 
     dev = torch.device(f"cuda:{torch.cuda.device_count()}"
                        if torch.cuda.is_available() else "cpu")   
+    print(f'device = {dev}')
     device_name = "GPU" if dev.type != "cpu" else "CPU"
     ddp = torch.distributed.is_available() and args.train_with_ddp
     global_rank = None

@@ -26,10 +26,16 @@ NAMES_DICT = {'fnsformer': 'FNS',
               'imdb': 'IMDb', 'rotten_tomatoes': 'Rotten Tomatoes',
               'eval_loss': 'Loss', 'eval_accuracy': 'Accuracy', 'eval_f1_score': r'$F_1$ score'}
 
-# color for models
-MODEL_CM = 'gist_ncar'
-MODEL_CMAP = get_cmap(MODEL_CM)
-MODEL_CNORM = mpl.colors.Normalize(vmin=1, vmax=len(MODEL_NAMES))
+# color for model hyperparameters
+#HYP_CM = 'gist_ncar'
+HYP_CM = 'turbo'
+HYP_CMAP = get_cmap(HYP_CM)
+HYP_CNORM = mpl.colors.Normalize(vmin=1, vmax=2)
+
+LINESTYLE_DICT = {'spfnsformer': 'solid', 'spopfnsformer': (0,(5,1)),               
+                  'rdfnsformer': 'solid', 'rdopfnsformer': (0,(5,1)),
+                  'sinkformer': (0,(5,5)),
+                  'dpformer': (0,(5,10))}
 
 # NAMES_DICT = {'fnsformer': 'FNS', 
 #               'spfnsformer': rf'FNS ($\mathbb{S}^{{d-1}}$)', 'spopfnsformer': rf'OPFNS ($\mathbb{S}^{{d-1}}$)',               

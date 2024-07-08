@@ -4,6 +4,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.transforms import ScaledTranslation
 from matplotlib.cm import get_cmap
+from os import makedirs
+from os.path import isdir, isfile
 from scipy.stats import vonmises
 from string import ascii_lowercase
 
@@ -16,8 +18,8 @@ from mutils import njoin
 cm_name = 'turbo'
 
 # method 1
-cmap = get_cmap(cm_name)
-norm = mpl.colors.Normalize(vmin=1, vmax=2)
+# cmap = get_cmap(cm_name)
+# norm = mpl.colors.Normalize(vmin=1, vmax=2)
 
 # method 2
 # cmap = mpl.colormaps[cm_name]
@@ -58,8 +60,11 @@ thresh = 1e-5
 loc1, loc2 = -np.pi/2, np.pi/2
 kappa = 8  # concentration
 
+# Set seed
+np.random.seed(10)
+
 # Sample 1 (non-uniform small)
-sample_size = 6
+sample_size = 5
 sample1 = vonmises(loc=loc1, kappa=kappa).rvs(sample_size)
 sample2 = vonmises(loc=loc2, kappa=kappa).rvs(sample_size)
 sample_radians = np.concatenate([sample1, sample2])
@@ -83,7 +88,7 @@ fig, axs = plt.subplots(nrows,ncols,figsize=figsize,
                         sharex=False,sharey=False)        
 axs = np.expand_dims(axs, axis=0) if axs.ndim == 1 else axs   
 
-# PDF
+# PDF (bimodel)
 x = np.linspace(-np.pi, np.pi, 1000)
 vonmises_pdf1 = vonmises.pdf(x, loc=loc1, kappa=kappa)
 vonmises_pdf2 = vonmises.pdf(x, loc=loc2, kappa=kappa)
@@ -92,6 +97,8 @@ final_pdf = 0.5 * vonmises_pdf1 + 0.5 * vonmises_pdf2
 # ---------------------------------------- Row 1 ----------------------------------------
 
 # PDF in radians
+pdf_yticks = [0, 0.3, 0.6]
+
 ax = axs[0,0]
 ax.plot(x, final_pdf)
 #ax.set_yticks(ticks)
@@ -100,6 +107,7 @@ ax.plot(x, final_pdf)
 #ax.set_title("Cartesian plot")
 ax.set_title("Bimodal von-Mises")
 ax.set_xlim(-np.pi, np.pi)
+ax.set_yticks(pdf_yticks)
 ax.grid(True)
 
 # Points and interactions on circle (non-uniform)
@@ -113,6 +121,7 @@ if qk_share:
     W = sample_xys
 
 n = sample_xys.shape[0]
+#d = sample_xys.shape[1]
 d = sample_xys.shape[1] - 1
 scale = 1e-10
 
@@ -128,7 +137,8 @@ for bidx, alpha in enumerate(alphas1):
     print('\n')    
 
     ax = axs[0,bidx+1]
-    c_alpha = cmap(norm(alpha))
+    #c_alpha = cmap(norm(alpha))
+    c_alpha = HYP_CMAP(HYP_CNORM(alpha))
 
     for i in range(n):
         for j in range(n):
@@ -140,9 +150,11 @@ for bidx, alpha in enumerate(alphas1):
                 else:
                     ax.plot([Q[i, 0], W[j, 0]], [Q[i, 1], W[j, 1]], c=c_alpha, linewidth=scale * M[i, j], zorder=1)
 
-    ax.scatter(Q[:, 0], Q[:, 1], label='Queries', lw=.25, c='#dd1c77', edgecolors="k", s=20, zorder=2)
+    # c='#dd1c77'
+    ax.scatter(Q[:, 0], Q[:, 1], label='Queries', lw=.25, c='grey', edgecolors="k", s=20, zorder=2)
     if not qk_share:
-        ax.scatter(W[:, 0], W[:, 1], label='Keys', lw=.5, c='#a8ddb5',  edgecolors="k", s=20, zorder=2)
+        # c='#a8ddb5'
+        ax.scatter(W[:, 0], W[:, 1], label='Keys', lw=.5, c='grey',  edgecolors="k", s=20, zorder=2)
 
     ax.set_xlim([-1.2,1.2]);ax.set_ylim([-1.2,1.2])
     ax.set_xticklabels([]);ax.set_yticklabels([])
@@ -155,14 +167,15 @@ for col in [1,2]:
 
 # ---------------------------------------- Row 2 ----------------------------------------
 
-alphas2 = [1.2,  2]
+alphas2 = [1.2, 2]
+#alphas2 = [1.2, 1.6, 2]
 bandwidth2 = 1e-4
 
 # Polar histograms
 axs[1,0].remove()
 axs[1,0] = ax = fig.add_subplot(nrows, ncols, 4, projection='polar')
 ax.plot(x, final_pdf, label="PDF")
-ax.set_yticks([0.5, 1])
+ax.set_yticks(pdf_yticks)
 ax.hist(large_sample_radians, density=True, bins=int(np.sqrt(large_sample_size)), label="Histogram")
 #ax.set_title("Polar plot")
 #ax.legend(bbox_to_anchor=(0.15, 1.06))
@@ -178,13 +191,16 @@ idxs = np.arange(1,large_sample_size+1)
 idx_mid = int(n/2)
 for bidx, alpha in enumerate(alphas2):
 
-    c_alpha = cmap(norm(alpha))
+    #c_alpha = cmap(norm(alpha))
+    c_alpha = HYP_CMAP(HYP_CNORM(alpha))
 
     t = bandwidth2**(alpha/2)
     K, D, K_tilde, D_tilde = get_markov_matrix(g_dists_2, alpha, bandwidth2, d, a)
 
-    ax = axs[1,1+bidx]
-    #ax = axs[1,1]
+    # ---------- Eigvals ----------
+
+    #ax = axs[1,1+bidx]
+    ax = axs[1,1]
 
     if a == 0:
         # removing non-uniform sampling
@@ -197,21 +213,27 @@ for bidx, alpha in enumerate(alphas2):
 
     eigvals, eigvecs = np.linalg.eigh(0.5*(K_hat + K_hat.T))
 
-    # small to large
+    # eigvals
     eidx = np.argsort(eigvals)[::-1]
     eigvals = eigvals[eidx]; eigvecs = eigvecs[:,eidx]
     eigvals = -1/t * np.log(eigvals)
-
-    ax.plot(idxs, eigvals, c=c_alpha, label=rf'$\alpha = {{{alpha}}}$')  # eigvals    
-    eigvals_theory = idxs**alpha  # eye guide
+    ax.plot(idxs, eigvals, c=c_alpha, label=rf'$\alpha = {{{alpha}}}$')    
+    # eye guide
+    eigvals_theory = idxs**alpha  
     eigvals_theory = eigvals_theory / eigvals_theory[idx_mid]
-    eigvals_theory = eigvals_theory * eigvals[idx_mid] * 50
+    eigvals_theory = eigvals_theory * eigvals[idx_mid] * 10
     ax.plot(idxs, eigvals_theory, c=c_alpha, alpha=0.5, linewidth=1, linestyle='--')
 
-    ax.set_xlim([1, 500])
+    #ax.set_xlim([1, 500])
+    ax.set_xlim([1, 1000])
     #ax.set_ylim([1e2, 5e4])
     ax.set_xscale('log'); ax.set_yscale('log')
     ax.legend()
+
+    # ---------- Eigvecs ----------
+
+    # ax = axs[1,2]
+    # ax.plot(large_sample_radians,eigvecs[:,-1], c=c_alpha)
 
 ii = 0
 for row in range(nrows):
@@ -224,4 +246,6 @@ for row in range(nrows):
 
         ii += 1
 
+FIGS_DIR = njoin(FIGS_DIR, 'schematic')
+if not isdir(FIGS_DIR): makedirs(FIGS_DIR)
 plt.savefig(njoin(FIGS_DIR, 'figure_fdm.pdf'))

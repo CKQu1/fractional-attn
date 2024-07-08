@@ -32,6 +32,7 @@ python -i plot_results.py plot_ensembles .droot/formers_trained/layers=2-heads=8
 PROMPT input:
 """
 
+# Ablation study on alphas
 def plot_ensembles(model_root_dirs, metrics=['eval_accuracy'], 
                    legend=True, display=False):
     global df, df_setting, df_filtered, fig_file, axs
@@ -217,13 +218,13 @@ def plot_ensembles(model_root_dirs, metrics=['eval_accuracy'],
             #axs[mr_ii].legend(loc='best', ncol=2, frameon=False)           
             axs[mr_ii].legend(bbox_to_anchor=(1, 1.3),
                               loc='best', ncol=2, frameon=False)
-        # set titles
+        # col labels (bandwidth eps)
         if mr_ii < nrows:            
-            title = r'$W_Q \neq W_K$' if qk_share == 'qkv' else r'$W_Q = W_K$'
-            axs[mr_ii].set_title(title)
-        # display bandwidth
-        if mr_ii % ncols == 1:            
-            axs[mr_ii].text(1.2, 0.5, rf'$\varepsilon = {{{bandwidth}}}$', transform=(
+            axs[mr_ii].set_title(rf'$\varepsilon = {{{bandwidth}}}$')
+        # row labels (Q = K)
+        if mr_ii % ncols == ncols-1:      
+            title = r'$W_Q \neq W_K$' if qk_share == 'qkv' else r'$W_Q = W_K$'               
+            axs[mr_ii].text(1.2, 0.5, title, transform=(
                             axs[mr_ii].transAxes + ScaledTranslation(-20/72, +7/72, fig.dpi_scale_trans)),
                             fontsize='medium', va='center', rotation='vertical')
 
@@ -237,9 +238,6 @@ def plot_ensembles(model_root_dirs, metrics=['eval_accuracy'],
     # Add shared x and y labels
     fig.text(0.5, 0.01, 'Epochs', ha='center')
     fig.text(0, 0.5, 'Eval accuracy', va='center', rotation='vertical')    
-
-    # Add shared vertical label on the right
-    #fig.text(0.95, 0.5, 'Shared Right Y-Axis Label', ha='center', va='center', rotation=270)
 
     # Adjust layout
     #plt.tight_layout(rect=[0, 0, 0.93, 1])  # Leave space for the right label                 

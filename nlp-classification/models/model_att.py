@@ -818,7 +818,8 @@ class RDFNSSelfAttention(nn.Module):
         # g_dist = g_dist.masked_fill(attention_mask_expanded==0, 1e5)
 
         if alpha < 2:            
-            attn_score = (1 + (32**(1/d_intrinsic) - 1) / math.sqrt(head_dim) * g_dist / bandwidth**0.5)**(-d_intrinsic-alpha)
+            #attn_score = (1 + (d_intrinsic**(1/d_intrinsic) - 1) / math.sqrt(d_intrinsic) * g_dist / bandwidth**0.5)**(-d_intrinsic-alpha)
+            attn_score = (1 + 1 / math.sqrt(d_intrinsic) * g_dist / bandwidth**0.5)**(-d_intrinsic-alpha)
             # attn_score = (1 + g_dist / bandwidth**0.5)**(-d_intrinsic-alpha)
         else:             
             attn_score = torch.exp(-(g_dist / head_dim**0.5 / bandwidth**0.5)**(alpha/(alpha-1)))
@@ -1153,10 +1154,13 @@ class RDOPFNSSelfAttention(nn.Module):
         #q = torch.tensor([0, 0.2, 0.4, 0.6, 0.8, 1])
         #print(f'Distance percentiles: {torch.quantile(g_dist.flatten(), q)}')  
 
-        if alpha < 2:
-            attn_score = (1 + g_dist/bandwidth**0.5)**(-d_intrinsic-alpha)
-        else:
-            attn_score = torch.exp(-(g_dist/bandwidth**0.5)**(alpha/(alpha-1)))
+        if alpha < 2:            
+            #attn_score = (1 + (d_intrinsic**(1/d_intrinsic) - 1) / math.sqrt(d_intrinsic) * g_dist / bandwidth**0.5)**(-d_intrinsic-alpha)
+            attn_score = (1 + 1 / math.sqrt(d_intrinsic) * g_dist / bandwidth**0.5)**(-d_intrinsic-alpha)
+            # attn_score = (1 + g_dist / bandwidth**0.5)**(-d_intrinsic-alpha)
+        else:             
+            attn_score = torch.exp(-(g_dist / head_dim**0.5 / bandwidth**0.5)**(alpha/(alpha-1)))
+            # attn_score = torch.exp(-(g_dist / bandwidth**0.5)**(alpha/(alpha-1)))            
 
         if attention_mask is not None:
             # type 1: key_pad_mask

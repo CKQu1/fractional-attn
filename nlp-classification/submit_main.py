@@ -1,6 +1,8 @@
 import json
 import os
-from os.path import isfile, isdir
+from datetime import datetime
+from os import makedirs
+from os.path import isdir, isfile
 from time import sleep
 from constants import *
 from mutils import njoin, get_instance, structural_model_root, str2bool
@@ -55,6 +57,8 @@ def train_submit(script_name, kwargss, **kwargs):
 
 if __name__ == '__main__':
 
+    # datetime
+    date_str = datetime.today().strftime('%Y-%m-%d')
     # script for running
     script_name = "main.py" 
     # settings
@@ -70,15 +74,26 @@ if __name__ == '__main__':
 
         dataset_name = dataset_names[didx]
 
+        # CPUs
         select = 1; ngpus, ncpus = 0, 20
-        #select = 2; ngpus, ncpus = 0, 12            
-        walltime = '23:59:59'
-        mem = '20GB'    
+        #select = 2; ngpus, ncpus = 0, 12 
+        mem = '20GB'       
+         
+        # GPUs
+        # select = 1; ngpus, ncpus = 1, 0 
+        # mem = '16GB'
+            
+        walltime = '23:59:59'            
 
         seeds = [0]                                             
         for config_file in config_files:
-            kwargss = [{'model_name':'fnsformer','alpha':1.5,'a': 0,'bandwidth':1,'manifold':'sphere'},                      
-                       {'model_name':'fnsformer','alpha':2,'a': 0,'bandwidth':1,'manifold':'sphere'}                                       
+            # kwargss = [{'model_name':'opfnsformer','alpha':1.6,'a': 0,'bandwidth':1,'manifold':'sphere'},   
+            #            {'model_name':'opfnsformer','alpha':1.8,'a': 0,'bandwidth':1,'manifold':'sphere'},                   
+            #            {'model_name':'opfnsformer','alpha':2,'a': 0,'bandwidth':1,'manifold':'sphere'}                                      
+            #            ] 
+
+            kwargss = [{'model_name':'fnsformer','alpha':2,'a': 0,'bandwidth':0.1,'manifold':'sphere'},                  
+                       {'model_name':'opfnsformer','alpha':2,'a': 0,'bandwidth':0.1,'manifold':'sphere'}                                      
                        ] 
 
             # {'model_name':'fnsformer','alpha':1.5,'a': 0,'bandwidth':1,'manifold':'rd'},                      
@@ -98,8 +113,11 @@ if __name__ == '__main__':
 
                 #model_root = njoin(DROOT, 'finetune-v5', model_root_dirname)                
                 #model_root = njoin(DROOT, config_file.split('.')[0], model_root_dirname)
-                job_path = njoin(DROOT, 'trained_models')
-                model_root = njoin(job_path, config_file.split('.')[0], model_root_dirname)
+                ROOT = njoin(DROOT, 'trained_models_v2')
+                job_path = njoin(ROOT, date_str)
+                model_root = njoin(ROOT, config_file.split('.')[0], model_root_dirname)
+                if not isdir(model_root): makedirs(model_root)
+                if not isdir(job_path): makedirs(job_path)
 
                 for idx in range(len(kwargss)):                    
                     kwargss[idx]["dataset"] = dataset_name    
@@ -118,4 +136,4 @@ if __name__ == '__main__':
                  select=select, 
                  walltime=walltime,
                  mem=mem,
-                 job_path=job_path)
+                 job_path=ROOT)

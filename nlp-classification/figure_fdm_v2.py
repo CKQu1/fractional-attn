@@ -1,0 +1,315 @@
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.transforms import ScaledTranslation
+from matplotlib.cm import get_cmap
+from matplotlib.colors import Normalize
+from os import makedirs
+from os.path import isdir, isfile
+from scipy.stats import vonmises, vonmises_fisher
+from string import ascii_lowercase
+
+from constants import *
+from mutils import njoin
+
+# ----- Global plot settings -----
+
+def get_markov_matrix(C, alpha, bandwidth, d, a):
+
+    #sphere_radius = ((np.pi**(1/d)-1)/np.pi)
+    if alpha >= 2:
+        alpha_hat = alpha/(alpha-1)
+        K = np.exp(-(C/bandwidth**0.5)**alpha_hat)
+    else:
+        K = (1 + C/bandwidth**0.5)**(-d-alpha)
+
+    D = K.sum(-1)  # row normalization
+    K_tilde = np.diag(D**(-a)) @ K @ np.diag(D**(-a))
+    D_tilde = K_tilde.sum(-1)
+
+    #return np.diag(D_tilde**(-1)) @ K_tilde
+    return K, D, K_tilde, D_tilde
+
+def plot_vmf_density(axs, axidxs, x, y, z, vertices, mus, kappa):
+
+    axs[axidxs[0],axidxs[1]].remove()
+    axs[axidxs[0],axidxs[1]] = fig.add_subplot(nrows, ncols, axidxs[0] * ncols + axidxs[1] + 1, projection='3d')    
+    ax = axs[axidxs[0],axidxs[1]]   
+
+    vmf = vonmises_fisher(mus[0], kappa)
+    pdf_values = vmf.pdf(vertices) * 1/mus.shape[0]
+    for mu in mus[1:]:
+        vmf = vonmises_fisher(mu, kappa)
+        pdf_values += vmf.pdf(vertices) * 1/mus.shape[0]
+    pdfnorm = Normalize(vmin=pdf_values.min(), vmax=pdf_values.max())
+    ax.plot_surface(x, y, z, rstride=1, cstride=1,
+                    facecolors=plt.cm.viridis(pdfnorm(pdf_values)),
+                    linewidth=0)
+    ax.set_aspect('equal')
+    ax.view_init(azim=-130, elev=0)
+    #ax.axis('off')
+    #ax.set_title(rf"$\kappa={kappa}$")    
+
+def get_vmf_samples(sample_size, mus, kappa):
+    vmf = vonmises_fisher(mus[0], kappa)
+    samples = vmf.rvs(sample_size)
+    for mu in mus[1:]:
+        vmf = vonmises_fisher(mu, kappa)
+        samples = np.concatenate([samples, vmf.rvs(sample_size)])
+    return samples
+
+# https://scicomp.stackexchange.com/questions/29959/uniform-dots-distribution-in-a-sphere
+def uniform_sphere_rvs(n):
+    r = 1
+    alp = 4.0*np.pi*r*r/n
+    d = np.sqrt(alp)
+    m_nu = int(np.round(np.pi/d))
+    d_nu = np.pi/m_nu
+    d_phi = alp/d_nu
+    count = 0
+    xyzs = []
+    for m in range (0,m_nu):
+        nu = np.pi*(m+0.5)/m_nu
+        m_phi = int(np.round(2*np.pi*np.sin(nu)/d_phi))
+        for n in range (0,m_phi):
+            phi = 2*np.pi*n/m_phi
+            xp = r*np.sin(nu)*np.cos(phi)
+            yp = r*np.sin(nu)*np.sin(phi)
+            zp = r*np.cos(nu)
+            xyzs.append([xp,yp,zp])
+            count = count +1    
+
+    return np.array(xyzs), count
+
+# Normalization
+a = 0
+bandwidth1 = 1e-1
+#thresh = 1e-12
+thresh = 1e-10
+
+# VMF
+# mus = np.array([-np.sqrt(0.5), -np.sqrt(0.5), 0])[None,:]  # single
+# mus = np.array([[-np.sqrt(0.5), -np.sqrt(0.5), 0],  # bimodal
+#                [-1, 0, 0]])
+mus = np.array([[0, -1, 0],  # bimodal
+               [-1, 0, 0]])
+kappa = 25
+
+# Set seed, working: 10, 20
+seed = 30
+np.random.seed(seed)
+
+# Sample 1
+sample_size = 3
+samples = get_vmf_samples(sample_size, mus, kappa)
+# Sample 2 (non-uniform probabilitic large)
+large_sample_size = 500
+large_sample_xyzs = get_vmf_samples(int(large_sample_size/2), mus, kappa)
+# Sample 3 (uniform large)
+uniform_xyzs, count = uniform_sphere_rvs(large_sample_size)
+
+# Stacked large samples
+#all_radians = np.stack([large_sample_radians, uniform_radians, nonuniform_radians])
+all_xyzs = np.stack([large_sample_xyzs, uniform_xyzs])
+
+nrows, ncols = 2, 3
+figsize = (3*ncols,3*nrows)
+fig, axs = plt.subplots(nrows,ncols,figsize=figsize,
+                        sharex=False,sharey=False)        
+axs = np.expand_dims(axs, axis=0) if axs.ndim == 1 else axs   
+
+# # PDF (bimodel)
+# x = np.linspace(-np.pi, np.pi, 1000)
+# vonmises_fisher_pdf1 = vonmises_fisher.pdf(x, loc=loc1, kappa=kappa)
+# vonmises_fisher_pdf2 = vonmises_fisher.pdf(x, loc=loc2, kappa=kappa)
+# final_pdf = 0.5 * vonmises_fisher_pdf1 + 0.5 * vonmises_fisher_pdf2
+
+# ---------------------------------------- Row 1 ----------------------------------------
+
+# Reference: https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.vonmises_fisher.html
+
+n_grid = 100
+u = np.linspace(0, np.pi, n_grid)
+v = np.linspace(0, 2 * np.pi, n_grid)
+u_grid, v_grid = np.meshgrid(u, v)
+vertices = np.stack([np.cos(v_grid) * np.sin(u_grid),
+                     np.sin(v_grid) * np.sin(u_grid),
+                     np.cos(u_grid)],
+                    axis=2)
+x = np.outer(np.cos(v), np.sin(u))
+y = np.outer(np.sin(v), np.sin(u))
+z = np.outer(np.ones_like(u), np.cos(u))
+
+# ----- (a) -----
+plot_vmf_density(axs, [0,0], x, y, z, vertices, mus, kappa)
+
+# ----- (b -- c) -----
+# Points and interactions on circle (non-uniform)
+g_dists = np.arccos(samples @ samples.T)
+for ii in range(g_dists.shape[0]):
+    g_dists[ii,ii] = 0
+
+# stereographic projection
+qk_share = True
+if qk_share:
+    Q = W = np.stack([samples[:,0] / (1 - samples[:,2]), samples[:,1] / (1 - samples[:,2])]).T
+    W = samples
+
+n = samples.shape[0]
+#d = samples.shape[1]
+d = samples.shape[1] - 1
+#scale = 3 * n
+scale = 1/2 * n
+
+alphas1 = [1.2, 2]
+for bidx, alpha in enumerate(alphas1):
+    K, D, K_tilde, D_tilde = get_markov_matrix(g_dists, alpha, bandwidth1, d, a)
+    M = np.diag(D_tilde**(-1)) @ K_tilde
+
+    print(f'alpha = {alpha}')
+    print(f'M min: {M.min()}, max: {M.max()}')
+    print(f'K min: {K.min()}, max: {K.max()}')
+    print(f'K_tilde min: {K_tilde.min()}, max: {K_tilde.max()}')
+    print('\n')    
+
+    ax = axs[0,bidx+1]
+    #c_alpha = cmap(norm(alpha))
+    c_alpha = HYP_CMAP(HYP_CNORM(alpha))
+
+    for i in range(n):
+        for j in range(n):
+            if M[i, j] > thresh:
+                if bidx ==0:
+                    ax.plot([Q[i, 0], W[j, 0]], [Q[i, 1], W[j, 1]], c=c_alpha, linewidth=scale * M[i, j], 
+                                                                               linestyle='--', zorder=1)
+                elif bidx == 1:
+                    ax.plot([Q[i, 0], W[j, 0]], [Q[i, 1], W[j, 1]], c=c_alpha, linewidth=scale * M[i, j], 
+                                                                               linestyle='--', zorder=1)
+                else:
+                    ax.plot([Q[i, 0], W[j, 0]], [Q[i, 1], W[j, 1]], c=c_alpha, linewidth=scale * M[i, j], 
+                                                                               linestyle='--', zorder=1)
+
+    # c='#dd1c77'
+    ax.scatter(Q[:, 0], Q[:, 1], label='Queries', lw=.25, c='grey', edgecolors="k", s=20, zorder=2)
+    if not qk_share:
+        # c='#a8ddb5'
+        ax.scatter(W[:, 0], W[:, 1], label='Keys', lw=.5, c='grey',  edgecolors="k", s=20, zorder=2)
+
+    #ax.set_xlim([-1.2,1.2]);ax.set_ylim([-1.2,1.2])
+    ax.set_xticklabels([]);ax.set_yticklabels([])
+    ax.set_title(rf'$\alpha = {alpha}$')
+
+
+# ---------------------------------------- Row 2 ----------------------------------------
+
+alphas2 = [1.2, 2]
+#alphas2 = [1.2, 1.6, 2]
+#bandwidth2 = 1e-4
+bandwidth2 = 1e-5
+
+# ----- (d) Polar histograms -----
+# axs[1,0].remove()
+# axs[1,0] = ax = fig.add_subplot(nrows, ncols, 4, projection='polar')
+# ax.plot(x, final_pdf, label="PDF")
+# ax.set_yticks(pdf_yticks)
+# ax.hist(large_sample_radians, density=True, bins=int(np.sqrt(large_sample_size)), label="Histogram")
+# ax.set_title("Polar plot")
+# ax.legend(bbox_to_anchor=(0.15, 1.06))
+
+# Points and interactions on circle
+#g_dists_2 = np.arccos(uniform_xyzs @ uniform_xyzs.T)  # uniform sampling
+#g_dists_2 = np.arccos(large_sample_xyzs @ large_sample_xyzs.T)  # non-uniform probabalistic sampling
+#g_dists_2 = np.arccos(nonuniform_xyzs @ nonuniform_xyzs.T)  # non-uniform probabalistic sampling
+
+dist_types = ['Non-uniform', 'Uniform']
+ds_iis = [0,1]
+for bidx, ds_ii in enumerate(ds_iis):
+
+    g_dists_2 = np.arccos(all_xyzs[ds_ii] @ all_xyzs[ds_ii].T)
+
+    n = g_dists_2.shape[0]
+    for ii in range(n):
+        g_dists_2[ii,ii] = 0
+
+    idxs = np.arange(1,large_sample_size+1)
+    idx_mid = int(n/2)
+    for _, alpha in enumerate(alphas2):
+
+        #c_alpha = cmap(norm(alpha))
+        c_alpha = HYP_CMAP(HYP_CNORM(alpha))
+
+        t = bandwidth2**(alpha/2)
+        K, D, K_tilde, D_tilde = get_markov_matrix(g_dists_2, alpha, bandwidth2, d, a)
+
+        # ---------- Eigvals ----------
+
+        ax = axs[1,1+bidx]
+        #ax = axs[1,1]
+
+        if a == 0:
+            # removing non-uniform sampling
+            a_ = 1
+            # estimate of sampling density
+            gaussian_hk = (2*np.pi*bandwidth2)**(-d/2)/n * np.exp(-g_dists_2**2/(2*bandwidth2))
+            q_sample = gaussian_hk.sum(-1)
+            K_tilde_ = np.diag(q_sample**(-a_)) @ K @ np.diag(q_sample**(-a_))
+            D_tilde_ = K_tilde_.sum(-1)
+            K_hat = np.diag(D_tilde_**(-0.5)) @ K_tilde_ @ np.diag(D_tilde_**(-0.5))
+            K_hat_sym = 0.5*(K_hat + K_hat.T)
+
+            eigvals, eigvecs = np.linalg.eigh(K_hat_sym)
+            eigvecs = np.diag(D_tilde_**(-0.5)) @ eigvecs
+
+# ----- (e -- f) -----
+
+            # eigvals
+            eidx = np.argsort(eigvals)[::-1]
+            eigvals = eigvals[eidx]; eigvecs = eigvecs[:,eidx]
+            eigvals = -1/t * np.log(eigvals)
+            ax.plot(idxs, eigvals, c=c_alpha, label=rf'$\alpha = {{{alpha}}}$')    
+            # eye guide
+            power = alpha if alpha <= 2 else 2
+            eigvals_theory = idxs**power  
+            # eigvals_theory = eigvals_theory / eigvals_theory[idx_mid]
+            # eigvals_theory = eigvals_theory * eigvals[idx_mid] * 10
+            ax.plot(idxs, eigvals_theory, c=c_alpha, alpha=0.5, linewidth=1, linestyle='--')
+
+            ax.set_xlim([1, n])
+            if d == 1:
+                ax.set_ylim([1, 1e6])
+
+            #ax.set_ylim([1e2, 5e4])
+            ax.set_xscale('log'); ax.set_yscale('log')
+            #ax.legend()
+
+            # ---------- Eigvecs ----------
+            # eidx = 1
+            # ax = axs[1,2]
+            # ax.plot(large_sample_radians, np.exp(t * eigvals[eidx]) * eigvecs[:,eidx], c=c_alpha)
+
+axs[1,1].legend(frameon=False)
+for bidx, ds_ii in enumerate(ds_iis):
+    axs[1,1+bidx].set_title(dist_types[ds_ii])
+
+ii = 0
+for row in range(nrows):
+    for col in range(ncols):  
+        ax = axs[row,col]
+        if '3d' in ax.name:
+            ax.text2D(
+                0.0, 1.0, f'({ascii_lowercase[ii]})', transform=(
+                    ax.transAxes + ScaledTranslation(-20/72, +7/72, fig.dpi_scale_trans)),
+                fontsize='medium', va='bottom', fontfamily='sans-serif')    
+        else:
+            ax.text(
+                0.0, 1.0, f'({ascii_lowercase[ii]})', transform=(
+                    ax.transAxes + ScaledTranslation(-20/72, +7/72, fig.dpi_scale_trans)),
+                fontsize='medium', va='bottom', fontfamily='sans-serif')       
+
+        ii += 1
+
+FIGS_DIR = njoin(FIGS_DIR, 'schematic')
+if not isdir(FIGS_DIR): makedirs(FIGS_DIR)
+plt.savefig(njoin(FIGS_DIR, 'figure_fdm_3d.pdf'))
+print(f'Figure saved in {FIGS_DIR}')

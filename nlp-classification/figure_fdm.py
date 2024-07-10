@@ -14,33 +14,12 @@ from mutils import njoin
 
 # ----- Global plot settings -----
 
-#cm_name = 'rainbow'
-cm_name = 'turbo'
-
-# method 1
-# cmap = get_cmap(cm_name)
-# norm = mpl.colors.Normalize(vmin=1, vmax=2)
-
-# method 2
-# cmap = mpl.colormaps[cm_name]
-# alpha_intervals = np.linspace(1, 2, 21)
-# alpha_colors = cmap(alpha_intervals)
-
-def get_alpha_index(alpha, alpha_intervals):
-    if alpha in alpha_intervals:
-        aidx = np.where(alpha_intervals==alpha)[0][0]
-    else:
-        for aidx in range(len(alpha_intervals)-1):            
-            if np.abs(alpha_intervals[aidx] - alpha) < np.abs(alpha_intervals[aidx+1] - alpha):
-                break
-
-    return aidx
-
 def get_markov_matrix(C, alpha, bandwidth, d, a):
 
     #sphere_radius = ((np.pi**(1/d)-1)/np.pi)
     if alpha >= 2:
-        K = np.exp(-(C/bandwidth**0.5)**(alpha/(alpha-1)))
+        alpha_hat = alpha/(alpha-1)
+        K = np.exp(-(C/bandwidth**0.5)**alpha_hat)
     else:
         K = (1 + C/bandwidth**0.5)**(-d-alpha)
 
@@ -51,7 +30,6 @@ def get_markov_matrix(C, alpha, bandwidth, d, a):
     #return np.diag(D_tilde**(-1)) @ K_tilde
     return K, D, K_tilde, D_tilde
 
-
 a = 0
 bandwidth1 = 1e-1
 thresh = 1e-5
@@ -60,27 +38,39 @@ thresh = 1e-5
 loc1, loc2 = -np.pi/2, np.pi/2
 kappa = 8  # concentration
 
-# Set seed
-np.random.seed(10)
+# Set seed, working: 10, 20
+seed = 50
+np.random.seed(seed)
 
-# Sample 1 (non-uniform small)
-sample_size = 5
+# Sample 0 (non-uniform probabilitic small)
+sample_size = 4
 sample1 = vonmises(loc=loc1, kappa=kappa).rvs(sample_size)
 sample2 = vonmises(loc=loc2, kappa=kappa).rvs(sample_size)
 sample_radians = np.concatenate([sample1, sample2])
 sample_xys = np.stack([np.cos(sample_radians), np.sin(sample_radians)]).T
 
-# Sample 2 (uniform large)
-uniform_sample_size = 500
-uniform_radians = np.linspace(0,2*np.pi,uniform_sample_size)
-uniform_xys = np.stack([np.cos(uniform_radians), np.sin(uniform_radians)]).T
 
-# Sample 1 (non-uniform large)
+uniform_sample_size = 500
+# Sample 1 (non-uniform probabilitic large)
 large_sample_size = uniform_sample_size
 large_sample1 = vonmises(loc=loc1, kappa=kappa).rvs(int(large_sample_size/2))
 large_sample2 = vonmises(loc=loc2, kappa=kappa).rvs(int(large_sample_size/2))
 large_sample_radians = np.concatenate([large_sample1, large_sample2])
 large_sample_xys = np.stack([np.cos(large_sample_radians), np.sin(large_sample_radians)]).T
+
+# Sample 2 (uniform large)
+uniform_radians = np.linspace(0,2*np.pi,uniform_sample_size)
+uniform_xys = np.stack([np.cos(uniform_radians), np.sin(uniform_radians)]).T
+
+# Sample 3 (non-uniform deterministic)
+uniform_sample_size = 500
+nonuniform_radians = np.linspace(0,2*np.pi,uniform_sample_size)
+nonuniform_radians = nonuniform_radians - np.sin(nonuniform_radians)/2
+nonuniform_xys = np.stack([np.cos(uniform_radians), np.sin(uniform_radians)]).T
+
+# Stacked large samples
+all_radians = np.stack([large_sample_radians, uniform_radians, nonuniform_radians])
+all_xys = np.stack([large_sample_xys, uniform_xys, nonuniform_xys])
 
 nrows, ncols = 2, 3
 figsize = (3*ncols,3*nrows)
@@ -97,7 +87,7 @@ final_pdf = 0.5 * vonmises_pdf1 + 0.5 * vonmises_pdf2
 # ---------------------------------------- Row 1 ----------------------------------------
 
 # PDF in radians
-pdf_yticks = [0, 0.3, 0.6]
+pdf_yticks = [0, 0.2, 0.4, 0.6]
 
 ax = axs[0,0]
 ax.plot(x, final_pdf)
@@ -182,58 +172,76 @@ ax.hist(large_sample_radians, density=True, bins=int(np.sqrt(large_sample_size))
 
 # Points and interactions on circle
 #g_dists_2 = np.arccos(uniform_xys @ uniform_xys.T)  # uniform sampling
-g_dists_2 = np.arccos(large_sample_xys @ large_sample_xys.T)  # non-uniform sampling
-n = g_dists_2.shape[0]
-for ii in range(n):
-    g_dists_2[ii,ii] = 0
+#g_dists_2 = np.arccos(large_sample_xys @ large_sample_xys.T)  # non-uniform probabalistic sampling
+#g_dists_2 = np.arccos(nonuniform_xys @ nonuniform_xys.T)  # non-uniform probabalistic sampling
 
-idxs = np.arange(1,large_sample_size+1)
-idx_mid = int(n/2)
-for bidx, alpha in enumerate(alphas2):
+dist_types = ['Non-uniform', 'Uniform', 'Non-uniform']
+ds_iis = [0,1]
+for bidx, ds_ii in enumerate(ds_iis):
 
-    #c_alpha = cmap(norm(alpha))
-    c_alpha = HYP_CMAP(HYP_CNORM(alpha))
+    g_dists_2 = np.arccos(all_xys[ds_ii] @ all_xys[ds_ii].T)
 
-    t = bandwidth2**(alpha/2)
-    K, D, K_tilde, D_tilde = get_markov_matrix(g_dists_2, alpha, bandwidth2, d, a)
+    n = g_dists_2.shape[0]
+    for ii in range(n):
+        g_dists_2[ii,ii] = 0
 
-    # ---------- Eigvals ----------
+    idxs = np.arange(1,large_sample_size+1)
+    idx_mid = int(n/2)
+    for _, alpha in enumerate(alphas2):
 
-    #ax = axs[1,1+bidx]
-    ax = axs[1,1]
+        #c_alpha = cmap(norm(alpha))
+        c_alpha = HYP_CMAP(HYP_CNORM(alpha))
 
-    if a == 0:
-        # removing non-uniform sampling
-        a_ = 1
-        # estimate of sampling density
-        q_sample = ((2*np.pi*bandwidth2)**(-d/2)/n * np.exp(-g_dists_2**2/(2*bandwidth2))).sum(-1)
-        K_tilde_ = np.diag(q_sample**(-a_)) @ K @ np.diag(q_sample**(-a_))
-        D_tilde_ = K_tilde_.sum(-1)
-        K_hat = np.diag(D_tilde_**(-0.5)) @ K_tilde_ @ np.diag(D_tilde_**(-0.5))
+        t = bandwidth2**(alpha/2)
+        K, D, K_tilde, D_tilde = get_markov_matrix(g_dists_2, alpha, bandwidth2, d, a)
 
-    eigvals, eigvecs = np.linalg.eigh(0.5*(K_hat + K_hat.T))
+        # ---------- Eigvals ----------
 
-    # eigvals
-    eidx = np.argsort(eigvals)[::-1]
-    eigvals = eigvals[eidx]; eigvecs = eigvecs[:,eidx]
-    eigvals = -1/t * np.log(eigvals)
-    ax.plot(idxs, eigvals, c=c_alpha, label=rf'$\alpha = {{{alpha}}}$')    
-    # eye guide
-    eigvals_theory = idxs**alpha  
-    eigvals_theory = eigvals_theory / eigvals_theory[idx_mid]
-    eigvals_theory = eigvals_theory * eigvals[idx_mid] * 10
-    ax.plot(idxs, eigvals_theory, c=c_alpha, alpha=0.5, linewidth=1, linestyle='--')
+        ax = axs[1,1+bidx]
+        #ax = axs[1,1]
 
-    #ax.set_xlim([1, 500])
-    ax.set_xlim([1, 1000])
-    #ax.set_ylim([1e2, 5e4])
-    ax.set_xscale('log'); ax.set_yscale('log')
-    ax.legend()
+        if a == 0:
+            # removing non-uniform sampling
+            a_ = 1
+            # estimate of sampling density
+            gaussian_hk = (2*np.pi*bandwidth2)**(-d/2)/n * np.exp(-g_dists_2**2/(2*bandwidth2))
+            q_sample = gaussian_hk.sum(-1)
+            K_tilde_ = np.diag(q_sample**(-a_)) @ K @ np.diag(q_sample**(-a_))
+            D_tilde_ = K_tilde_.sum(-1)
+            K_hat = np.diag(D_tilde_**(-0.5)) @ K_tilde_ @ np.diag(D_tilde_**(-0.5))
+            K_hat_sym = 0.5*(K_hat + K_hat.T)
 
-    # ---------- Eigvecs ----------
+            eigvals, eigvecs = np.linalg.eigh(K_hat_sym)
+            eigvecs = np.diag(D_tilde_**(-0.5)) @ eigvecs
 
-    # ax = axs[1,2]
-    # ax.plot(large_sample_radians,eigvecs[:,-1], c=c_alpha)
+            # eigvals
+            eidx = np.argsort(eigvals)[::-1]
+            eigvals = eigvals[eidx]; eigvecs = eigvecs[:,eidx]
+            eigvals = -1/t * np.log(eigvals)
+            ax.plot(idxs, eigvals, c=c_alpha, label=rf'$\alpha = {{{alpha}}}$')    
+            # eye guide
+            power = alpha if alpha <= 2 else 2
+            eigvals_theory = idxs**power  
+            # eigvals_theory = eigvals_theory / eigvals_theory[idx_mid]
+            # eigvals_theory = eigvals_theory * eigvals[idx_mid] * 10
+            ax.plot(idxs, eigvals_theory, c=c_alpha, alpha=0.5, linewidth=1, linestyle='--')
+
+            ax.set_xlim([1, n])
+            if d == 1:
+                ax.set_ylim([1, 1e6])
+
+            #ax.set_ylim([1e2, 5e4])
+            ax.set_xscale('log'); ax.set_yscale('log')
+            #ax.legend()
+
+            # ---------- Eigvecs ----------
+            # eidx = 1
+            # ax = axs[1,2]
+            # ax.plot(large_sample_radians, np.exp(t * eigvals[eidx]) * eigvecs[:,eidx], c=c_alpha)
+
+axs[1,1].legend(frameon=False)
+for bidx, ds_ii in enumerate(ds_iis):
+    axs[1,1+bidx].set_title(dist_types[ds_ii])
 
 ii = 0
 for row in range(nrows):

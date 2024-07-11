@@ -2,6 +2,7 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 import matplotlib.pyplot as plt
+import sys
 from matplotlib.transforms import ScaledTranslation
 from matplotlib.cm import get_cmap
 from matplotlib.colors import Normalize
@@ -14,6 +15,8 @@ from constants import *
 from mutils import njoin
 
 # ----- Global plot settings -----
+
+c_node = 'grey'
 
 def get_markov_matrix(C, alpha, bandwidth, d, a):
 
@@ -33,6 +36,7 @@ def get_markov_matrix(C, alpha, bandwidth, d, a):
 
 def plot_vmf_density(axs, axidxs, x, y, z, vertices, mus, kappa):
 
+    cmap_name = 'inferno'; cmap = get_cmap(cmap_name)
     axs[axidxs[0],axidxs[1]].remove()
     axs[axidxs[0],axidxs[1]] = fig.add_subplot(nrows, ncols, axidxs[0] * ncols + axidxs[1] + 1, projection='3d')    
     ax = axs[axidxs[0],axidxs[1]]   
@@ -44,7 +48,7 @@ def plot_vmf_density(axs, axidxs, x, y, z, vertices, mus, kappa):
         pdf_values += vmf.pdf(vertices) * 1/mus.shape[0]
     pdfnorm = Normalize(vmin=pdf_values.min(), vmax=pdf_values.max())
     ax.plot_surface(x, y, z, rstride=1, cstride=1,
-                    facecolors=plt.cm.viridis(pdfnorm(pdf_values)),
+                    facecolors=cmap(pdfnorm(pdf_values)),
                     linewidth=0)
     ax.set_aspect('equal')
     ax.view_init(azim=-130, elev=0)
@@ -153,8 +157,7 @@ for ii in range(g_dists.shape[0]):
 # stereographic projection
 qk_share = True
 if qk_share:
-    Q = W = np.stack([samples[:,0] / (1 - samples[:,2]), samples[:,1] / (1 - samples[:,2])]).T
-    W = samples
+    Q = W = np.stack([samples[:,0] / (1 - samples[:,2]), samples[:,1] / (1 - samples[:,2])]).T    
 
 n = samples.shape[0]
 #d = samples.shape[1]
@@ -191,10 +194,10 @@ for bidx, alpha in enumerate(alphas1):
                                                                                linestyle='--', zorder=1)
 
     # c='#dd1c77'
-    ax.scatter(Q[:, 0], Q[:, 1], label='Queries', lw=.25, c='grey', edgecolors="k", s=20, zorder=2)
+    ax.scatter(Q[:, 0], Q[:, 1], label='Queries', lw=.25, c=c_node, edgecolors="k", s=20, zorder=2)
     if not qk_share:
         # c='#a8ddb5'
-        ax.scatter(W[:, 0], W[:, 1], label='Keys', lw=.5, c='grey',  edgecolors="k", s=20, zorder=2)
+        ax.scatter(W[:, 0], W[:, 1], label='Keys', lw=.5, c=c_node,  edgecolors="k", s=20, zorder=2)
 
     #ax.set_xlim([-1.2,1.2]);ax.set_ylim([-1.2,1.2])
     ax.set_xticklabels([]);ax.set_yticklabels([])
@@ -217,13 +220,10 @@ bandwidth2 = 1e-5
 # ax.set_title("Polar plot")
 # ax.legend(bbox_to_anchor=(0.15, 1.06))
 
-# Points and interactions on circle
-#g_dists_2 = np.arccos(uniform_xyzs @ uniform_xyzs.T)  # uniform sampling
-#g_dists_2 = np.arccos(large_sample_xyzs @ large_sample_xyzs.T)  # non-uniform probabalistic sampling
-#g_dists_2 = np.arccos(nonuniform_xyzs @ nonuniform_xyzs.T)  # non-uniform probabalistic sampling
-
 dist_types = ['Non-uniform', 'Uniform']
-ds_iis = [0,1]
+#ds_iis = [0,1]
+ds_iis = [0]
+
 for bidx, ds_ii in enumerate(ds_iis):
 
     g_dists_2 = np.arccos(all_xyzs[ds_ii] @ all_xyzs[ds_ii].T)
@@ -288,6 +288,8 @@ for bidx, ds_ii in enumerate(ds_iis):
             # ax = axs[1,2]
             # ax.plot(large_sample_radians, np.exp(t * eigvals[eidx]) * eigvecs[:,eidx], c=c_alpha)
 
+# ----- plot settings -----
+
 axs[1,1].legend(frameon=False)
 for bidx, ds_ii in enumerate(ds_iis):
     axs[1,1+bidx].set_title(dist_types[ds_ii])
@@ -313,3 +315,5 @@ FIGS_DIR = njoin(FIGS_DIR, 'schematic')
 if not isdir(FIGS_DIR): makedirs(FIGS_DIR)
 plt.savefig(njoin(FIGS_DIR, 'figure_fdm_3d.pdf'))
 print(f'Figure saved in {FIGS_DIR}')
+
+#sys.exit()

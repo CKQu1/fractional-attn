@@ -72,7 +72,9 @@ nonuniform_xys = np.stack([np.cos(uniform_radians), np.sin(uniform_radians)]).T
 all_radians = np.stack([large_sample_radians, uniform_radians, nonuniform_radians])
 all_xys = np.stack([large_sample_xys, uniform_xys, nonuniform_xys])
 
-nrows, ncols = 2, 3
+# nrows, ncols = 2, 3
+# figsize = (3*ncols,3*nrows)
+nrows, ncols = 2, 4
 figsize = (3*ncols,3*nrows)
 fig, axs = plt.subplots(nrows,ncols,figsize=figsize,
                         sharex=False,sharey=False)        
@@ -86,7 +88,7 @@ final_pdf = 0.5 * vonmises_pdf1 + 0.5 * vonmises_pdf2
 
 # ---------------------------------------- Row 1 ----------------------------------------
 
-# PDF in radians
+# ----- (a) PDF in radians -----
 pdf_yticks = [0, 0.2, 0.4, 0.6]
 
 ax = axs[0,0]
@@ -99,6 +101,16 @@ ax.set_title("Bimodal von-Mises")
 ax.set_xlim(-np.pi, np.pi)
 ax.set_yticks(pdf_yticks)
 ax.grid(True)
+
+# ----- (b) Polar histograms -----
+axs[0,1].remove()
+axs[0,1] = fig.add_subplot(nrows, ncols, 4, projection='polar')
+ax = axs[0,1]
+ax.plot(x, final_pdf, label="PDF")
+ax.set_yticks(pdf_yticks)
+ax.hist(large_sample_radians, density=True, bins=int(np.sqrt(large_sample_size)), label="Histogram")
+#ax.set_title("Polar plot")
+#ax.legend(bbox_to_anchor=(0.15, 1.06))
 
 # Points and interactions on circle (non-uniform)
 g_dists = np.arccos(sample_xys @ sample_xys.T)
@@ -126,8 +138,8 @@ for bidx, alpha in enumerate(alphas1):
     print(f'K_tilde min: {K_tilde.min()}, max: {K_tilde.max()}')
     print('\n')    
 
-    ax = axs[0,bidx+1]
-    #c_alpha = cmap(norm(alpha))
+    #ax = axs[0,bidx+1]
+    ax = axs[0,bidx+2]
     c_alpha = HYP_CMAP(HYP_CNORM(alpha))
 
     for i in range(n):
@@ -151,7 +163,8 @@ for bidx, alpha in enumerate(alphas1):
     ax.set_title(rf'$\alpha = {alpha}$')
 
 # unit circle outline
-for col in [1,2]:
+#for col in [1,2]:
+for col in [2,3]:
     axs[0,col].plot(uniform_xys[:,0], uniform_xys[:,1], c='grey', 
                        linestyle='--', linewidth=1e-2)
 
@@ -161,22 +174,9 @@ alphas2 = [1.2, 2]
 #alphas2 = [1.2, 1.6, 2]
 bandwidth2 = 1e-4
 
-# Polar histograms
-axs[1,0].remove()
-axs[1,0] = ax = fig.add_subplot(nrows, ncols, 4, projection='polar')
-ax.plot(x, final_pdf, label="PDF")
-ax.set_yticks(pdf_yticks)
-ax.hist(large_sample_radians, density=True, bins=int(np.sqrt(large_sample_size)), label="Histogram")
-#ax.set_title("Polar plot")
-#ax.legend(bbox_to_anchor=(0.15, 1.06))
-
-# Points and interactions on circle
-#g_dists_2 = np.arccos(uniform_xys @ uniform_xys.T)  # uniform sampling
-#g_dists_2 = np.arccos(large_sample_xys @ large_sample_xys.T)  # non-uniform probabalistic sampling
-#g_dists_2 = np.arccos(nonuniform_xys @ nonuniform_xys.T)  # non-uniform probabalistic sampling
-
 dist_types = ['Non-uniform', 'Uniform', 'Non-uniform']
 ds_iis = [0,1]
+trans = [1,0.5]
 for bidx, ds_ii in enumerate(ds_iis):
 
     g_dists_2 = np.arccos(all_xys[ds_ii] @ all_xys[ds_ii].T)
@@ -187,7 +187,7 @@ for bidx, ds_ii in enumerate(ds_iis):
 
     idxs = np.arange(1,large_sample_size+1)
     idx_mid = int(n/2)
-    for _, alpha in enumerate(alphas2):
+    for aidx, alpha in enumerate(alphas2):
 
         #c_alpha = cmap(norm(alpha))
         c_alpha = HYP_CMAP(HYP_CNORM(alpha))
@@ -197,7 +197,7 @@ for bidx, ds_ii in enumerate(ds_iis):
 
         # ---------- Eigvals ----------
 
-        ax = axs[1,1+bidx]
+        ax = axs[1,bidx]
         #ax = axs[1,1]
 
         if a == 0:
@@ -235,13 +235,23 @@ for bidx, ds_ii in enumerate(ds_iis):
             #ax.legend()
 
             # ---------- Eigvecs ----------
-            # eidx = 1
-            # ax = axs[1,2]
-            # ax.plot(large_sample_radians, np.exp(t * eigvals[eidx]) * eigvecs[:,eidx], c=c_alpha)
+            eidx_plot = n - 1
+            if eidx_plot % 2 == 0:
+                eigvec_theory = np.sin(eidx_plot/2 * uniform_radians)
+            else:
+                eigvec_theory = np.cos((eidx_plot-1)/2 * uniform_radians)
+            ax = axs[1,bidx+2]
+            #ax.plot(large_sample_radians, np.exp(t * eigvals[eidx_plot]) * eigvecs[:,eidx_plot], c=c_alpha)
+            ax.scatter(eigvecs[:,eidx_plot], eigvecs[:,eidx_plot - 1], alpha=trans[aidx])
+            #ax.plot(eigvecs[:,eidx_plot], c=c_alpha)
+            #ax.plot(uniform_radians, eigvec_theory)
 
-axs[1,1].legend(frameon=False)
+# ----- Plot settings -----
+
+axs[1,0].legend(frameon=False)
 for bidx, ds_ii in enumerate(ds_iis):
-    axs[1,1+bidx].set_title(dist_types[ds_ii])
+    axs[1,bidx].set_title(dist_types[ds_ii])
+    axs[1,bidx+2].set_title(dist_types[ds_ii])
 
 ii = 0
 for row in range(nrows):

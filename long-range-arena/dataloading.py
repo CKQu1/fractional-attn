@@ -78,7 +78,8 @@ def create_lra_imdb_classification_dataset(cache_dir: Union[str, Path] = DEFAULT
 	dataset_obj.setup()
 
 	trainloader = make_data_loader(dataset_obj.dataset_train, dataset_obj, seed=seed, batch_size=train_bs)
-	testloader = make_data_loader(dataset_obj.dataset_test, dataset_obj, seed=seed, batch_size=eval_bs, drop_last=False, shuffle=False)
+	#testloader = make_data_loader(dataset_obj.dataset_test, dataset_obj, seed=seed, batch_size=eval_bs, drop_last=False, shuffle=False)
+	testloader = make_data_loader(dataset_obj.dataset_test, dataset_obj, seed=seed, batch_size=eval_bs)
 	valloader = None
 
 	N_CLASSES = dataset_obj.d_output
@@ -100,19 +101,22 @@ def create_lra_listops_classification_dataset(cache_dir: Union[str, Path] = DEFA
 	print("[*] Generating LRA-listops Classification Dataset")
 	from dataloaders.lra import ListOps
 	name = 'listops'
-	dir_name = './raw_datasets/lra_release/lra_release/listops-1000'
+	dir_name = './.raw_datasets/lra_release/lra_release/listops-1000'
 
 	dataset_obj = ListOps(name, data_dir=dir_name)
 	dataset_obj.cache_dir = Path(cache_dir) / name
 	dataset_obj.setup()
 
 	trainloader = make_data_loader(dataset_obj.dataset_train, dataset_obj, seed=seed, batch_size=train_bs)
-	valloader = make_data_loader(dataset_obj.dataset_val, dataset_obj, seed=seed, batch_size=eval_bs, drop_last=False, shuffle=False)
-	testloader = make_data_loader(dataset_obj.dataset_test, dataset_obj, seed=seed, batch_size=eval_bs, drop_last=False, shuffle=False)
+	#valloader = make_data_loader(dataset_obj.dataset_val, dataset_obj, seed=seed, batch_size=eval_bs, drop_last=False, shuffle=False)
+	valloader = make_data_loader(dataset_obj.dataset_val, dataset_obj, seed=seed, batch_size=eval_bs)
+	#testloader = make_data_loader(dataset_obj.dataset_test, dataset_obj, seed=seed, batch_size=eval_bs, drop_last=False, shuffle=False)
+	testloader = make_data_loader(dataset_obj.dataset_test, dataset_obj, seed=seed, batch_size=eval_bs)
 
 	N_CLASSES = dataset_obj.d_output
 	SEQ_LENGTH = dataset_obj.l_max
 	IN_DIM = 20
+	TRAIN_SIZE = len(dataset_obj.dataset_train)
 	VOCAB_SIZE = dataset_obj.n_tokens
 
 	return trainloader, valloader, testloader, N_CLASSES, SEQ_LENGTH, IN_DIM, TRAIN_SIZE, VOCAB_SIZE
@@ -129,15 +133,17 @@ def create_lra_path32_classification_dataset(cache_dir: Union[str, Path] = DEFAU
 	from dataloaders.lra import PathFinder
 	name = 'pathfinder'
 	resolution = 32
-	dir_name = f'./raw_datasets/lra_release/lra_release/pathfinder{resolution}'
+	dir_name = f'./.raw_datasets/lra_release/lra_release/pathfinder{resolution}'
 
 	dataset_obj = PathFinder(name, data_dir=dir_name, resolution=resolution)
 	dataset_obj.cache_dir = Path(cache_dir) / name
 	dataset_obj.setup()
 
 	trn_loader = make_data_loader(dataset_obj.dataset_train, dataset_obj, seed=seed, batch_size=train_bs)
-	val_loader = make_data_loader(dataset_obj.dataset_val, dataset_obj, seed=seed, batch_size=eval_bs, drop_last=False, shuffle=False)
-	tst_loader = make_data_loader(dataset_obj.dataset_test, dataset_obj, seed=seed, batch_size=eval_bs, drop_last=False, shuffle=False)
+	#val_loader = make_data_loader(dataset_obj.dataset_val, dataset_obj, seed=seed, batch_size=eval_bs, drop_last=False, shuffle=False)
+	val_loader = make_data_loader(dataset_obj.dataset_val, dataset_obj, seed=seed, batch_size=eval_bs)
+	#tst_loader = make_data_loader(dataset_obj.dataset_test, dataset_obj, seed=seed, batch_size=eval_bs, drop_last=False, shuffle=False)
+	tst_loader = make_data_loader(dataset_obj.dataset_test, dataset_obj, seed=seed, batch_size=eval_bs)
 
 	N_CLASSES = dataset_obj.d_output
 	SEQ_LENGTH = dataset_obj.dataset_train.tensors[0].shape[1]
@@ -159,15 +165,17 @@ def create_lra_pathx_classification_dataset(cache_dir: Union[str, Path] = DEFAUL
 	from dataloaders.lra import PathFinder
 	name = 'pathfinder'
 	resolution = 128
-	dir_name = f'./raw_datasets/lra_release/lra_release/pathfinder{resolution}'
+	dir_name = f'./.raw_datasets/lra_release/lra_release/pathfinder{resolution}'
 
 	dataset_obj = PathFinder(name, data_dir=dir_name, resolution=resolution)
 	dataset_obj.cache_dir = Path(cache_dir) / name
 	dataset_obj.setup()
 
 	trn_loader = make_data_loader(dataset_obj.dataset_train, dataset_obj, seed=seed, batch_size=train_bs)
-	val_loader = make_data_loader(dataset_obj.dataset_val, dataset_obj, seed=seed, batch_size=eval_bs, drop_last=False, shuffle=False)
-	tst_loader = make_data_loader(dataset_obj.dataset_test, dataset_obj, seed=seed, batch_size=eval_bs, drop_last=False, shuffle=False)
+	#val_loader = make_data_loader(dataset_obj.dataset_val, dataset_obj, seed=seed, batch_size=eval_bs, drop_last=False, shuffle=False)
+	val_loader = make_data_loader(dataset_obj.dataset_val, dataset_obj, seed=seed, batch_size=eval_bs)
+	#tst_loader = make_data_loader(dataset_obj.dataset_test, dataset_obj, seed=seed, batch_size=eval_bs, drop_last=False, shuffle=False)
+	tst_loader = make_data_loader(dataset_obj.dataset_test, dataset_obj, seed=seed, batch_size=eval_bs)
 
 	N_CLASSES = dataset_obj.d_output
 	SEQ_LENGTH = dataset_obj.dataset_train.tensors[0].shape[1]
@@ -201,8 +209,10 @@ def create_lra_image_classification_dataset(cache_dir: Union[str, Path] = DEFAUL
 	dataset_obj.setup()
 
 	trn_loader = make_data_loader(dataset_obj.dataset_train, dataset_obj, seed=seed, batch_size=train_bs)
-	val_loader = make_data_loader(dataset_obj.dataset_val, dataset_obj, seed=seed, batch_size=eval_bs, drop_last=False, shuffle=False)
-	tst_loader = make_data_loader(dataset_obj.dataset_test, dataset_obj, seed=seed, batch_size=eval_bs, drop_last=False, shuffle=False)
+	#val_loader = make_data_loader(dataset_obj.dataset_val, dataset_obj, seed=seed, batch_size=eval_bs, drop_last=False, shuffle=False)
+	val_loader = make_data_loader(dataset_obj.dataset_val, dataset_obj, seed=seed, batch_size=eval_bs)
+	#tst_loader = make_data_loader(dataset_obj.dataset_test, dataset_obj, seed=seed, batch_size=eval_bs, drop_last=False, shuffle=False)
+	tst_loader = make_data_loader(dataset_obj.dataset_test, dataset_obj, seed=seed, batch_size=eval_bs)
 
 	N_CLASSES = dataset_obj.d_output
 	SEQ_LENGTH = 32 * 32
@@ -224,7 +234,7 @@ def create_lra_aan_classification_dataset(cache_dir: Union[str, Path] = DEFAULT_
 	from dataloaders.lra import AAN
 	name = 'aan'
 
-	dir_name = './raw_datasets/lra_release/lra_release/tsv_data'
+	dir_name = './.raw_datasets/lra_release/lra_release/tsv_data'
 
 	kwargs = {
 		'n_workers': 1,  # Multiple workers seems to break AAN.
@@ -235,8 +245,10 @@ def create_lra_aan_classification_dataset(cache_dir: Union[str, Path] = DEFAULT_
 	dataset_obj.setup()
 
 	trn_loader = make_data_loader(dataset_obj.dataset_train, dataset_obj, seed=seed, batch_size=train_bs)
-	val_loader = make_data_loader(dataset_obj.dataset_val, dataset_obj, seed=seed, batch_size=eval_bs, drop_last=False, shuffle=False)
-	tst_loader = make_data_loader(dataset_obj.dataset_test, dataset_obj, seed=seed, batch_size=eval_bs, drop_last=False, shuffle=False)
+	#val_loader = make_data_loader(dataset_obj.dataset_val, dataset_obj, seed=seed, batch_size=eval_bs, drop_last=False, shuffle=False)
+	val_loader = make_data_loader(dataset_obj.dataset_val, dataset_obj, seed=seed, batch_size=eval_bs)
+	#tst_loader = make_data_loader(dataset_obj.dataset_test, dataset_obj, seed=seed, batch_size=eval_bs, drop_last=False, shuffle=False)
+	tst_loader = make_data_loader(dataset_obj.dataset_test, dataset_obj, seed=seed, batch_size=eval_bs)
 
 	N_CLASSES = dataset_obj.d_output
 	SEQ_LENGTH = dataset_obj.l_max

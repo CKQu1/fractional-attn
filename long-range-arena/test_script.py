@@ -1,6 +1,7 @@
 from dataloading import Datasets
 
-create_dataset_fn = Datasets["imdb-classification"]
+#create_dataset_fn = Datasets["imdb-classification"]
+create_dataset_fn = Datasets["pathfinder-classification"]
 
 trainloader, valloader, testloader, n_classes, seq_len, in_dim, train_size = \
     create_dataset_fn(cache_dir='long-range-arena/cache_dir/', seed=0, train_bs=2, eval_bs=2) 

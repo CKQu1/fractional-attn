@@ -11,8 +11,9 @@ import torchtext
 import torchvision
 from einops.layers.torch import Rearrange, Reduce
 from PIL import Image  # Only used for Pathfinder
-from datasets import DatasetDict, Value, load_dataset
+from torchtext import vocab as vocab_
 
+from datasets import DatasetDict, Value, load_dataset
 from .base import default_data_path, SequenceDataset, ImageResolutionSequenceDataset
 
 
@@ -116,7 +117,7 @@ class IMDB(SequenceDataset):
             load_from_cache_file=False,
             num_proc=max(self.n_workers, 1),
         )
-        vocab = torchtext.vocab.build_vocab_from_iterator(
+        vocab = vocab_.build_vocab_from_iterator(
             dataset["train"]["tokens"],
             min_freq=self.min_freq,
             specials=(
@@ -316,7 +317,7 @@ class ListOps(SequenceDataset):
             load_from_cache_file=False,
             num_proc=max(self.n_workers, 1),
         )
-        vocab = torchtext.vocab.build_vocab_from_iterator(
+        vocab = vocab_.build_vocab_from_iterator(
             dataset["train"]["tokens"],
             specials=(
                 ["<pad>", "<unk>"]
@@ -679,7 +680,7 @@ class AAN(SequenceDataset):
             load_from_cache_file=False,
             num_proc=max(self.n_workers, 1),
         )
-        vocab = torchtext.vocab.build_vocab_from_iterator(
+        vocab = vocab_.build_vocab_from_iterator(
             dataset["train"]["tokens1"] + dataset["train"]["tokens2"],
             specials=(
                 ["<pad>", "<unk>"]

@@ -45,21 +45,7 @@ $ torchrun --nproc_per_node=8 --nnodes=2 --node_rank=1 --master_addr=123.456.123
 # single-core
 """
 # training based on steps
-python -i ddp_main.py --model_name=dpnmt --num_heads=2\
- --max_iters=50 --eval_interval=10 --log_interval=10 --eval_iters=10 --weight_decay=0 --model_root=.droot/debug_mode
-
-python -i ddp_main.py --model_name=sinknmt --num_heads=2\
- --max_iters=50 --eval_interval=10 --log_interval=10 --eval_iters=1 --weight_decay=0 --model_root=.droot/debug_mode 
-
-# training based on epochs
-python -i ddp_main.py --model_name=dpnmt --num_heads=2\
- --epochs=1 --weight_decay=0 --model_root=.droot/debug_mode
-
-python -i ddp_main.py --model_name=fnsnmt --manifold=sphere --alpha=1.2 --num_heads=2\
- --max_iters=50 --eval_interval=10 --log_interval=10 --eval_iters=10 --weight_decay=0 --model_root=.droot/debug_mode 
-
-python -i ddp_main.py --model_name=fnsnmt --alpha=1.2\
- --num_encoder_layers=2 --num_decoder_layers=2\
+python -i main.py --model_name=fnsformer --num_heads=2 --dataset_name=listops-classification\
  --max_iters=50 --eval_interval=10 --log_interval=10 --eval_iters=10 --weight_decay=0 --model_root=.droot/debug_mode
 """
 

@@ -1,3 +1,4 @@
+import json
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcl
 import math
@@ -34,14 +35,16 @@ PROMPT input:
 
 # Ablation study on alphas
 def plot_fns_ensembles(model_root_dirs, metrics=['eval_accuracy'], 
-                       epss=[0.01,0.1,1.0],
+                       epss=[0.01,0.1,0.5,1.0],
                        legend=True, display=False):
     global df, df_setting, df_filtered, fig_file, axs
-    global final_performance
+    global final_performance, train_setting, config, attn_setup
     global model_dir, config_dict, final_metrics, ensemble_metrics, metric_plot   
-    global model_dirs, subpath 
+    global model_dirs, subpath, dirnames
+    global model_combo, model_combos
 
     model_root_dirs = str2ls(model_root_dirs)
+    model_root_dirs = [model_root_dirs[0]] * 4 + [model_root_dirs[1]] * 4
     metrics = str2ls(metrics)
     legend = str2bool(legend)
     display = str2bool(display)    
@@ -68,23 +71,11 @@ def plot_fns_ensembles(model_root_dirs, metrics=['eval_accuracy'],
     alphas_plotted = []
     epss_plotted = []
     full_model_names = []
+    model_combos = {}
     for mr_ii, model_root_dir in enumerate(model_root_dirs):
 
         model_root_dir = model_root_dir.replace('\\','')
-        #dirnames = sorted([dirname for dirname in os.listdir(model_root_dir) if 'former' in dirname])
         dirnames = sorted([dirname for dirname in os.listdir(model_root_dir) if 'fns' in dirname and 'former' in dirname])
-
-        # Method 1: prompt to reorder file names
-        # for dirname_idx, dirname in enumerate(dirnames):
-        #     for subdir in os.listdir(njoin(model_root_dir, dirname)):
-        #         if isfile(njoin(model_root_dir, dirname, subdir, 'run_performance.csv')):
-        #             final_performance = pd.read_csv(njoin(model_root_dir, dirname, subdir, 'final_performance.csv'))
-        #             dataset = final_performance.loc[0,'dataset_name']
-        #             print(f'Index {dirname_idx}: {dirname}')
-        #             break            
-        # print(f'Dataset: {dataset}, model_root_dir = {model_root_dir} \n')
-        # dirname_idxs = input('Order of dirnames:')        
-        # dirname_idxs = [int(dirname_idx) for dirname_idx in dirname_idxs.split(',')]
 
         # Method 2: select based on eps
         eps_plot = epss[mr_ii % ncols]
@@ -93,7 +84,7 @@ def plot_fns_ensembles(model_root_dirs, metrics=['eval_accuracy'],
             if f'-eps={eps_plot}-' in dirname:
                 for subdir in os.listdir(njoin(model_root_dir, dirname)):
                     if isfile(njoin(model_root_dir, dirname, subdir, 'run_performance.csv')):
-                        final_performance = pd.read_csv(njoin(model_root_dir, dirname, subdir, 'final_performance.csv'))
+                        final_performance = pd.read_csv(njoin(model_root_dir, dirname, subdir, 'final_performance.csv'))                        
                         dataset = final_performance.loc[0,'dataset_name']
                         print(f'Index {dirname_idx}: {dirname}')
                         dirname_idxs.append(dirname_idx)
@@ -126,6 +117,14 @@ def plot_fns_ensembles(model_root_dirs, metrics=['eval_accuracy'],
                 if 'model=' in subdir and isfile(njoin(subpath,'final_performance.csv')):
                     model_dirs.append(subpath.replace('\\',''))
 
+                    # get configs
+                    f = open(njoin(subpath,'config.json'))
+                    config = json.load(f)
+                    f.close()
+                    f = open(njoin(subpath,'attn_setup.json'))
+                    attn_setup = json.load(f)
+                    f.close()  
+
             # get type of transformer
             df_setting = pd.read_csv(njoin(model_dirs[0],'final_performance.csv'))
             model_type = model_name = NAMES_DICT[dirname.split('-')[0]]
@@ -138,22 +137,17 @@ def plot_fns_ensembles(model_root_dirs, metrics=['eval_accuracy'],
                 model_names.append(model_name)
 
             #alpha, bandwidth  = df_setting.loc[0,['alpha','bandwidth']]      
-            bandwidth = df_setting.loc[0,'bandwidth']
-            if 'a' in df_setting.columns:
-                a = df_setting.loc[0,'a']
-            else:
-                a = 0
-            if 'alpha' in df_setting.columns:
-                alpha = df_setting.loc[0,'alpha']
-            else:
-                alpha = df_setting.loc[0,'beta']
-            #model_settings = rf'$\alpha$ = {alpha}, $\varepsilon$ = {bandwidth}'
-            #model_settings = rf'$\alpha$ = {alpha}, $a$ = {a}'
+            bandwidth = attn_setup['bandwidth']
+            a = attn_setup['a']
+            alpha = attn_setup['alpha']
             model_settings = rf'$\alpha$ = {alpha}'
-            # if alpha < 2:                        
-            #     d_intrinsic = df_setting.loc[0,'d_intrinsic']
-            #     model_settings += rf', $d$ = {d_intrinsic}'  #$d_{\mathcal{M}}$
             model_legend = f'{model_name} ({model_settings})'     
+            model_combo = f'{model_name}-{qk_share}'
+            metric = metrics[0]
+            if model_combo not in model_combos.keys():
+                columns = ['alpha', 'bandwidth', 'a', f'{metric}_best', f'{metric}_median', f'{metric}_mean', f'{metric}_worst', 
+                           'epoch_eval_runtime', 'train_runtime', 'total_flos', 'total_ensembles']
+                model_combos[model_combo] = pd.DataFrame(columns=columns)                            
 
             # ensemble of training instances for the same architecture
             final_metrics = {}  # metrics of the final epoch
@@ -236,14 +230,17 @@ def plot_fns_ensembles(model_root_dirs, metrics=['eval_accuracy'],
                 best = max(final_metrics[metric]) if 'acc' in metric or 'f1' in metric else min(final_metrics[metric])
                 worst = min(final_metrics[metric]) if 'acc' in metric or 'f1' in metric else max(final_metrics[metric])
                 median, mean = np.median(final_metrics[metric]), np.mean(final_metrics[metric])
-                print(f'{metric.upper()} best, median, mean, worst: {best}, {median}, {mean}, {worst}')
+                #print(f'{metric.upper()} best, median, mean, worst: {best}, {median}, {mean}, {worst}')
 
+                summary = {'alpha': alpha, 'bandwidth': bandwidth, 'a': a, 
+                          f'{metric}_best': best, f'{metric}_median': median, f'{metric}_mean': mean, f'{metric}_worst': worst, 
+                          'epoch_eval_runtime': np.mean(final_metrics['epoch_eval_runtime']), 
+                          'train_runtime': np.mean(final_metrics['train_runtime']), 
+                          'total_flos': np.mean(final_metrics['total_flos']),
+                          'total_ensembles': ensemble_metrics[metric].shape[0]}
+                model_combos[model_combo] = model_combos[model_combo].append(summary, ignore_index=True)     
+                #print(summary)           
 
-            #axs[idx,0].set_ylabel(NAMES_DICT[dataset])
-            print(f'Total ensembles: {ensemble_metrics[metric].shape[0]}')
-            print('\n')            
-            for other_metric in ['epoch_eval_runtime', 'train_runtime', 'total_flos']:
-                print(f'Average total {other_metric}: {np.mean(final_metrics[other_metric])}')
             print('-'*15 + '\n')                    
 
         # col labels (bandwidth eps)
@@ -264,6 +261,15 @@ def plot_fns_ensembles(model_root_dirs, metrics=['eval_accuracy'],
             0.0, 1.0, f'({ascii_lowercase[mr_ii]})', transform=(
                 axs[mr_ii].transAxes + ScaledTranslation(-20/72, +7/72, fig.dpi_scale_trans)),
             va='bottom', fontfamily='sans-serif')  # fontsize='medium',                                
+
+    # ----- Print message -----
+    for model_combo in model_combos.keys():
+        print('-' * 15)
+        print(model_combo)
+        print(model_combos[model_combo])
+        print('-' * 15)
+        print('\n')
+    # -------------------------
 
     # legend
     for alpha_plotted in alphas_plotted :

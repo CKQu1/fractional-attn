@@ -16,11 +16,12 @@ import torch
 
 from constants import *
 from mutils import njoin, create_model_dir, structural_model_root
+from mutils import str2bool
 
 from torch.optim import AdamW
 
 ### CHANGES HERE ###
-from models import ClassificationModel, RetrievalModel
+from models.model import ClassificationModel, RetrievalModel
 from dataloading import Datasets
 ####################
 
@@ -44,9 +45,14 @@ $ torchrun --nproc_per_node=8 --nnodes=2 --node_rank=1 --master_addr=123.456.123
 
 # single-core
 """
-# training based on steps
 python -i main.py --model_name=fnsformer --num_heads=2 --dataset_name=listops-classification\
- --max_iters=50 --eval_interval=10 --log_interval=10 --eval_iters=10 --weight_decay=0 --model_root=.droot/debug_mode
+ --max_iters=30 --eval_interval=10 --log_interval=10 --eval_iters=10 --weight_decay=0 --model_root=.droot/debug_mode
+
+python -i main.py --model_name=dpformer --num_heads=2 --dataset_name=listops-classification\
+ --max_iters=30 --eval_interval=10 --log_interval=10 --eval_iters=10 --weight_decay=0 --model_root=.droot/debug_mode
+
+python -i main.py --model_name=sinkformer --num_heads=2 --dataset_name=listops-classification\
+ --max_iters=30 --eval_interval=10 --log_interval=10 --eval_iters=10 --weight_decay=0 --model_root=.droot/debug_mode
 """
 
 # multi-core
@@ -101,12 +107,11 @@ if __name__ == '__main__':
     parser.add_argument('--manifold', default='sphere', type=str) #
     parser.add_argument('--alpha', default=1, type=float) #
     parser.add_argument('--a', default=0, type=float) #
+    parser.add_argument('--sphere_radius', default=1, type=float)
     # SINK
     parser.add_argument('--n_it', default=1, type=int)
     # general
-    parser.add_argument('--bandwidth', default=1, type=float)
-    parser.add_argument('--qk_share', default=False, type=bool)              
-    parser.add_argument('--sphere_radius', default=1, type=float)  
+    parser.add_argument('--bandwidth', default=1, type=float)                        
 
     # Dataset settings
     parser.add_argument('--dataset_name', default='imdb-classification', type=str)
@@ -123,6 +128,7 @@ if __name__ == '__main__':
     parser.add_argument('--encoder_dropout_prob', default=0.0, type=float)
     parser.add_argument('--attention_probs_dropout_prob', default=0.0, type=float)
     parser.add_argument('--initializer_range', default=0.02, type=float)
+    parser.add_argument('--qk_share', type=str2bool, nargs='?', const=True, default=False)
     parser.add_argument('--qkv_bias', default=False, type=bool)
     parser.add_argument('--use_faster_attn', default=True, type=bool)
     parser.add_argument('--pooling_mode', default='MEAN', type=str)
@@ -168,6 +174,7 @@ if __name__ == '__main__':
             args.epochs = 200 # Can probably change this
             # Also did extensive hyperparameter sweeps
             
+            
 
     # assertions
     model_name = args.model_name.lower()
@@ -198,9 +205,7 @@ if __name__ == '__main__':
     bias = False # do we use bias inside LayerNorm and Linear layers?
     
     config = {
-        "alpha": args.alpha,
-        "a": args.a,
-        "bandwidth": args.bandwidth,
+        "model_name": model_name,
         "sphere_radius": args.sphere_radius,
         "hidden_size": args.hidden_size,
         "num_encoder_layers": args.num_encoder_layers,
@@ -211,6 +216,7 @@ if __name__ == '__main__':
         "attention_probs_dropout_prob": args.attention_probs_dropout_prob,
         "initializer_range": args.initializer_range,
         "qkv_bias": args.qkv_bias,
+        "qk_share": args.qk_share,
         "use_faster_attention": args.use_faster_attn,
         "tokenizer_path": args.tokenizer_path,
         "pooling_mode": args.pooling_mode,
@@ -225,10 +231,11 @@ if __name__ == '__main__':
     if instance is not None:
         attn_setup['instance'] = instance    
     attn_setup['dataset_name'] = args.dataset_name    
-    if 'fns' in model_name:
+    if 'fnsformer' in model_name:
         attn_setup['manifold'] = args.manifold
         config['alpha'] = attn_setup['alpha'] = args.alpha      
         config['bandwidth'] = attn_setup['bandwidth'] = args.bandwidth          
+        config['a'] = attn_setup['a'] = args.a
         if args.manifold == 'sphere':
 
             if args.alpha < 2:
@@ -252,7 +259,7 @@ if __name__ == '__main__':
 
         # degree index
         config['a'] = attn_setup['a'] = args.a       
-    elif model_name == 'sinknmt':
+    elif model_name == 'sinkformer':
         config['n_it'] = attn_setup['n_it'] = args.n_it
         config['bandwidth'] = attn_setup['bandwidth'] = args.bandwidth           
 
@@ -307,20 +314,7 @@ if __name__ == '__main__':
         json.dump(config, ofile)   
     # save attn_setup
     with open(njoin(out_dir,"attn_setup.json"), "w") as ofile: 
-        json.dump(attn_setup, ofile)                 
-    # save train settings
-    train_settings = pd.DataFrame(columns=["max_lr", "min_lr", "batch_size", "beta1", "beta2",
-                                            "max_iters", "weight_decay", "grad_clip", "decay_lr",
-                                            "lr_scheduler_type",
-                                            "eval_interval", "log_interval", "eval_iters", "eval_only", "always_save_checkpoint",                         
-                                            "warmup_iters"], index=range(1))
-    train_settings.iloc[0] = [args.max_lr, args.min_lr, args.train_bs, args.beta1, args.beta2,
-                                args.max_iters, args.weight_decay, args.grad_clip, args.decay_lr,
-                                args.lr_scheduler_type,
-                                args.eval_interval, args.log_interval, args.eval_iters, args.eval_only, args.always_save_checkpoint,
-                                args.warmup_iters
-                                ]
-    train_settings.to_csv(njoin(out_dir, "train_setting.csv"))        
+        json.dump(attn_setup, ofile)                      
 
     torch.manual_seed(1337)
     if torch.cuda.is_available():
@@ -353,6 +347,8 @@ if __name__ == '__main__':
     # Create dataset...
     trainloader, valloader, testloader, num_classes, seq_len, in_dim, train_size, vocab_size = \
         create_dataset_fn(cache_dir=args.cache_dir, seed=args.seed, train_bs=train_batch_size, eval_bs=eval_batch_size)
+    eval_size = len(testloader)  
+
     # Add config parameters depending on dataset
     config["num_classes"] = num_classes 
     config["max_length"] = seq_len 
@@ -365,11 +361,11 @@ if __name__ == '__main__':
         print(f'Initializing a new {model_name} from scratch \n')
         # Initialize model from scratch
         if retrieval:
-            from models import RetrievalModel
+            from models.model import RetrievalModel
             print("Using RetrievalModel for {} task".format(dataset))
             model = RetrievalModel(config)
         else:
-            from models import ClassificationModel
+            from models.model import ClassificationModel
             print("Using ClassificationModel for {} task".format(dataset))
             model = ClassificationModel(config)
     model.to(device)
@@ -390,6 +386,8 @@ if __name__ == '__main__':
     if epochs is None:
         steps_per_epoch = None
         max_iters = args.max_iters # total number of training iterations
+        eval_interval = args.eval_interval
+        log_interval = args.log_interval
     else:    
         epochs = int(epochs)
         steps_per_epoch = len(train_size) // train_batch_size + 1
@@ -397,6 +395,22 @@ if __name__ == '__main__':
         eval_interval = steps_per_epoch
         log_interval = steps_per_epoch  # will need to change later
     lr_decay_iters = max_iters # should be ~= max_iters per Chinchilla
+
+    # save train settings
+    train_settings = pd.DataFrame(columns=["max_lr", "min_lr", "batch_size", "beta1", "beta2",
+                                           "train_size", "eval_size", "steps_per_epoch",
+                                           "max_iters", "weight_decay", "grad_clip", "decay_lr",
+                                           "lr_scheduler_type",
+                                           "eval_interval", "log_interval", "eval_iters", "eval_only", "always_save_checkpoint",                         
+                                           "warmup_iters"], index=range(1))
+    train_settings.iloc[0] = [args.max_lr, args.min_lr, args.train_bs, args.beta1, args.beta2,
+                              train_size, eval_size, steps_per_epoch,
+                              max_iters, args.weight_decay, args.grad_clip, args.decay_lr,
+                              args.lr_scheduler_type,
+                              eval_interval, log_interval, args.eval_iters, args.eval_only, args.always_save_checkpoint,
+                              args.warmup_iters
+                              ]
+    train_settings.to_csv(njoin(out_dir, "train_setting.csv")) 
 
     def get_batch(split):
         """Get batch from data iterator. Returns:
@@ -420,7 +434,36 @@ if __name__ == '__main__':
         # Create padding mask
         padding_mask = (x != 0).type(torch.int) # B x L
         padding_mask = padding_mask.unsqueeze(1).unsqueeze(1).type(torch.int) # B x 1 x 1 x L
-        return x, y, padding_mask
+        return x, y, padding_mask    
+
+    # def fb_indices(split):
+    #     data_size = train_size if split == 'train' else eval_size
+    #     return random.sample(range(data_size), data_size)
+
+    # def mb_indices(split, indices):      
+    #     bsize = train_batch_size if split == 'train' else eval_batch_size          
+    #     mb_indices = indices[:bsize]            
+    #     return mb_indices, indices[bsize:]
+
+    # def get_batch(split, indices):
+    #     """Get batch from data iterator. Returns:
+    #         (inputs, targets) if no aux data for lengths
+    #         ((inputs, lengths), targets) if aux data for lengths
+    #         inputs is B x seq_len"""
+    #     if split == 'train':
+    #         data = trainloader
+    #     else:
+    #         data = testloader # valloader is not used
+        
+    #     ##### ADD HERE #####
+
+    #     # Pad to seq_len
+    #     x = F.pad(x, (0,seq_len - x.shape[1],0,0), value=0) # padding_idx = 0
+    #     x, y = x.to(device), y.to(device)
+    #     # Create padding mask
+    #     padding_mask = (x != 0).type(torch.int) # B x L
+    #     padding_mask = padding_mask.unsqueeze(1).unsqueeze(1).type(torch.int) # B x 1 x 1 x L
+    #     return x, y, padding_mask    
     
     def get_lr(it):
         # 1) linear warmup for warmup_iters steps
@@ -464,6 +507,7 @@ if __name__ == '__main__':
     best_val_loss = 1e9
     dt = None
     
+    #fb_train_indices = fb_indices('train')
     if not wandb_log:
         metrics_ls = []    
     while True:
@@ -493,7 +537,8 @@ if __name__ == '__main__':
                     #"mfu": running_mfu*100, # convert to percentage
                 })
             else:
-                metrics_ls.append([iter_num, lr, losses['train'].item(), losses['val'].item(), acc['train'], acc['val'], dt])
+                metrics_ls.append([iter_num, lr, losses['train'].item(), losses['val'].item(), 
+                                   acc['train'].item(), acc['val'].item(), dt])
                 
             if losses['val'] < best_val_loss or always_save_checkpoint:
                 best_val_loss = losses['val']

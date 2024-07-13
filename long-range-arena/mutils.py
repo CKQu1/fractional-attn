@@ -1,3 +1,4 @@
+import argparse
 import os
 import pandas as pd
 from ast import literal_eval
@@ -8,13 +9,17 @@ from os.path import join, normpath, isdir
 def njoin(*args):
     return normpath(join(*args))
 
-def str_to_bool(s):
+def str2bool(s):
     if isinstance(s, bool):
         return s
+    if s.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif s.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
     else:
-        literal_eval(s)
+        raise argparse.ArgumentTypeError('Boolean value expected.')
 
-def str_to_ls(s):
+def str2ls(s):
     if isinstance(s, list):
         return s
     elif isinstance(s, str):
@@ -50,8 +55,8 @@ def get_instance(dir, *args):  # for enumerating each instance of training
 
 # create model_dir which determines the instance for the specific model/training setting
 def create_model_dir(model_root_dir, **kwargs):
-    model_name = kwargs.get('model_name', 'fnsnmt')    
-    dataset_name = kwargs.get('dataset_name', 'cifar10')
+    model_name = kwargs.get('model_name')  # , 'fnsformer'
+    dataset_name = kwargs.get('dataset_name')  # , 'cifar10'
     if '_' in dataset_name:
         dataset_code = ''.join([s[0] for s in dataset_name.split('_')])
     else:
@@ -70,7 +75,7 @@ def create_model_dir(model_root_dir, **kwargs):
         # if alpha < 2:
         #     d_intrinsic = kwargs.get('d_intrinsic')
         #     dirname += f'-dman={d_intrinsic}'
-    elif model_name == 'sinknmt':
+    elif model_name == 'sinkformer':
         bandwidth = kwargs.get("bandwidth", 1)     
         n_it = kwargs.get("n_it", 1)        
         dirname += f'-n_it={n_it}-eps={bandwidth}'        
@@ -90,7 +95,8 @@ def structural_model_root(**kwargs):
     use_custom_optim = kwargs.get('use_custom_optim')
     qk_share = kwargs.get('qk_share'); num_encoder_layers = kwargs.get('num_encoder_layers')
     num_decoder_layers = kwargs.get('num_decoder_layers')
-    n_attn_heads = kwargs.get('num_attention_heads'); hidden_size = kwargs.get('hidden_size')
+    n_attn_heads = kwargs.get('num_attention_heads')
+    #hidden_size = kwargs.get('hidden_size')
 
     #lr = kwargs.get('lr'); 
     bs = kwargs.get('bs'); milestones = kwargs.get('milestones'); gamma = kwargs.get('gamma')
@@ -102,9 +108,10 @@ def structural_model_root(**kwargs):
     # else:
     #     milestones_str = ','.join(str(s) for s in milestones)    
     if use_custom_optim is True:
-        model_root = njoin(f'en_layers={num_encoder_layers}-de_layers={num_decoder_layers}-heads={n_attn_heads}-hidden={hidden_size}-{affix}')    
+        #model_root = njoin(f'en_layers={num_encoder_layers}-de_layers={num_decoder_layers}-heads={n_attn_heads}-{affix}')    
+        model_root = f'en_layers={num_encoder_layers}-heads={n_attn_heads}-{affix}'
     else:
-        model_root = njoin(f'en_layers={num_encoder_layers}-de_layers={num_decoder_layers}-heads={n_attn_heads}-hidden={hidden_size}-{affix}')            
+        model_root = f'en_layers={num_encoder_layers}-heads={n_attn_heads}-{affix}'
 
     return model_root       
 

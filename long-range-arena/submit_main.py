@@ -136,7 +136,8 @@ if __name__ == '__main__':
                                                             num_attention_heads=common_kwargs['num_heads'] 
                                                             )  # hidden_size=common_kwargs['hidden_size']       
 
-                model_root = njoin(ROOT, 'config_qqv' if qk_share else 'config_qkv', model_root_dirname)
+                #model_root = njoin(ROOT, 'config_qqv' if qk_share else 'config_qkv', model_root_dirname)
+                model_root = njoin(ROOT, 'config_qqv' if qk_share else 'config_qkv', dataset_name, model_root_dirname)
                 if not isdir(model_root): makedirs(model_root)                                                
                 
                 for idx in range(len(kwargss)):

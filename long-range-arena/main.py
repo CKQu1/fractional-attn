@@ -390,7 +390,7 @@ if __name__ == '__main__':
         log_interval = args.log_interval
     else:    
         epochs = int(epochs)
-        steps_per_epoch = len(train_size) // train_batch_size + 1
+        steps_per_epoch = train_size // train_batch_size + 1
         max_iters = epochs * steps_per_epoch
         eval_interval = steps_per_epoch
         log_interval = steps_per_epoch  # will need to change later

@@ -11,7 +11,7 @@ from typing import Union
 from tqdm import tqdm
 #from constants import DROOT, MODEL_NAMES
 from constants import *
-from mutils import njoin
+from mutils import njoin, str2bool, str2ls
 from data_utils import get_dataset, get_dataset_cols, process_dataset_cols
 
 from os import makedirs
@@ -34,14 +34,29 @@ warnings.simplefilter(action='ignore', category=FutureWarning)
 
 import matplotlib.pyplot as plt
 from scipy.stats import gaussian_kde
+from matplotlib.transforms import ScaledTranslation
+from string import ascii_lowercase
 from torch.nn import functional as F  
 
+# True attn score
+def get_markov_matrix(C, alpha, bandwidth, d, a):
 
-colors = ['b', 'r']
+    #sphere_radius = ((np.pi**(1/d)-1)/np.pi)
+    if alpha >= 2:
+        alpha_hat = alpha/(alpha-1)
+        K = np.exp(-(C/bandwidth**0.5)**alpha_hat)
+    else:
+        K = (1 + C/bandwidth**0.5)**(-d-alpha)
+
+    D = K.sum(-1)  # row normalization
+    K_tilde = np.diag(D**(-a)) @ K @ np.diag(D**(-a))
+    D_tilde = K_tilde.sum(-1)
+
+    return K, D, K_tilde, D_tilde
 
 # quick run (single unit)
 """
-python -i fns_dynamics.py --model_dir=.droot/debug-mode/rdfnsformer-rt-alpha=1.5-eps=1-a=1/model=0/
+python -i fns_dynamics.py --models_root=.droot/trained_models_v2/config_qqv/ds\=imdb-layers\=2-heads\=1-hidden\=768-epochs\=5-prj\=qqv/
 """
 
 if __name__ == '__main__':
@@ -50,6 +65,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='main_seq_classification.py training arguments')    
     # parser.add_argument('--train_with_ddp', default=False, type=bool, help='to use DDP or not')
     parser.add_argument('--models_root', default='', help='Pretrained models root')
+
     parser.add_argument('--wandb_log', default=False, type=bool)
 
     args = parser.parse_args()    
@@ -60,6 +76,7 @@ if __name__ == '__main__':
     repo_dir = os.getcwd()  # main dir 
     dev = torch.device(f"cuda:{torch.cuda.device_count()}"
                        if torch.cuda.is_available() else "cpu")   
+    # --------------------
     device_name = "GPU" if dev.type != "cpu" else "CPU"
     #ddp = torch.distributed.is_available()
     ddp = False
@@ -76,33 +93,53 @@ if __name__ == '__main__':
         master_process = True    
 
     logging.set_verbosity_debug()
-    logger = logging.get_logger()    
-        
+    logger = logging.get_logger()   
+    # --------------------
 
     # Get model setting from dir
     models_root = args.models_root.replace('\\','')
-    dirnames = sorted([dirname for dirname in os.listdir(models_root) if 'former' in dirname])
-    # prompt to reorder file names
+    dirnames = sorted([dirname for dirname in os.listdir(models_root) if 'former' in dirname])  
+
+    # select based on bandwidth
+    dirname_idxs = []
+    model_instances = []
+    epss = []
     for dirname_idx, dirname in enumerate(dirnames):
-        for subdir in os.listdir(njoin(models_root, dirname)):
-            if isfile(njoin(models_root, dirname, subdir, 'run_performance.csv')):
-                final_performance = pd.read_csv(njoin(models_root, dirname, subdir, 'final_performance.csv'))
-                dataset = final_performance.loc[0,'dataset_name']
-                print(f'Index {dirname_idx}: {dirname}')
-                break    
-    dirname_idxs = input('Order of dirnames:')
-    dirname_idxs = [int(dirname_idx) for dirname_idx in dirname_idxs.split(',')]
+        if f'-eps=' in dirname and 'opfns' in dirname:
+            for s in dirname.split('-'):
+                if 'eps' in s:
+                    break
+            eps = float(s[4:])
+            if eps not in epss:
+                epss.append(eps)
+            for subdir in os.listdir(njoin(models_root, dirname)):
+                if isfile(njoin(models_root, dirname, subdir, 'run_performance.csv')):
+                    final_performance = pd.read_csv(njoin(models_root, dirname, subdir, 'final_performance.csv'))
+                    dataset = final_performance.loc[0,'dataset_name']
+                    print(f'Index {dirname_idx}: {dirname}')
+                    dirname_idxs.append(dirname_idx)
+                    model_instances.append(subdir)
+                    break    
     assert len(dirname_idxs) <= len(dirnames), 'dirname_idxs cannot exceed dirnames'
-    model_dirs = [njoin(models_root, dirnames[dirname_idx], 'model=0') for dirname_idx in dirname_idxs]            
+    model_dirs = []
+    for ii, dirname_idx in enumerate(dirname_idxs):
+        model_dirs.append(njoin(models_root, dirnames[dirname_idx], model_instances[ii]))
+    
 
     # Set up plots for later
-    nrows, ncols = len(model_dirs), 3
-    figsize = (10,3*nrows)
+    nrows, ncols = 2, len(epss)
+    figsize = (3*ncols,3*nrows)
     fig, axs = plt.subplots(nrows,ncols,figsize=figsize,
-                            sharex=False,sharey=False)        
-    axs = np.expand_dims(axs, axis=0) if axs.ndim == 1 else axs    
-
-    for model_idx, model_dir in enumerate(model_dirs):
+                            sharex=True,sharey=True)          
+    if nrows == 1:
+        if ncols > 1:
+            axs = np.expand_dims(axs, axis=0)
+        else:
+            axs = np.expand_dims(axs, axis=[0,1])     
+    axs = axs.flatten()    
+      
+    row_labels = ['Uniform', 'Non-uniform']
+    for model_idx, model_dir in enumerate(model_dirs):        
 
         train_setting = pd.read_csv(njoin(model_dir, 'train_setting.csv'))
         if os.path.isdir(njoin(model_dir, 'run_performance.csv')):
@@ -117,71 +154,81 @@ if __name__ == '__main__':
         attn_setup = json.load(f)
         f.close()   
 
+        ##### 0. Model settings #####
+        alpha = attn_setup['alpha']
+        bandwidth = attn_setup['bandwidth']
+        a = attn_setup['a']
+        if alpha < 2:
+            d_intrinsic = attn_setup['d_intrinsic']   
+
+        mr_ii = epss.index(bandwidth)
+
         # conditions for diffusion maps
-        #assert config['qk_share'], 'QK weight-tying is required!'
-        #assert 'op' in attn_setup['model_name'], 'Orthogonal projection matrix is required!'
+        assert config['qk_share'], 'QK weight-tying is required!'
+        assert 'op' in attn_setup['model_name'], 'Orthogonal projection matrix is required!'
         assert config['num_attention_heads'] == 1, 'Number of attention heads must be 1!'
 
         # ---------------------------------------- 1. Dataset setup ----------------------------------------
-        print('---------- Dataset setup ----------')
-    
-        max_length = config['attention_window']
-        dataset_name = attn_setup['dataset_name']
-
-        def preprocess_function(examples):
-            #return tokenizer(examples['text'], padding='max_length', truncation=True, max_length=max_length)
-            return tokenizer(examples['text'], padding=False, truncation=True, max_length=max_length)
-
-        def preprocess_logits_for_metrics(logits, labels):
-            preds = logits.argmax(dim=-1)
-            return preds    
+        if model_idx == 0:
+            print('---------- Dataset setup ----------')
         
-        tokenizer = RobertaTokenizer(tokenizer_file = f"{repo_dir}/roberta-tokenizer/tokenizer.json",
-                                    vocab_file     = f"{repo_dir}/roberta-tokenizer/vocab.json",
-                                    merges_file    = f"{repo_dir}/roberta-tokenizer/merges.txt",
-                                    max_length     = max_length)    
+            max_length = config['attention_window']
+            dataset_name = attn_setup['dataset_name']
 
-        special_tokens = [word for word in tokenizer.get_vocab().keys() if '<' in word and '>' in word]
+            def preprocess_function(examples):
+                #return tokenizer(examples['text'], padding='max_length', truncation=True, max_length=max_length)
+                return tokenizer(examples['text'], padding=False, truncation=True, max_length=max_length)
 
-        # save tokenized dataset
-        tokenized_dataset_dir = njoin(DROOT, "DATASETS", f"tokenized_{dataset_name}")
-        if not isdir(tokenized_dataset_dir):         
-            print("Downloading data!") if master_process else None
-            # create cache for dataset
-            dataset = get_dataset(dataset_name, njoin(DROOT, "DATASETS"))
+            def preprocess_logits_for_metrics(logits, labels):
+                preds = logits.argmax(dim=-1)
+                return preds    
+            
+            tokenizer = RobertaTokenizer(tokenizer_file = f"{repo_dir}/roberta-tokenizer/tokenizer.json",
+                                        vocab_file     = f"{repo_dir}/roberta-tokenizer/vocab.json",
+                                        merges_file    = f"{repo_dir}/roberta-tokenizer/merges.txt",
+                                        max_length     = max_length)    
 
-            tokenized_dataset = dataset.map(preprocess_function, batched=True)
-            column_names = get_dataset_cols(tokenized_dataset)
-            if 'text' in column_names:
-                tokenized_dataset = tokenized_dataset.map(remove_columns=['text'])
-            if not isdir(tokenized_dataset_dir): os.makedirs(tokenized_dataset_dir)
-            tokenized_dataset.save_to_disk(tokenized_dataset_dir)
-            del dataset  # alleviate memory
-        else:        
-            print("Data downloaded, loading from local now! \n") if master_process else None
-            tokenized_dataset = load_from_disk(tokenized_dataset_dir)
-        if attn_setup['dataset_name'] != 'imdb':
-            tokenized_dataset = process_dataset_cols(tokenized_dataset)
+            special_tokens = [word for word in tokenizer.get_vocab().keys() if '<' in word and '>' in word]
 
-        keys = list(tokenized_dataset.keys())
-        if len(keys) == 1:
-            tokenized_dataset = tokenized_dataset[keys[0]].train_test_split(0.5)
-        train_dataset = tokenized_dataset["train"]
-        eval_dataset = tokenized_dataset["test"]             
+            # save tokenized dataset
+            tokenized_dataset_dir = njoin(DROOT, "DATASETS", f"tokenized_{dataset_name}")
+            if not isdir(tokenized_dataset_dir):         
+                print("Downloading data!") if master_process else None
+                # create cache for dataset
+                dataset = get_dataset(dataset_name, njoin(DROOT, "DATASETS"))
 
-        # convert to torch.Tensor from list
-        train_dataset.set_format('torch')
-        eval_dataset.set_format('torch')
+                tokenized_dataset = dataset.map(preprocess_function, batched=True)
+                column_names = get_dataset_cols(tokenized_dataset)
+                if 'text' in column_names:
+                    tokenized_dataset = tokenized_dataset.map(remove_columns=['text'])
+                if not isdir(tokenized_dataset_dir): os.makedirs(tokenized_dataset_dir)
+                tokenized_dataset.save_to_disk(tokenized_dataset_dir)
+                del dataset  # alleviate memory
+            else:        
+                print("Data downloaded, loading from local now! \n") if master_process else None
+                tokenized_dataset = load_from_disk(tokenized_dataset_dir)
+            if attn_setup['dataset_name'] != 'imdb':
+                tokenized_dataset = process_dataset_cols(tokenized_dataset)
 
-        # data
-        N_batch = 10
-        dataset = attn_setup['dataset_name']
-        #train_bs = int(train_setting.loc[0,'batch_size'])
-        train_bs = 1
-        eval_bs = 1    
+            keys = list(tokenized_dataset.keys())
+            if len(keys) == 1:
+                tokenized_dataset = tokenized_dataset[keys[0]].train_test_split(0.5)
+            train_dataset = tokenized_dataset["train"]
+            eval_dataset = tokenized_dataset["test"]             
+
+            # convert to torch.Tensor from list
+            train_dataset.set_format('torch')
+            eval_dataset.set_format('torch')
+
+            # data
+            N_batch = 10
+            dataset = attn_setup['dataset_name']
+            #train_bs = int(train_setting.loc[0,'batch_size'])
+            train_bs = 1
+            eval_bs = 1    
 
         # ---------------------------------------- 2. Load pretrained model ----------------------------------------
-        print('---------- Load pretrained model ----------')
+        print(f'---------- Load pretrained model: (alpha, eps) = ({alpha}, {bandwidth}) ----------')
 
         # model
         model_name = attn_setup['model_name']    
@@ -204,14 +251,7 @@ if __name__ == '__main__':
                 checkpoint_steps.append(int(subdir.split('-')[-1]))
         checkpoint = torch.load(njoin(model_dir, f'checkpoint-{checkpoint_steps[-1]}', 'pytorch_model.bin'), map_location=dev)
         model.load_state_dict(checkpoint)
-
-
-        ##### 0. Model settings #####
-        alpha = attn_setup['alpha']
-        bandwidth = attn_setup['bandwidth']
-        a = attn_setup['a']
-        if alpha < 2:
-            d_intrinsic = attn_setup['d_intrinsic']            
+         
 
         ###### 1. Compute geodesic distances and attention-score ######
 
@@ -323,8 +363,8 @@ if __name__ == '__main__':
         eigvals_, eigvecs_ = torch.linalg.eigh(MC_)
         eigvals_ = eigvals_.detach().numpy()
         eigvecs_ = eigvecs_.detach().numpy()
-        # order based on eigvals from large to small
-        ii = np.argsort(eigvals_[0,0])[::-1]
+        # order based on eigvals from small to large
+        ii = np.argsort(eigvals_[0,0])
         eigvals_ = eigvals_[:,:,ii]
         eigvecs_ = eigvecs_[:,:,:,ii]
 
@@ -352,7 +392,7 @@ if __name__ == '__main__':
         eigvals = eigvals.detach().numpy()
         eigvecs = eigvecs.detach().numpy()      
         # order based on eigvals from large to small
-        ii = np.argsort(eigvals[0,0])[::-1]
+        ii = np.argsort(eigvals[0,0])
         eigvals = eigvals[:,:,ii]
         eigvecs = eigvecs[:,:,:,ii]          
 
@@ -360,41 +400,69 @@ if __name__ == '__main__':
 
         ###### 5. Plot results ######
 
+        """
         # Projection matrix properties
-        axs[model_idx,0].scatter(WQ_eigvals.real, WQ_eigvals.imag, s=0.75, c=colors[model_idx])
-        
-
+        axs[model_idx,0].scatter(WQ_eigvals.real, WQ_eigvals.imag, s=0.75)        
         # Geodesic distance error
-        # dist_mses = np.array(dist_mses)
-        # density = gaussian_kde(dist_mses)
-        # xs = np.linspace(0,1,100)
-        # axs[model_idx,1].plot(xs,density(xs), c=colors[model_idx])    
-        
+        dist_mses = np.array(dist_mses)
+        density = gaussian_kde(dist_mses)
+        xs = np.linspace(0,1,100)
+        axs[model_idx,1].plot(xs,density(xs))    
+        """        
+
+        c_hyp = HYP_CMAP(HYP_CNORM(alpha))  # hyperparameter color
+
+        # Eigenvalues
+        idxs = np.arange(1,len(eigvals_[0,0])+1)
+        idx_mid = len(idxs) // 2
+
+        # Uniform
+        axs[mr_ii].plot(idxs, eigvals_[0,0], c=c_hyp, linestyle='-', label=r'$q$ removed')
+        # eye guide
+        # power = alpha if alpha <= 2 else 2
+        # eigvals_theory = idxs**power  
+        # eigvals_theory = eigvals_theory / eigvals_theory[idx_mid]
+        # eigvals_theory = eigvals_theory * eigvals[idx_mid] * 10
+        # ax.plot(idxs, eigvals_theory, c=c_alpha, alpha=0.5, linewidth=1, linestyle='--')
+
+        # Non-uniform
+        axs[mr_ii + ncols].plot(idxs, eigvals[0,0], c=c_hyp, linestyle='-', label=r'$q$ kept')
+
+        # Eigenvectors
         # Query/key projection onto lower-dim
         #dim1, dim2 = 0, 1
         #axs[model_idx,1].scatter(query_vectors[0,0,:,dim1].detach().numpy(), query_vectors[0,0,:,dim2].detach().numpy())
-        axs[model_idx,1].scatter(eigvecs_[0,0,:,0], eigvecs_[0,0,:,1], c=colors[model_idx])        
+        #axs[mr_ii].scatter(eigvecs_[0,0,:,0], eigvecs_[0,0,:,1], c=c_hyp)
 
-        # Eigenvalue
-        axs[model_idx,2].plot(np.arange(len(eigvals_[0,0])), eigvals_[0,0], c=colors[model_idx], linestyle='-', label=r'$q$ removed')
-        axs[model_idx,2].plot(np.arange(len(eigvals[0,0])), eigvals[0,0], c=colors[model_idx], linestyle='--', label=r'$q$ kept')
+    for mr_ii in range(len(axs)):
+        axs[mr_ii].set_xscale('log'); axs[mr_ii].set_yscale('log')        
 
-        # axs[model_idx,0].set_xlim([-1.1, 1.1]); axs[model_idx,0].set_ylim([-1.1, 1.1])
-        # axs[model_idx,1].set_xlim([0, 1e-3])
+        # ----- plot labels -----
 
-        axs[model_idx,2].set_xscale('log'); axs[model_idx,2].set_yscale('log')
-        axs[model_idx,0].plot([],[],c=colors[model_idx],label=rf'$\alpha$ = {alpha}')
+        # subplot labels
+        axs[mr_ii].text(
+            0.0, 1.0, f'({ascii_lowercase[mr_ii]})', transform=(
+                axs[mr_ii].transAxes + ScaledTranslation(-20/72, +7/72, fig.dpi_scale_trans)),
+            va='bottom', fontfamily='sans-serif')  # fontsize='medium',   
 
+        # if mr_ii // ncols == nrows-1:
+        #     axs[mr_ii].set_xticks(epochs)
+        #     axs[mr_ii].set_xticklabels(epochs)
+
+        # row labels 
+        if mr_ii % ncols == ncols - 1:
+            axs[mr_ii].text(1.2, 0.5, row_labels[mr_ii//ncols], transform=(
+                            axs[mr_ii].transAxes + ScaledTranslation(-20/72, +7/72, fig.dpi_scale_trans)),
+                            va='center', rotation='vertical')  # fontsize='medium',          
+
+    # col labels
     for col in range(ncols):
-        axs[0,0].set_title(r'$W_Q$ eigvals')
-        #axs[0,1].set_title(r'Distance MSE')
-        axs[0,1].set_title(r'Interactions')
-        axs[0,2].set_title('Eigvals')
-        #axs[0,3].set_title('Eigvecs')
-        
-    axs[0,0].legend()
-    axs[0,2].legend()    
+        bandwidth = epss[col]
+        axs[col].set_title(rf'$\varepsilon = {{{bandwidth}}}$')     
 
+    # --------------------
+
+    FIGS_DIR = njoin(FIGS_DIR, 'nlp-task')
     if not isdir(FIGS_DIR): makedirs(FIGS_DIR)
     layers, heads, hidden = config['num_hidden_layers'], config['num_attention_heads'], int(config['hidden_size'])
     fig_file = f'{model_name}-layers={layers}-heads={heads}-hidden={hidden}'

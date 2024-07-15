@@ -9,6 +9,7 @@ from mutils import njoin
 def qsub(command, pbs_array_data, **kwargs):
 
     system = kwargs.get('system')
+    nstack = kwargs.get('nstack', 1)
 
     if 'path' in kwargs:
         path = kwargs['path']
@@ -83,7 +84,7 @@ END""")
         # ---------- end{ARTEMIS} ----------
 
         # ---------- begin{PHYSICS} ----------
-        if system == 'PHYSICS':
+        elif system == 'PHYSICS':
             PBS_SCRIPT = f"""<<'END'
                 #!/bin/bash
                 #PBS -N {kwargs.get('N', sys.argv[0] or 'job')}
@@ -94,6 +95,7 @@ END""")
                 #PBS -l select={kwargs.get('select',1)}:ncpus={kwargs.get('ncpus',1)}:mem={kwargs.get('mem','1GB')}{':ngpus='+str(kwargs['ngpus']) if 'ngpus' in kwargs else ''}
                 #PBS -l walltime={kwargs.get('walltime','23:59:00')}
                 #PBS -J {1000*i}-{1000*i + len(pbs_array_data_chunk)-1}
+                cd fractional-attn/long-range-arena
                 args=($(python -c "import sys;print(' '.join(map(str, {pbs_array_data_chunk}[int(sys.argv[1])-{1000*i}])))" $PBS_ARRAY_INDEX))
                 cd {kwargs.get('cd', '$PBS_O_WORKDIR')}
                 echo "pbs_array_args = ${{args[*]}}"
@@ -104,11 +106,11 @@ END""")
                 #    conda activate {kwargs.get('conda')}
                 #fi
                 {command} ${{args[*]}} {additional_command} {post_command}
-    END"""
+    """
         # ---------- end{PHYSICS} ----------
 
-        os.system(f'qsub {PBS_SCRIPT}')
-        #print(PBS_SCRIPT)
+        #os.system(f'qsub {PBS_SCRIPT}')
+        print(PBS_SCRIPT)
 
 def add_common_kwargs(kwargss, common_kwargs):
     for i in range(len(kwargss)):

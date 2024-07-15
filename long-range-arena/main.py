@@ -1,5 +1,6 @@
 """Adapted from https://github.com/lindermanlab/S5/blob/main/s5/dataloaders/lra.py"""
 
+import platform
 import json
 import argparse
 import os
@@ -282,6 +283,7 @@ if __name__ == '__main__':
     #device = 'cuda' # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
     #device = f'cuda:{torch.cuda.device_count()}' if torch.cuda.is_available() else 'cpu'
     device = f'cuda' if torch.cuda.is_available() else "cpu"
+    device_name = torch.cuda.get_device_name(0) if 'cuda' in device else platform.processor()
     dtype = 'bfloat16' if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else 'float16' # 'float32', 'bfloat16', or 'float16', the latter will auto implement a GradScaler
     #compile = True # use PyTorch 2.0 to compile the model to be faster
     compile = False
@@ -402,13 +404,16 @@ if __name__ == '__main__':
                                            "max_iters", "weight_decay", "grad_clip", "decay_lr",
                                            "lr_scheduler_type",
                                            "eval_interval", "log_interval", "eval_iters", "eval_only", "always_save_checkpoint",                         
-                                           "warmup_iters"], index=range(1))
+                                           "warmup_iters",
+                                           "device_name"
+                                           ], index=range(1))
     train_settings.iloc[0] = [args.max_lr, args.min_lr, args.train_bs, args.beta1, args.beta2,
                               train_size, eval_size, steps_per_epoch,
                               max_iters, args.weight_decay, args.grad_clip, args.decay_lr,
                               args.lr_scheduler_type,
                               eval_interval, log_interval, args.eval_iters, args.eval_only, args.always_save_checkpoint,
-                              args.warmup_iters
+                              args.warmup_iters,
+                              device_name
                               ]
     train_settings.to_csv(njoin(out_dir, "train_setting.csv")) 
 

@@ -107,7 +107,8 @@ if __name__ == '__main__':
             walltime, mem = '23:59:59', '8GB'                                         
             num_proc = ngpus if ngpus > 1 else ncpus
                         
-            for qk_share in [True, False]:
+            #for qk_share in [True, False]:
+            for qk_share in [True]
                 kwargss = []
 
                 for model_name in ['fnsformer', 'opfnsformer']:
@@ -117,9 +118,9 @@ if __name__ == '__main__':
                         for bandwidth in [0.1]:
                             kwargss.append({'model_name':model_name, 'alpha': alpha, 'a': 0,'bandwidth':bandwidth,'manifold':'sphere'})
 
-                kwargss.append({'model_name':'sinkformer', 'n_it': 1})
-                kwargss.append({'model_name':'sinkformer', 'n_it': 3})
-                kwargss.append({'model_name':'dpformer'})
+                # kwargss.append({'model_name':'sinkformer', 'n_it': 1})
+                # kwargss.append({'model_name':'sinkformer', 'n_it': 3})
+                # kwargss.append({'model_name':'dpformer'})
 
                 #epochs = dataset_epochs[dataset_name]
                 epochs = None                                                              

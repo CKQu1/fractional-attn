@@ -52,6 +52,7 @@ def train_submit(script_name, kwargss, **kwargs):
                 HOST_NODE_ADDR += 1
 
             kwargs_command["HOST_NODE_ADDR"] = HOST_NODE_ADDR
+            kwargs_command["singularity_path"] = SPATH
 
         # ----- PHYSICS -----
         elif system == 'PHYSICS':
@@ -64,7 +65,7 @@ def train_submit(script_name, kwargss, **kwargs):
             kwargs_qsub["source"] = '/usr/physics/python/Anaconda3-2022.10/etc/profile.d/conda.csh' 
             kwargs_qsub["conda"] = 'frac_attn'
 
-        command, additional_command = command_setup_ddp(SPATH,**kwargs_command)                
+        command, additional_command = command_setup_ddp(**kwargs_command)                
 
         if len(additional_command) > 0:
             kwargs_qsub["additional_command"] = additional_command

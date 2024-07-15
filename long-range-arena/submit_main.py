@@ -6,25 +6,14 @@ from time import sleep
 from constants import *
 from mutils import njoin, get_instance, structural_model_root
 from qsub_parser import command_setup_ddp, qsub, job_divider
-
-def add_common_kwargs(kwargss, common_kwargs):
-    for i in range(len(kwargss)):
-        for key, value in common_kwargs.items():
-            kwargss[i][key] = value
-    return kwargss
-
-def get_pbs_array_data(kwargss):
-    pbs_array_data = []
-    for kwargs in kwargss:
-        args_ls = []
-        for key, value in kwargs.items():
-            args_ls.append(f'--{key}={value}')
-        pbs_array_data.append(tuple(args_ls))
-    return pbs_array_data
+from qsub_parser import add_common_kwargs, get_pbs_array_data
 
 def train_submit(script_name, kwargss, **kwargs):
 
     assert isfile(script_name), f"{script_name} does not exist!"
+
+    # system
+    system = kwargs.get('system')
 
     # computing resource settings
     ncpus = kwargs.get('ncpus', 1) 
@@ -42,8 +31,7 @@ def train_submit(script_name, kwargss, **kwargs):
     for idx, pidx in enumerate(perm):
         pbs_array_true = pbss[idx]
         print(PROJECTS[pidx])
-        kwargs_qsub = {"path":        kwargs.get("job_path"),  # acts as PBSout
-                       "P":           PROJECTS[pidx],
+        kwargs_qsub = {"path":        kwargs.get("job_path"),  # acts as PBSout                       
                        "ngpus":       ngpus, 
                        "ncpus":       ncpus, 
                        "select":      select,
@@ -51,12 +39,32 @@ def train_submit(script_name, kwargss, **kwargs):
                        "mem":         mem                       
                        }        
 
-        if select * max(ncpus, ngpus) > 1:
-            # master_port += 1            
-            HOST_NODE_ADDR += 1
+        kwargs_command = kwargs_qsub; del kwargs_command["path"]
+        kwargs_command["system"] = system
 
-        command, additional_command = command_setup_ddp(SPATH,ncpus=ncpus,ngpus=ngpus,select=select,
-                                                        HOST_NODE_ADDR=HOST_NODE_ADDR)                           
+        # ----- ARTEMIS -----
+        if system == 'ARTEMIS':
+            # project names
+            kwargs_qsub["P"] = PROJECTS[pidx]
+
+            if select * max(ncpus, ngpus) > 1:
+                # master_port += 1            
+                HOST_NODE_ADDR += 1
+
+            kwargs_command["HOST_NODE_ADDR"] = HOST_NODE_ADDR
+
+        # ----- PHYSICS -----
+        elif system == 'PHYSICS':
+            if ngpus >= 1:
+                kwargs_qsub["q"] = 'l40s'
+            else:
+                #kwargs_qsub["q"] = 'yossarian'
+                pass
+
+            kwargs_qsub["source"] = '/usr/physics/python/Anaconda3-2022.10/etc/profile.d/conda.csh' 
+            kwargs_qsub["conda"] = 'frac_attn'
+
+        command, additional_command = command_setup_ddp(SPATH,**kwargs_command)                
 
         if len(additional_command) > 0:
             kwargs_qsub["additional_command"] = additional_command
@@ -66,13 +74,13 @@ def train_submit(script_name, kwargss, **kwargs):
 
 if __name__ == '__main__':
     
-    # datetime
+    # ----- System -----
+    #system = 'ARTEMIS'
+    system = 'PHYSICS'
     date_str = datetime.today().strftime('%Y-%m-%d')    
-    script_name = "main.py"
-    dataset_names = ['imdb-classification', 'lra-cifar-classification',
-                     'listops-classification', 'aan-classification',
-                     'pathfinder-classification', 'pathx-classification']   
+    script_name = "main.py"  
     
+    # ----- Dataset -----
     dataset_epochs = {'imdb-classification':5, 'lra-cifar-classification':100,
                       'listops-classification':5, 'aan-classification':5,
                       'pathfinder-classification':5, 'pathx-classification':5}
@@ -86,9 +94,9 @@ if __name__ == '__main__':
     instances = [0]
     kwargss_all = []    
     for instance in instances:        
-        #for didx, dataset_name in enumerate(dataset_names):
-        for didx, dataset_name in enumerate(dataset_names[1:3]):
-        #for didx, dataset_name in enumerate(dataset_names[2:3]):
+        #for didx, dataset_name in enumerate(DATASET_NAMES):
+        for didx, dataset_name in enumerate(DATASET_NAMES[1:3]):
+        #for didx, dataset_name in enumerate(DATASET_NAMES[2:3]):
             select = 1; ngpus, ncpus = 1, 0                            
             walltime, mem = '23:59:59', '8GB'                                         
             num_proc = ngpus if ngpus > 1 else ncpus
@@ -97,18 +105,18 @@ if __name__ == '__main__':
                 kwargss = []
 
                 for model_name in ['fnsformer', 'opfnsformer']:
-                    for alpha in [1.2, 1.6, 2]:
-                    #for alpha in [1.2, 2]:
-                        for bandwidth in [0.01, 0.1, 0.5, 1]:
-                        #for bandwidth in [0.1]:
+                    #for alpha in [1.2, 1.6, 2]:
+                    for alpha in [1.2, 2]:
+                        #for bandwidth in [0.01, 0.1, 0.5, 1]:
+                        for bandwidth in [0.1]:
                             kwargss.append({'model_name':model_name, 'alpha': alpha, 'a': 0,'bandwidth':bandwidth,'manifold':'sphere'})
 
                 kwargss.append({'model_name':'sinkformer', 'n_it': 1})
                 kwargss.append({'model_name':'sinkformer', 'n_it': 3})
                 kwargss.append({'model_name':'dpformer'})
 
-                epochs = dataset_epochs[dataset_name]
-                #epochs = None                                                              
+                #epochs = dataset_epochs[dataset_name]
+                epochs = None                                                              
                 common_kwargs = {'instance':            instance,
                                 'qk_share':             qk_share,
                                 'num_encoder_layers':   1,
@@ -159,4 +167,5 @@ if __name__ == '__main__':
                  select=select, 
                  walltime=walltime,
                  mem=mem,
-                 job_path=job_path)
+                 job_path=job_path,
+                 system=system)

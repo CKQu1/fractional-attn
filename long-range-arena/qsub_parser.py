@@ -85,8 +85,8 @@ END""")
 
         # ---------- begin{PHYSICS} ----------
         elif system == 'PHYSICS':
-            PBS_SCRIPT = f"""<<'END'
-                #!/bin/bash
+            PBS_SCRIPT = f"""
+                #!/bin/csh
                 #PBS -N {kwargs.get('N', sys.argv[0] or 'job')}
                 #PBS -q {kwargs.get('q','defaultQ')}
                 #PBS -V
@@ -95,17 +95,19 @@ END""")
                 #PBS -l select={kwargs.get('select',1)}:ncpus={kwargs.get('ncpus',1)}:mem={kwargs.get('mem','1GB')}{':ngpus='+str(kwargs['ngpus']) if 'ngpus' in kwargs else ''}
                 #PBS -l walltime={kwargs.get('walltime','23:59:00')}
                 #PBS -J {1000*i}-{1000*i + len(pbs_array_data_chunk)-1}
-                cd fractional-attn/long-range-arena
+                #PBS -V                
                 args=($(python -c "import sys;print(' '.join(map(str, {pbs_array_data_chunk}[int(sys.argv[1])-{1000*i}])))" $PBS_ARRAY_INDEX))
                 cd {kwargs.get('cd', '$PBS_O_WORKDIR')}
                 echo "pbs_array_args = ${{args[*]}}"
-                #if [ {source_exists} ]; then
-                #    source {kwargs.get('source')}
-                #fi
-                #if [ {conda_exists} ]; then
-                #    conda activate {kwargs.get('conda')}
-                #fi
+                if [ {source_exists} ]; then
+                   source {kwargs.get('source')}
+                fi
+                if [ {conda_exists} ]; then
+                   conda activate {kwargs.get('conda')}
+                fi
+                cd fractional-attn/long-range-arena
                 {command} ${{args[*]}} {additional_command} {post_command}
+                exit
     """
         # ---------- end{PHYSICS} ----------
 

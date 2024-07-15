@@ -167,15 +167,19 @@ def command_setup(singularity_path, **kwargs):
 
     return command, additional_command
 
-def command_setup_ddp(singularity_path, **kwargs):
-    assert isfile(singularity_path), "singularity_path does not exist!"
+def command_setup_ddp(**kwargs):
 
     system = kwargs.get('system')
-
     ncpus = kwargs.get('ncpus', 1) 
     ngpus = kwargs.get('ngpus', 0)
     select = kwargs.get('select', 1)
     
+    if 'singularity_path' in kwargs:
+        singularity_path = kwargs.get('singularity_path')
+        assert isfile(singularity_path), "singularity_path does not exist!"
+    else:
+        singularity_path = ''
+
     if len(singularity_path) > 0:
         bind_path = kwargs.get('bind_path', BPATH)
         home_path = kwargs.get('home_path', os.getcwd())        

@@ -14,38 +14,42 @@ def train_submit(script_name, kwargss, **kwargs):
 
     # system
     system = kwargs.get('system')
+    nstack = kwargs.get('nstack', 1)
 
     # computing resource settings
     ncpus = kwargs.get('ncpus', 1) 
     ngpus = kwargs.get('ngpus', 0)
     select = kwargs.get('select', 1)  # number of nodes    
-
     walltime = kwargs.get('walltime', '23:59:59')
     mem = kwargs.get('mem', '8GB')            
     
-    pbs_array_data = get_pbs_array_data(kwargss)        
-    perm, pbss = job_divider(pbs_array_data, len(PROJECTS))
+    pbs_array_data = get_pbs_array_data(kwargss)     
+    if system == 'ARTEMIS':   
+        perm, pbss = job_divider(pbs_array_data, len(PROJECTS))
+    elif system == 'PHYSICS':
+        perm, pbss = job_divider(pbs_array_data, 1)  # not need for projects
 
     #master_port = 0
     HOST_NODE_ADDR = 0
     for idx, pidx in enumerate(perm):
-        pbs_array_true = pbss[idx]
-        print(PROJECTS[pidx])
+        pbs_array_true = pbss[idx]        
         kwargs_qsub = {"path":        kwargs.get("job_path"),  # acts as PBSout                       
                        "ngpus":       ngpus, 
                        "ncpus":       ncpus, 
                        "select":      select,
                        "walltime":    walltime,
-                       "mem":         mem                       
+                       "mem":         mem,
+                       "nstack":      nstack                       
                        }        
 
         kwargs_command = kwargs_qsub; del kwargs_command["path"]
         kwargs_command["system"] = system
 
         # ----- ARTEMIS -----
-        if system == 'ARTEMIS':
+        if system == 'ARTEMIS':            
             # project names
             kwargs_qsub["P"] = PROJECTS[pidx]
+            print(PROJECTS[pidx])
 
             if select * max(ncpus, ngpus) > 1:
                 # master_port += 1            
@@ -80,6 +84,7 @@ if __name__ == '__main__':
     system = 'PHYSICS'
     date_str = datetime.today().strftime('%Y-%m-%d')    
     script_name = "main.py"  
+    nstack = 1
     
     # ----- Dataset -----
     dataset_epochs = {'imdb-classification':5, 'lra-cifar-classification':100,
@@ -169,4 +174,5 @@ if __name__ == '__main__':
                  walltime=walltime,
                  mem=mem,
                  job_path=job_path,
+                 nstack=nstack,
                  system=system)

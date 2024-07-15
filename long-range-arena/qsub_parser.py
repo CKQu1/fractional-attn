@@ -111,8 +111,8 @@ END""")
     """
         # ---------- end{PHYSICS} ----------
 
-        #os.system(f'qsub {PBS_SCRIPT}')
-        print(PBS_SCRIPT)
+        os.system(f'qsub {PBS_SCRIPT}')
+        #print(PBS_SCRIPT)
 
 def add_common_kwargs(kwargss, common_kwargs):
     for i in range(len(kwargss)):

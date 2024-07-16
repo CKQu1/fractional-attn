@@ -376,6 +376,7 @@ if __name__ == '__main__':
     scaler = torch.cuda.amp.GradScaler(enabled=(dtype == 'float16'))
     loss_fn = nn.CrossEntropyLoss()
     optimizer = AdamW(model.parameters(), lr=learning_rate, betas=(beta1,beta2), weight_decay=args.weight_decay)
+    #optimizer = model.configure_optimizers(weight_decay, learning_rate, (beta1, beta2), device_type)
     if compile:
         print("compiling the model... (takes a ~minute)")
         unoptimized_model = model
@@ -435,10 +436,15 @@ if __name__ == '__main__':
             x, y, _ = batch
         # Pad to seq_len
         x = F.pad(x, (0,seq_len - x.shape[1],0,0), value=0) # padding_idx = 0
-        x, y = x.to(device), y.to(device)
         # Create padding mask
         padding_mask = (x != 0).type(torch.int) # B x L
         padding_mask = padding_mask.unsqueeze(1).unsqueeze(1).type(torch.int) # B x 1 x 1 x L
+        if device_type == 'cuda':
+            x, y = x.pin_memory().to(device, non_blocking=True), y.pin_memory().to(device, non_blocking=True)
+            padding_mask = padding_mask.pin_memory().to(device, non_blocking=True)
+        else:
+            x, y = x.to(device), y.to(device)
+            padding_mask = padding_mask.to(device)
         return x, y, padding_mask    
 
     # def fb_indices(split):

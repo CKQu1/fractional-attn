@@ -101,14 +101,14 @@ if __name__ == '__main__':
     kwargss_all = []    
     for instance in instances:        
         #for didx, dataset_name in enumerate(DATASET_NAMES):
-        for didx, dataset_name in enumerate(DATASET_NAMES[1:3]):
-        #for didx, dataset_name in enumerate(DATASET_NAMES[2:3]):
+        #for didx, dataset_name in enumerate(DATASET_NAMES[1:3]):
+        for didx, dataset_name in enumerate(DATASET_NAMES[2:3]):
             select = 1; ngpus, ncpus = 1, 0                            
             walltime, mem = '23:59:59', '8GB'                                         
             num_proc = ngpus if ngpus > 1 else ncpus
                         
             #for qk_share in [True, False]:
-            for qk_share in [True]
+            for qk_share in [True]:
                 kwargss = []
 
                 for model_name in ['fnsformer', 'opfnsformer']:

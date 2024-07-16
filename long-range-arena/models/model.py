@@ -68,7 +68,7 @@ class ClassificationModel(nn.Module):
             attention_mask = torch.cat([torch.ones(attention_mask.shape[0], 1, 1, 1), attention_mask], dim=-1)
         # Find last non-padded index (CHECK)
         B, L = x.shape
-        last_nonpadded_idx = torch.arange(B) * L + torch.sum(x != self.padding_idx, dim=1, dtype=torch.int)-1 # B
+        last_nonpadded_idx = (torch.arange(B) * L).to(x.device) + (torch.sum(x != self.padding_idx, dim=1, dtype=torch.int)-1).to(x.device) # B
         # Calculate the encoder's output
         x, all_attentions = self.encoder(
             x, attention_mask=attention_mask, output_attentions=output_attentions

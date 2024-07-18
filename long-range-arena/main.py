@@ -353,8 +353,7 @@ if __name__ == '__main__':
     eval_size = len(testloader)  
 
     # ----- DOUBLE-CHECK -----
-    if 'path' in args.dataset_name:
-        if vocab_size is None:
+    if 'path' in args.dataset_name and vocab_size is None:
             vocab_size = 256
     # ------------------------
 

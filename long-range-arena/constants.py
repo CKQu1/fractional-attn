@@ -7,7 +7,7 @@ RT = os.path.abspath(os.getcwd())
 if 'project' in RT:
     DROOT = njoin('/project/frac_attn/fractional-attn/long-range-arena', '.droot')
 else:
-    DROOT = njoin(RT, 'long-range-arena', '.droot')
+    DROOT = njoin(RT, '.droot')
 
 FIGS_DIR = njoin(DROOT, 'figs_dir')
 

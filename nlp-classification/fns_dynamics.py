@@ -103,6 +103,7 @@ if __name__ == '__main__':
     # select based on bandwidth
     dirname_idxs = []
     model_instances = []
+    alphas = []
     epss = []
     for dirname_idx, dirname in enumerate(dirnames):
         if f'-eps=' in dirname and 'opfns' in dirname:
@@ -115,6 +116,12 @@ if __name__ == '__main__':
             for subdir in os.listdir(njoin(models_root, dirname)):
                 if isfile(njoin(models_root, dirname, subdir, 'run_performance.csv')):
                     final_performance = pd.read_csv(njoin(models_root, dirname, subdir, 'final_performance.csv'))
+                    f = open(njoin(models_root, dirname, subdir,'attn_setup.json'))
+                    attn_setup = json.load(f)
+                    f.close()  
+                    alpha = attn_setup['alpha']
+                    if alpha not in alphas:
+                        alphas.append(alpha)
                     dataset = final_performance.loc[0,'dataset_name']
                     print(f'Index {dirname_idx}: {dirname}')
                     dirname_idxs.append(dirname_idx)
@@ -127,10 +134,12 @@ if __name__ == '__main__':
     
 
     # Set up plots for later
-    nrows, ncols = 2, len(epss)
+    #nrows, ncols = 2, len(epss)
+    nrows, ncols = 1 + len(alphas), len(epss)
     figsize = (3*ncols,3*nrows)
     fig, axs = plt.subplots(nrows,ncols,figsize=figsize,
-                            sharex=True,sharey=True)          
+                            sharex=False,sharey=False)
+                            #sharex=True,sharey=True)          
     if nrows == 1:
         if ncols > 1:
             axs = np.expand_dims(axs, axis=0)
@@ -160,7 +169,6 @@ if __name__ == '__main__':
         a = attn_setup['a']
         if alpha < 2:
             d_intrinsic = attn_setup['d_intrinsic']   
-
         mr_ii = epss.index(bandwidth)
 
         # conditions for diffusion maps
@@ -221,7 +229,7 @@ if __name__ == '__main__':
             eval_dataset.set_format('torch')
 
             # data
-            N_batch = 10
+            N_batch = 5
             dataset = attn_setup['dataset_name']
             #train_bs = int(train_setting.loc[0,'batch_size'])
             train_bs = 1
@@ -256,11 +264,10 @@ if __name__ == '__main__':
         ###### 1. Compute geodesic distances and attention-score ######
 
         dist_mses = []
-        bidxs = list(range(N_batch))
-        batch_idx = train_dataset['attention_mask'].sum(-1).argmax().item()
-        if batch_idx in bidxs:
-            bidxs.remove(batch_idx)
-        bidxs.append(batch_idx)
+        seq_lens = train_dataset['attention_mask'].sum(-1)
+        idxs_max = torch.argsort(seq_lens, descending=True)
+        #bidxs = list(idxs_max[:N_batch].numpy())
+        bidxs = [idxs_max[1].item()]
 
         for bidx in tqdm(bidxs):         
 
@@ -347,6 +354,11 @@ if __name__ == '__main__':
 
         ###### 3. Extended analysis on removing non-uniform sampling (MC equiv to attn-score) ######
 
+        WQ = model.transformer.encoder.layer[0].attention.self.query.weight
+        WQ_eigvals, WQ_eigvecs = torch.linalg.eig(WQ)        
+        WQ_eigvals = WQ_eigvals.detach().numpy()
+        WQ_eigvecs = WQ_eigvecs.detach().numpy()
+
         a_ = 1
         if alpha != 2:
             attn_score_ = torch.exp(-(g_dist/bandwidth**0.5)**(alpha/(alpha-1)))
@@ -359,6 +371,8 @@ if __name__ == '__main__':
             N_C = attn_score.sum(-2)  # col su              
             K_tilde = (N_R**(-a_)).unsqueeze(-1) * attn_score * (N_C**(-a_)).unsqueeze(-2)
 
+        # ----- V1 -----
+        """
         MC_ = F.normalize(K_tilde,p=1,dim=3)  # can do this as the attn weights are always positive
         eigvals_, eigvecs_ = torch.linalg.eigh(MC_)
         eigvals_ = eigvals_.detach().numpy()
@@ -379,22 +393,64 @@ if __name__ == '__main__':
         else:
             attn_weights = F.normalize(attn_score,p=1,dim=3)  # can do this as the attn weights are always positive     
 
-        WQ = model.transformer.encoder.layer[0].attention.self.query.weight
-        WQ_eigvals, WQ_eigvecs = torch.linalg.eig(WQ)        
-        WQ_eigvals = WQ_eigvals.detach().numpy()
-        WQ_eigvecs = WQ_eigvecs.detach().numpy()
-
         # remove dropout for eval
         # attn_weights = F.dropout(attn_weights, p=model.transformer.encoder.layer[0].attention.self.dropout, 
         #                          training=model.transformer.encoder.layer[0].attention.self.training)           
 
-        eigvals, eigvecs = torch.linalg.eigh(attn_weights)
+        #eigvals, eigvecs = torch.linalg.eigh(attn_weights)
+        eigvals, eigvecs = torch.linalg.eig(attn_weights)
         eigvals = eigvals.detach().numpy()
         eigvecs = eigvecs.detach().numpy()      
         # order based on eigvals from large to small
         ii = np.argsort(eigvals[0,0])
         eigvals = eigvals[:,:,ii]
-        eigvecs = eigvecs[:,:,:,ii]          
+        eigvecs = eigvecs[:,:,:,ii]         
+        """
+
+        # ----- V2 -----
+        K_tilde = K_tilde[0,0]
+        D_tilde = K_tilde.sum(-1)        
+        # can do this as the attn weights are always positive  
+        MC = torch.diag(D_tilde**(-1)) @ K_tilde  # same as MC_ = F.normalize(K_tilde,p=1,dim=-1)
+
+        # K_hat_ = torch.diag(D_tilde_**(-0.5)) @ K_tilde_ @ torch.diag(D_tilde_**(-0.5))
+        # K_hat_sym_ = 0.5*(K_hat_ + K_hat_.T)
+        # eigvals_, eigvecs_ = torch.linalg.eigh(K_hat_sym_)                                
+        # eigvals_, eigvecs_ = torch.linalg.eigh(MC_)
+        # eigvals_ = eigvals_.detach().numpy()
+        # eigvecs_ = eigvecs_.detach().numpy()
+        # # order based on eigvals from small to large
+        # ii = np.argsort(eigvals_[0,0])
+        # eigvals_ = eigvals_[:,:,ii]
+        # eigvecs_ = eigvecs_[:,:,:,ii]
+        
+
+        ###### 4. Obtain attention weights based on model settings ######
+
+        if a > 0:            
+            N_R = attn_score.sum(-1)  # row sum
+            N_C = attn_score.sum(-2)  # col su                
+            K_tilde = (N_R**(-a)).unsqueeze(-1) * attn_score * (N_C**(-a)).unsqueeze(-2)       
+
+            attn_weights = F.normalize(K_tilde,p=1,dim=3)  # can do this as the attn weights are always positive
+        else:
+            attn_weights = F.normalize(attn_score,p=1,dim=3)  # can do this as the attn weights are always positive     
+
+        # remove dropout for eval
+        # attn_weights = F.dropout(attn_weights, p=model.transformer.encoder.layer[0].attention.self.dropout, 
+        #                          training=model.transformer.encoder.layer[0].attention.self.training)           
+
+        K_hat = torch.diag(D_tilde**(-0.5)) @ K_tilde @ torch.diag(D_tilde**(-0.5))
+        K_hat_sym = 0.5*(K_hat + K_hat.T)
+        eigvals, eigvecs = torch.linalg.eigh(K_hat_sym)    
+        eigvecs = torch.diag(D_tilde**(-0.5)) @ eigvecs
+
+        eigvals = eigvals.detach().numpy()
+        eigvecs = eigvecs.detach().numpy()      
+        # order based on eigvals from large to small
+        ii = np.argsort(eigvals)
+        eigvals = eigvals[ii]
+        eigvecs = eigvecs[:,ii]          
 
         attn_output = attn_weights @ value_vectors  
 
@@ -413,11 +469,13 @@ if __name__ == '__main__':
         c_hyp = HYP_CMAP(HYP_CNORM(alpha))  # hyperparameter color
 
         # Eigenvalues
-        idxs = np.arange(1,len(eigvals_[0,0])+1)
-        idx_mid = len(idxs) // 2
+        seq_len = len(eigvals)
+        idxs = np.arange(1,seq_len + 1)
+        idx_mid = len(idxs) // 2        
 
-        # Uniform
-        axs[mr_ii].plot(idxs, eigvals_[0,0], c=c_hyp, linestyle='-', label=r'$q$ removed')
+        lstyles = ['-', '--', '--']
+        axs[mr_ii].plot(idxs, eigvals, c=c_hyp, linestyle=lstyles[alphas.index(alpha)], label=r'$q$ removed')  # Non-uniform
+
         # eye guide
         # power = alpha if alpha <= 2 else 2
         # eigvals_theory = idxs**power  
@@ -426,16 +484,21 @@ if __name__ == '__main__':
         # ax.plot(idxs, eigvals_theory, c=c_alpha, alpha=0.5, linewidth=1, linestyle='--')
 
         # Non-uniform
-        axs[mr_ii + ncols].plot(idxs, eigvals[0,0], c=c_hyp, linestyle='-', label=r'$q$ kept')
+        # axs[mr_ii + ncols].plot(idxs, eigvals, c=c_hyp, linestyle='-', label=r'$q$ kept')
 
         # Eigenvectors
         # Query/key projection onto lower-dim
-        #dim1, dim2 = 0, 1
-        #axs[model_idx,1].scatter(query_vectors[0,0,:,dim1].detach().numpy(), query_vectors[0,0,:,dim2].detach().numpy())
-        #axs[mr_ii].scatter(eigvecs_[0,0,:,0], eigvecs_[0,0,:,1], c=c_hyp)
+        eidx1, eidx2 = seq_len - 1, seq_len - 2
+        row = alphas.index(alpha) + 1
+        axs[mr_ii + ncols * row].scatter(eigvecs[:,eidx1], eigvecs[:,eidx2], c=c_hyp, s=1)
+
+        # ---------- Message ----------
+        print(f'Non-uniform eigval min: {eigvals.min()}, max: {eigvals.max()}')
+        print('\n')
 
     for mr_ii in range(len(axs)):
-        axs[mr_ii].set_xscale('log'); axs[mr_ii].set_yscale('log')        
+        if mr_ii < ncols:
+            axs[mr_ii].set_xscale('log'); axs[mr_ii].set_yscale('log')        
 
         # ----- plot labels -----
 
@@ -445,15 +508,11 @@ if __name__ == '__main__':
                 axs[mr_ii].transAxes + ScaledTranslation(-20/72, +7/72, fig.dpi_scale_trans)),
             va='bottom', fontfamily='sans-serif')  # fontsize='medium',   
 
-        # if mr_ii // ncols == nrows-1:
-        #     axs[mr_ii].set_xticks(epochs)
-        #     axs[mr_ii].set_xticklabels(epochs)
-
         # row labels 
-        if mr_ii % ncols == ncols - 1:
-            axs[mr_ii].text(1.2, 0.5, row_labels[mr_ii//ncols], transform=(
-                            axs[mr_ii].transAxes + ScaledTranslation(-20/72, +7/72, fig.dpi_scale_trans)),
-                            va='center', rotation='vertical')  # fontsize='medium',          
+        # if mr_ii % ncols == ncols - 1:
+        #     axs[mr_ii].text(1.2, 0.5, row_labels[mr_ii//ncols], transform=(
+        #                     axs[mr_ii].transAxes + ScaledTranslation(-20/72, +7/72, fig.dpi_scale_trans)),
+        #                     va='center', rotation='vertical')  # fontsize='medium',          
 
     # col labels
     for col in range(ncols):
@@ -465,11 +524,11 @@ if __name__ == '__main__':
     FIGS_DIR = njoin(FIGS_DIR, 'nlp-task')
     if not isdir(FIGS_DIR): makedirs(FIGS_DIR)
     layers, heads, hidden = config['num_hidden_layers'], config['num_attention_heads'], int(config['hidden_size'])
-    fig_file = f'{model_name}-layers={layers}-heads={heads}-hidden={hidden}'
+    fig_file = 'fdm-'
+    fig_file += f'{model_name}-layers={layers}-heads={heads}-hidden={hidden}'
     # if isfile(njoin(FIGS_DIR, fig_file)):
     #     version = len([fname for fname in os.listdir(FIGS_DIR) if fname==fig_file])
-    #     fig_file += f'-v{version}'
-    fig_file += '-dm'
+    #     fig_file += f'-v{version}'    
     fig_file += '.pdf'
     plt.savefig(njoin(FIGS_DIR, fig_file))            
     print(f'Figure saved in {njoin(FIGS_DIR, fig_file)}')

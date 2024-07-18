@@ -146,9 +146,11 @@ def create_lra_path32_classification_dataset(cache_dir: Union[str, Path] = DEFAU
 	tst_loader = make_data_loader(dataset_obj.dataset_test, dataset_obj, seed=seed, batch_size=eval_bs)
 
 	N_CLASSES = dataset_obj.d_output
-	SEQ_LENGTH = dataset_obj.dataset_train.tensors[0].shape[1]
+	#SEQ_LENGTH = dataset_obj.dataset_train.tensors[0].shape[1]
+	SEQ_LENGH = dataset_obj.dataset_train[0][0].shape[0]
 	IN_DIM = dataset_obj.d_input
-	TRAIN_SIZE = dataset_obj.dataset_train.tensors[0].shape[0]
+	#TRAIN_SIZE = dataset_obj.dataset_train.tensors[0].shape[0]
+	TRAIN_SIZE = len(dataset_obj.dataset_train)
 	VOCAB_SIZE = dataset_obj.n_tokens
 
 	return trn_loader, val_loader, tst_loader, N_CLASSES, SEQ_LENGTH, IN_DIM, TRAIN_SIZE, VOCAB_SIZE
@@ -178,9 +180,11 @@ def create_lra_pathx_classification_dataset(cache_dir: Union[str, Path] = DEFAUL
 	tst_loader = make_data_loader(dataset_obj.dataset_test, dataset_obj, seed=seed, batch_size=eval_bs)
 
 	N_CLASSES = dataset_obj.d_output
-	SEQ_LENGTH = dataset_obj.dataset_train.tensors[0].shape[1]
+	#SEQ_LENGTH = dataset_obj.dataset_train.tensors[0].shape[1]
+	SEQ_LENGH = dataset_obj.dataset_train[0][0].shape[0]
 	IN_DIM = dataset_obj.d_input
-	TRAIN_SIZE = dataset_obj.dataset_train.tensors[0].shape[0]
+	#TRAIN_SIZE = dataset_obj.dataset_train.tensors[0].shape[0]
+	TRAIN_SIZE = len(dataset_obj.dataset_train)
 	VOCAB_SIZE = dataset_obj.n_tokens
 
 	return trn_loader, val_loader, tst_loader, N_CLASSES, SEQ_LENGTH, IN_DIM, TRAIN_SIZE, VOCAB_SIZE
@@ -265,6 +269,6 @@ Datasets = {
 	"listops-classification": create_lra_listops_classification_dataset,
 	"aan-classification": create_lra_aan_classification_dataset,
 	"lra-cifar-classification": create_lra_image_classification_dataset,
-	"pathfinder-classification": create_lra_path32_classification_dataset,
+	"	": create_lra_path32_classification_dataset,
 	"pathx-classification": create_lra_pathx_classification_dataset,
 }

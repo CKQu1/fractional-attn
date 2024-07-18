@@ -85,7 +85,7 @@ END""")
 
         # ---------- begin{PHYSICS} ----------
         elif system == 'PHYSICS':
-            PBS_SCRIPT = f"""
+            PBS_SCRIPT = f"""<<eof
                 #!/bin/bash
                 #PBS -N {kwargs.get('N', sys.argv[0] or 'job')}
                 #PBS -q {kwargs.get('q','defaultQ')}
@@ -109,7 +109,7 @@ END""")
                 conda activate frac_attn                                                        
                 {command} ${{args[*]}} {additional_command} {post_command}
                 exit
-    """
+            eof"""
         # ---------- end{PHYSICS} ----------
 
         os.system(f'qsub {PBS_SCRIPT}')

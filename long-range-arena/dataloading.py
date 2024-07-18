@@ -147,7 +147,7 @@ def create_lra_path32_classification_dataset(cache_dir: Union[str, Path] = DEFAU
 
 	N_CLASSES = dataset_obj.d_output
 	#SEQ_LENGTH = dataset_obj.dataset_train.tensors[0].shape[1]
-	SEQ_LENGH = dataset_obj.dataset_train[0][0].shape[0]
+	SEQ_LENGTH = dataset_obj.dataset_train[0][0].shape[0]
 	IN_DIM = dataset_obj.d_input
 	#TRAIN_SIZE = dataset_obj.dataset_train.tensors[0].shape[0]
 	TRAIN_SIZE = len(dataset_obj.dataset_train)
@@ -181,7 +181,7 @@ def create_lra_pathx_classification_dataset(cache_dir: Union[str, Path] = DEFAUL
 
 	N_CLASSES = dataset_obj.d_output
 	#SEQ_LENGTH = dataset_obj.dataset_train.tensors[0].shape[1]
-	SEQ_LENGH = dataset_obj.dataset_train[0][0].shape[0]
+	SEQ_LENGTH = dataset_obj.dataset_train[0][0].shape[0]
 	IN_DIM = dataset_obj.d_input
 	#TRAIN_SIZE = dataset_obj.dataset_train.tensors[0].shape[0]
 	TRAIN_SIZE = len(dataset_obj.dataset_train)

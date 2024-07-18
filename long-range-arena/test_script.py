@@ -53,3 +53,21 @@ train_len = len_dataset - val_len - test_len
     [train_len, val_len, test_len],
     generator=torch.Generator().manual_seed(dataset_obj.seed),
 )
+
+from dataloading import make_data_loader
+
+seed = 42
+train_bs = 8
+eval_bs = 8
+trn_loader = make_data_loader(dataset_obj.dataset_train, dataset_obj, seed=seed, batch_size=train_bs)
+#val_loader = make_data_loader(dataset_obj.dataset_val, dataset_obj, seed=seed, batch_size=eval_bs, drop_last=False, shuffle=False)
+val_loader = make_data_loader(dataset_obj.dataset_val, dataset_obj, seed=seed, batch_size=eval_bs)
+#tst_loader = make_data_loader(dataset_obj.dataset_test, dataset_obj, seed=seed, batch_size=eval_bs, drop_last=False, shuffle=False)
+tst_loader = make_data_loader(dataset_obj.dataset_test, dataset_obj, seed=seed, batch_size=eval_bs)
+
+N_CLASSES = dataset_obj.d_output
+#SEQ_LENGTH = dataset_obj.dataset_train.tensors[0].shape[1]
+SEQ_LENGH = dataset_obj.dataset_train[0][0].shape[0]
+IN_DIM = dataset_obj.d_input
+#TRAIN_SIZE = len(dataset_obj.dataset_train)
+VOCAB_SIZE = dataset_obj.n_tokens

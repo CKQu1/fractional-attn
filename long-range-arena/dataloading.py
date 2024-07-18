@@ -269,6 +269,6 @@ Datasets = {
 	"listops-classification": create_lra_listops_classification_dataset,
 	"aan-classification": create_lra_aan_classification_dataset,
 	"lra-cifar-classification": create_lra_image_classification_dataset,
-	"	": create_lra_path32_classification_dataset,
+	"pathfinder-classification": create_lra_path32_classification_dataset,
 	"pathx-classification": create_lra_pathx_classification_dataset,
 }

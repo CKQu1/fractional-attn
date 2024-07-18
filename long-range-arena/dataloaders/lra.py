@@ -414,7 +414,8 @@ class PathFinderDataset(torch.utils.data.Dataset):
             sample = Image.open(f).convert("L")  # Open in grayscale
         if self.transform is not None:
             sample = self.transform(sample)
-        return sample, target
+        #return sample, target
+        return sample.squeeze(), target
 
 
 class PathFinder(ImageResolutionSequenceDataset):

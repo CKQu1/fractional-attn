@@ -186,6 +186,8 @@ ds_iis = [1, 0]
 
 for bidx, ds_ii in enumerate(ds_iis):
 
+    dist_type = dist_types[ds_ii]
+
     dot = all_xyzs[ds_ii] @ all_xyzs[ds_ii].T
     # clip values
     dot[dot>=1] = 1
@@ -198,7 +200,7 @@ for bidx, ds_ii in enumerate(ds_iis):
 
     idxs = np.arange(1,large_sample_size+1)
     idx_mid = int(n/2)
-    for _, alpha in enumerate(alphas2):
+    for alpidx, alpha in enumerate(alphas2):
 
         #c_alpha = cmap(norm(alpha))
         c_alpha = HYP_CMAP(HYP_CNORM(alpha))
@@ -212,26 +214,29 @@ for bidx, ds_ii in enumerate(ds_iis):
         #ax = axs[1,1]
 
         if a == 0:
-            # removing non-uniform sampling
+            # removing initial sampling effect
             a_ = 1
             # estimate of sampling density
             gaussian_hk = (2*np.pi*bandwidth2)**(-d/2)/n * np.exp(-g_dists_2**2/(2*bandwidth2))
             q_sample = gaussian_hk.sum(-1)
             K_tilde_ = np.diag(q_sample**(-a_)) @ K @ np.diag(q_sample**(-a_))
             D_tilde_ = K_tilde_.sum(-1)
-            K_hat = np.diag(D_tilde_**(-0.5)) @ K_tilde_ @ np.diag(D_tilde_**(-0.5))
-            K_hat_sym = 0.5*(K_hat + K_hat.T)
+            K_hat_ = np.diag(D_tilde_**(-0.5)) @ K_tilde_ @ np.diag(D_tilde_**(-0.5))
+            K_hat_sym_ = 0.5*(K_hat_ + K_hat_.T)
 
-            eigvals, eigvecs = np.linalg.eigh(K_hat_sym)
-            eigvecs = np.diag(D_tilde_**(-0.5)) @ eigvecs
+            eigvals_, eigvecs_ = np.linalg.eigh(K_hat_sym_)
+            eigvecs_ = np.diag(D_tilde_**(-0.5)) @ eigvecs_
+
+            # keep initial sampling density
+
 
 # ----- (e -- f) -----
 
             # eigvals
-            eidx = np.argsort(eigvals)[::-1]
-            eigvals = eigvals[eidx]; eigvecs = eigvecs[:,eidx]
-            eigvals = -1/t * np.log(eigvals)
-            ax.plot(idxs, eigvals, c=c_alpha, label=rf'$\alpha = {{{alpha}}}$')    
+            eidx = np.argsort(eigvals_)[::-1]
+            eigvals_ = eigvals_[eidx]; eigvecs_ = eigvecs_[:,eidx]
+            eigvals_ = -1/t * np.log(eigvals_)
+            ax.plot(idxs, eigvals_, c=c_alpha, label=rf'$\alpha = {{{alpha}}}$')    
             # eye guide
             power = alpha if alpha <= 2 else 2
             eigvals_theory = idxs**power  
@@ -249,19 +254,31 @@ for bidx, ds_ii in enumerate(ds_iis):
             ax.set_xscale('log'); ax.set_yscale('log')
             #ax.legend()
 
+            # original markov matrix np.diag(D_tilde**(-1)) @ K_tilde
+            K_hat = np.diag(D_tilde**(-1/2)) @ K_tilde @ np.diag(D_tilde**(-1/2))
+            K_hat_sym = 0.5*(K_hat + K_hat.T)
+            eigvals, eigvecs = np.linalg.eigh(K_hat_sym)
+            eigvecs = np.diag(D_tilde**(-0.5)) @ eigvecs
+
+            eidx = np.argsort(eigvals)[::-1]
+            eigvals = eigvals[eidx]; eigvecs = eigvecs[:,eidx]
+
             # ---------- Eigvecs ----------
-            eidx1, eidx2 = large_sample_size, large_sample_size-1
-            ax = axs[1,bidx+2]
-            #ax.plot(large_sample_radians, np.exp(t * eigvals[eidx]) * eigvecs[:,eidx], c=c_alpha)
-            #ax.scatter(eigvecs[:,eidx1-1], eigvecs[:,eidx2-1], c=c_alpha, s=1)
-            ax.scatter(all_radians[ds_ii][:,0], eigvecs[:,eidx1-1], c=c_alpha, s=1)
+            if dist_type == 'Non-uniform':
+                #eidx1, eidx2 = large_sample_size-1, large_sample_size-2
+                eidx1, eidx2 = 0, 1
+                #eidx1, eidx2 = 1, 2
+                ax = axs[1,alpidx+2]
+                #ax.plot(large_sample_radians, np.exp(t * eigvals[eidx]) * eigvecs[:,eidx], c=c_alpha)
+                ax.scatter(eigvecs[:,eidx1], eigvecs[:,eidx2], c=c_alpha, s=1)
+                #ax.scatter(all_radians[ds_ii][:,0], eigvecs[:,eidx1-1], c=c_alpha, s=1)
 
 # ----- plot settings -----
 
 axs[1,1].legend(frameon=False)
 for bidx, ds_ii in enumerate(ds_iis):
     axs[1,bidx].set_title(dist_types[ds_ii])
-    axs[1,bidx+2].set_title(dist_types[ds_ii])
+    #axs[1,bidx+2].set_title(dist_types[ds_ii])
 
 ii = 0
 for row in range(nrows):

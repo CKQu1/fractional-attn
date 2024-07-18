@@ -123,6 +123,7 @@ if __name__ == '__main__':
     parser.add_argument('--hidden_size', default=128, type=int)
     parser.add_argument('--intermediate_size', default=128, type=int)    
     parser.add_argument('--num_encoder_layers', default=1, type=int)
+    parser.add_argument('--num_decoder_layers', default=0, type=int)
     parser.add_argument('--num_heads', default=2, type=int)
     parser.add_argument('--num_classifier_layers', default=1, type=int)
     parser.add_argument('--hidden_dropout_prob', default=0.0, type=float)
@@ -350,6 +351,12 @@ if __name__ == '__main__':
     trainloader, valloader, testloader, num_classes, seq_len, in_dim, train_size, vocab_size = \
         create_dataset_fn(cache_dir=args.cache_dir, seed=args.seed, train_bs=train_batch_size, eval_bs=eval_batch_size)
     eval_size = len(testloader)  
+
+    # ----- DOUBLE-CHECK -----
+    if 'path' in args.dataset_name:
+        if vocab_size is None:
+            vocab_size = 256
+    # ------------------------
 
     # Add config parameters depending on dataset
     config["num_classes"] = num_classes 

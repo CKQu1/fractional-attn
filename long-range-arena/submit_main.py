@@ -80,8 +80,7 @@ def train_submit(script_name, kwargss, **kwargs):
 if __name__ == '__main__':
     
     # ----- System -----
-    #system = 'ARTEMIS'
-    system = 'PHYSICS'
+    system = 'ARTEMIS' if 'project' in DROOT else 'PHYSICS'    
     date_str = datetime.today().strftime('%Y-%m-%d')    
     script_name = "main.py"  
     nstack = 1
@@ -111,7 +110,8 @@ if __name__ == '__main__':
             for qk_share in [True]:
                 kwargss = []
 
-                for model_name in ['fnsformer', 'opfnsformer']:
+                #for model_name in ['fnsformer', 'opfnsformer']:
+                for model_name in ['fnsformer']:
                     #for alpha in [1.2, 1.6, 2]:
                     for alpha in [1.2, 2]:
                         #for bandwidth in [0.01, 0.1, 0.5, 1]:

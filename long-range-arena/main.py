@@ -125,6 +125,7 @@ if __name__ == '__main__':
     parser.add_argument('--num_encoder_layers', default=1, type=int)
     parser.add_argument('--num_decoder_layers', default=0, type=int)
     parser.add_argument('--num_heads', default=2, type=int)
+    parser.add_argument('--force_num_heads', type=str2bool, nargs='?', const=True, default=False)
     parser.add_argument('--num_classifier_layers', default=1, type=int)
     parser.add_argument('--hidden_dropout_prob', default=0.0, type=float)
     parser.add_argument('--encoder_dropout_prob', default=0.0, type=float)
@@ -137,7 +138,7 @@ if __name__ == '__main__':
     parser.add_argument('--interaction', default='none', type=str) # 'NLI' = NLI, else not
     
     # CHANGES HERE
-    parser.add_argument('--apples_to_apples', default=False, type=bool)
+    parser.add_argument('--apples_to_apples', type=str2bool, nargs='?', const=True, default=False)
 
     args = parser.parse_args()    
     
@@ -145,14 +146,16 @@ if __name__ == '__main__':
     if args.apples_to_apples:
         if args.dataset_name == 'listops-classification':
             args.hidden_size = 512 # IMMUTABLE
-            args.num_heads = 8 
+            if not args.force_num_heads:
+                args.num_heads = 8 
             args.num_encoder_layers = 6 # IMMUTABLE
             args.intermediate_size = 2048 # IMMUTABLE
             args.pooling_mode = 'CLS' # Pooling not currently done in non-retrieval model
             args.max_iter = 5000 # Can probably change this
         elif args.dataset_name == 'imdb-classification':
             args.hidden_size = 512 # IMMUTABLE
-            args.num_heads = 8 
+            if not args.force_num_heads:
+                args.num_heads = 8 
             args.num_encoder_layers = 6 # IMMUTABLE
             args.intermediate_size = 2048 # IMMUTABLE
             args.pooling_mode = 'CLS'
@@ -160,7 +163,8 @@ if __name__ == '__main__':
             args.max_iter = 20000 # Can probably change this
         elif args.dataset_name == 'aan-classification':
             args.hidden_size = 128 # IMMUTABLE
-            args.num_heads = 4
+            if not args.force_num_heads:
+                args.num_heads = 4
             args.num_encoder_layers = 4 # IMMUTABLE
             args.intermediate_size = 512 # IMMUTABLE
             args.pooling_mode = 'CLS'
@@ -168,16 +172,24 @@ if __name__ == '__main__':
             args.max_iter = 5000 # Can probably change this
         elif args.dataset_name == 'lra-cifar-classification':
             args.hidden_size = 64 # IMMUTABLE
-            args.num_heads = 4
+            if not args.force_num_heads:
+                args.num_heads = 4
             args.num_encoder_layers = 3 # IMMUTABLE
             args.intermediate_size = 128 # IMMUTABLE
             args.num_classifier_layers = 2 # 2-layer MLP
             # args.pooling_mode = 'CLS' # Not mentioned
             args.epochs = 200 # Can probably change this
             # Also did extensive hyperparameter sweeps
+        elif args.dataset_name == 'pathfinder-classification':
+            args.hidden_size = 64 # IMMUTABLE
+            if not args.force_num_heads:
+                args.num_heads = 4
+            args.num_encoder_layers = 3 # IMMUTABLE
+            args.intermediate_size = 128 # IMMUTABLE
+            args.num_classifier_layers = 2 # 2-layer MLP
+            # args.pooling_mode = 'CLS' # Not mentioned
+            args.epochs = 200 # Can probably change this            
             
-            
-
     # assertions
     model_name = args.model_name.lower()
     if 'fns' in model_name:
@@ -353,8 +365,8 @@ if __name__ == '__main__':
     eval_size = len(testloader)  
 
     # ----- DOUBLE-CHECK -----
-    if 'path' in args.dataset_name and vocab_size is None:
-            vocab_size = 256
+    # if 'path' in args.dataset_name and vocab_size is None:
+    #         vocab_size = 256
     # ------------------------
 
     # Add config parameters depending on dataset
@@ -403,6 +415,8 @@ if __name__ == '__main__':
         max_iters = epochs * steps_per_epoch
         eval_interval = steps_per_epoch
         log_interval = steps_per_epoch  # will need to change later
+
+        args.eval_iters = eval_size // eval_batch_size 
     lr_decay_iters = max_iters # should be ~= max_iters per Chinchilla
 
     # save train settings
@@ -439,7 +453,7 @@ if __name__ == '__main__':
         if len(batch) == 2:
             x, y = batch
         elif len(batch) == 3:
-            x, y, _ = batch
+            x, y, _ = batch  
         # Pad to seq_len
         x = F.pad(x, (0,seq_len - x.shape[1],0,0), value=0) # padding_idx = 0
         # Create padding mask

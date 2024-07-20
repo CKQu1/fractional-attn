@@ -18,36 +18,39 @@ if __name__ == '__main__':
     nstack = 1    
     
     # ----- Paths -----
-    ROOT = njoin(DROOT, 'qsub_test2')
+    ROOT = njoin(DROOT, 'full_model')
     job_path = njoin(ROOT, 'jobs_all', date_str)
     if not isdir(job_path): makedirs(job_path)
 
     #instances = list(range(5))    
     instances = [0]
     kwargss_all = []    
+
+    DATASET_NAMES = ['imdb-classification', 'lra-cifar-classification',
+                     'listops-classification', 'pathfinder-classification']  
     for instance in instances:        
-        #for didx, dataset_name in enumerate(DATASET_NAMES):
-        #for didx, dataset_name in enumerate(DATASET_NAMES[1:3]):
-        for didx, dataset_name in enumerate(DATASET_NAMES[2:3]):
-            select = 1; ngpus, ncpus = 0, 1                            
-            walltime, mem = '23:59:59', '8GB'                                         
+        for didx, dataset_name in enumerate(DATASET_NAMES):
+        #for didx, dataset_name in enumerate(DATASET_NAMES[0:1]):
+            select = 1; ngpus, ncpus = 1, 0                            
+            walltime, mem = '23:59:59', '32GB'                                         
             num_proc = ngpus if ngpus > 1 else ncpus
                         
             #for qk_share in [True, False]:
             for qk_share in [True]:
                 kwargss = []
 
-                #for model_name in ['fnsformer', 'opfnsformer']:
-                for model_name in ['fnsformer']:
-                    #for alpha in [1.2, 1.6, 2]:
-                    for alpha in [1.2, 2]:
+                for model_name in ['fnsformer', 'opfnsformer']:
+                #for model_name in ['fnsformer']:
+                    #for alpha in [1, 1.2, 1.4, 1.6, 1.8, 2]:
+                    for alpha in [1.2, 1.6, 2]:
                         #for bandwidth in [0.01, 0.1, 0.5, 1]:
-                        for bandwidth in [0.1]:
+                        for bandwidth in [0.01, 0.1, 1]:
+                        #for bandwidth in [0.1]:
                             kwargss.append({'model_name':model_name, 'alpha': alpha, 'a': 0,'bandwidth':bandwidth,'manifold':'sphere'})
 
-                # kwargss.append({'model_name':'sinkformer', 'n_it': 1})
-                # kwargss.append({'model_name':'sinkformer', 'n_it': 3})
-                # kwargss.append({'model_name':'dpformer'})
+                kwargss.append({'model_name':'sinkformer', 'n_it': 1})
+                kwargss.append({'model_name':'sinkformer', 'n_it': 3})
+                kwargss.append({'model_name':'dpformer'})
 
                 #epochs = DATASET_EPOCHS[dataset_name]
                 epochs = None                                                              
@@ -58,18 +61,24 @@ if __name__ == '__main__':
                                 'train_bs':             16,   
                                 'eval_bs':              16,                                                                       
                                 'weight_decay':         0,
-                                'lr_scheduler_type':    'constant',
-                                'max_lr':               5e-5,
-                                'min_lr':               5e-6,
+                                #'lr_scheduler_type':    'constant',
+                                'lr_scheduler_type':    'cosine',
+                                'max_lr':               1e-4,
+                                'min_lr':               1e-5,
                                 }  
-
-                if epochs is not None:                    
-                    common_kwargs['epochs'] = epochs
-                else:
-                    common_kwargs['max_iters'] = 50
-                    common_kwargs['eval_interval'] = 10
-                    common_kwargs['eval_iters'] = 50
                     
+                common_kwargs['apples_to_apples'] = True
+                common_kwargs['force_num_heads'] = True
+
+                if not common_kwargs['apples_to_apples']:
+                    if epochs is not None:                    
+                        common_kwargs['epochs'] = epochs
+                        #common_kwargs['eval_iters'] = 250
+                    else:
+                        common_kwargs['max_iters'] = 50
+                        common_kwargs['eval_interval'] = 10
+                        common_kwargs['eval_iters'] = 50                
+                
                 # if num_proc > 1:
                 #     common_kwargs['grad_accum_step'] = num_proc * 2
 
@@ -122,4 +131,4 @@ if __name__ == '__main__':
                     system=system)
 
     for i in range(len(commands)):
-        qsub(f'{command} {script_name}', pbs_array_true, **kwargs_qsub)      
+        qsub(f'{commands[i]} {script_names[i]}', pbs_array_trues[i], **kwargs_qsubs[i])      

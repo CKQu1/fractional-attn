@@ -3,7 +3,7 @@ import sys
 import os
 import random
 from os.path import isdir, isfile
-from constants import BPATH
+from constants import *
 from mutils import njoin
 
 def qsub(command, pbs_array_data, **kwargs):
@@ -46,25 +46,23 @@ def qsub(command, pbs_array_data, **kwargs):
                 echo "pbs_array_args = {str_pbs_array_args}"
                 {command} {str_pbs_array_args} {post_command}
 END""")
-        return
+        return    
+
     # Distribute subjobs evenly across array chunks.
     pbs_array_data = random.sample(pbs_array_data, len(pbs_array_data))
     # Submit array job.
     print(f"Submitting {len(pbs_array_data)} subjobs")
-
+    
+    # ---------- begin{ARTEMIS} ----------
     if system == 'ARTEMIS':
-        subjobs_limit = 1000
-    elif system == 'PHYSICS':
-        subjobs_limit = 100
-    # PBS array jobs are limited to 1000 subjobs by default
-    pbs_array_data_chunks = [pbs_array_data[x:x+subjobs_limit]
-                             for x in range(0, len(pbs_array_data), subjobs_limit)]
-    if len(pbs_array_data_chunks[-1]) == 1:  # array jobs must have length >1
-        pbs_array_data_chunks[-1].insert(0, pbs_array_data_chunks[-2].pop())
-    for i, pbs_array_data_chunk in enumerate(pbs_array_data_chunks):
+        MAX_SUBJOBS = 1000
+        # PBS array jobs are limited to 1000 subjobs by default
+        pbs_array_data_chunks = [pbs_array_data[x:x+MAX_SUBJOBS]
+                                for x in range(0, len(pbs_array_data), MAX_SUBJOBS)]
+        if len(pbs_array_data_chunks[-1]) == 1:  # array jobs must have length >1
+            pbs_array_data_chunks[-1].insert(0, pbs_array_data_chunks[-2].pop())
+        for i, pbs_array_data_chunk in enumerate(pbs_array_data_chunks):
 
-        # ---------- begin{ARTEMIS} ----------
-        if system == 'ARTEMIS':
             PBS_SCRIPT = f"""<<'END'
                 #!/bin/bash
                 #PBS -N {kwargs.get('N', sys.argv[0] or 'job')}
@@ -75,8 +73,8 @@ END""")
                 #PBS -o {path}job -e {path}job
                 #PBS -l select={kwargs.get('select',1)}:ncpus={kwargs.get('ncpus',1)}:mem={kwargs.get('mem','1GB')}{':ngpus='+str(kwargs['ngpus']) if 'ngpus' in kwargs else ''}
                 #PBS -l walltime={kwargs.get('walltime','23:59:00')}
-                #PBS -J {subjobs_limit*i}-{subjobs_limit*i + len(pbs_array_data_chunk)-1}
-                args=($(python -c "import sys;print(' '.join(map(str, {pbs_array_data_chunk}[int(sys.argv[1])-{subjobs_limit*i}])))" $PBS_ARRAY_INDEX))
+                #PBS -J {MAX_SUBJOBS*i}-{MAX_SUBJOBS*i + len(pbs_array_data_chunk)-1}
+                args=($(python -c "import sys;print(' '.join(map(str, {pbs_array_data_chunk}[int(sys.argv[1])-{MAX_SUBJOBS*i}])))" $PBS_ARRAY_INDEX))
                 cd {kwargs.get('cd', '$PBS_O_WORKDIR')}
                 echo "pbs_array_args = ${{args[*]}}"
                 #if [ {source_exists} ]; then
@@ -86,11 +84,19 @@ END""")
                 #    conda activate {kwargs.get('conda')}
                 #fi
                 {command} ${{args[*]}} {additional_command} {post_command}
-    END"""
-        # ---------- end{ARTEMIS} ----------s
+    END"""        
 
-        # ---------- begin{PHYSICS} ----------
-        elif system == 'PHYSICS':
+        os.system(f'qsub {PBS_SCRIPT}')
+        #print(PBS_SCRIPT)
+
+    # ---------- end{ARTEMIS} ----------s
+
+    # ---------- begin{PHYSICS} ----------
+    elif system == 'PHYSICS':
+        MAX_SUBJOBS = 100
+        
+        for i, pbs_array_data_point in enumerate(pbs_array_data):
+
             # https://stackoverflow.com/questions/2500436/how-does-cat-eof-work-in-bash
             PBS_SCRIPT = f"""<<eof
                 #!/bin/bash
@@ -100,27 +106,105 @@ END""")
                 #PBS -m n
                 #PBS -o {path}job -e {path}job
                 #PBS -l select={kwargs.get('select',1)}:ncpus={kwargs.get('ncpus',1)}:mem={kwargs.get('mem','1GB')}{':ngpus='+str(kwargs['ngpus']) if 'ngpus' in kwargs else ''}
-                #PBS -l walltime={kwargs.get('walltime','23:59:00')}    
-                ##PBS -J {subjobs_limit*i}-{subjobs_limit*i + len(pbs_array_data_chunk)-1}                       
-                args=($(python -c "import sys;print(' '.join(map(str, {pbs_array_data_chunk}[int(sys.argv[1])-{subjobs_limit*i}])))" $PBS_ARRAY_INDEX))
+                #PBS -l walltime={kwargs.get('walltime','23:59:00')}                       
+                ##PBS -J {MAX_SUBJOBS*i}-{MAX_SUBJOBS*i + len(pbs_array_data_point)-1}
+                args=($(python -c "import sys;print(' '.join(map(str, {pbs_array_data_point}[{i}])))"))
                 cd {kwargs.get('cd', '$PBS_O_WORKDIR')}
                 echo "pbs_array_args = ${{args[*]}}"
-                # if [ {source_exists} ]; then
-                #    source {kwargs.get('source')}
-                # fi
-                # if [ {conda_exists} ]; then
-                #    conda activate {kwargs.get('conda')}
-                # fi         
+                if [ {source_exists} ]; then
+                    source {kwargs.get('source')}
+                fi
+                if [ {conda_exists} ]; then
+                    conda activate {kwargs.get('conda')}
+                fi         
 
-                source /usr/physics/python/Anaconda3-2022.10/etc/profile.d/conda.sh
-                conda activate frac_attn                                                        
+                # source /usr/physics/python/Anaconda3-2022.10/etc/profile.d/conda.sh
+                # conda activate frac_attn                                                        
                 {command} ${{args[*]}} {additional_command} {post_command}
                 exit
             eof"""
+
+        os.system(f'qsub {PBS_SCRIPT}')
+        #print(PBS_SCRIPT)
+
         # ---------- end{PHYSICS} ----------
 
-        #os.system(f'qsub {PBS_SCRIPT}')
-        print(PBS_SCRIPT)
+def job_setup(script_name, kwargss, **kwargs):
+
+    assert isfile(script_name), f"{script_name} does not exist!"
+
+    # system
+    system = kwargs.get('system')
+    nstack = kwargs.get('nstack', 1)
+
+    # computing resource settings
+    ncpus = kwargs.get('ncpus', 1) 
+    ngpus = kwargs.get('ngpus', 0)
+    select = kwargs.get('select', 1)  # number of nodes    
+    walltime = kwargs.get('walltime', '23:59:59')
+    mem = kwargs.get('mem', '8GB')            
+    
+    pbs_array_data = get_pbs_array_data(kwargss)     
+    if system == 'ARTEMIS':   
+        perm, pbss = job_divider(pbs_array_data, len(PROJECTS))
+    elif system == 'PHYSICS':
+        perm, pbss = job_divider(pbs_array_data, 1)  # not needed for projects
+
+    #master_port = 0
+    HOST_NODE_ADDR = 0
+    commands, script_names, pbs_array_trues, kwargs_qsubs = [], [], [], []
+    for idx, pidx in enumerate(perm):
+        pbs_array_true = pbss[idx]        
+        kwargs_qsub = {"path":        kwargs.get("job_path"),  # acts as PBSout                       
+                       "ngpus":       ngpus, 
+                       "ncpus":       ncpus, 
+                       "select":      select,
+                       "walltime":    walltime,
+                       "mem":         mem,
+                       "nstack":      nstack                       
+                       }        
+
+        kwargs_command = kwargs_qsub; del kwargs_command["path"]
+        kwargs_command["system"] = system
+
+        # ----- ARTEMIS -----
+        if system == 'ARTEMIS':            
+            # project names
+            kwargs_qsub["P"] = PROJECTS[pidx]
+            print(PROJECTS[pidx])
+
+            if select * max(ncpus, ngpus) > 1:
+                # master_port += 1            
+                HOST_NODE_ADDR += 1
+
+            kwargs_command["HOST_NODE_ADDR"] = HOST_NODE_ADDR
+            kwargs_command["singularity_path"] = SPATH
+
+        # ----- PHYSICS -----
+        elif system == 'PHYSICS':
+            if ngpus >= 1:
+                kwargs_qsub["q"] = 'l40s'
+            else:
+                #kwargs_qsub["q"] = 'yossarian'
+                pass
+
+            kwargs_qsub["source"] = PHYSICS_SOURCE 
+            kwargs_qsub["conda"] = PHYSICS_CONDA
+
+        command, additional_command = command_setup_ddp(**kwargs_command)                
+
+        if len(additional_command) > 0:
+            kwargs_qsub["additional_command"] = additional_command
+
+        #qsub(f'{command} {script_name}', pbs_array_true, **kwargs_qsub)   
+        #print("\n")
+        commands.append(command)
+        script_names.append(script_name)
+        pbs_array_trues.append(pbs_array_true)
+        kwargs_qsubs.append(kwargs_qsub)
+
+    assert len(list(set([len(commands), len(script_names), len(pbs_array_trues), len(kwargs_qsubs)]))) == 1, 'len not same'
+    return commands, script_names, pbs_array_trues, kwargs_qsubs
 
 def add_common_kwargs(kwargss, common_kwargs):
     for i in range(len(kwargss)):
@@ -232,3 +316,76 @@ def command_setup_ddp(**kwargs):
         command = command[1:]
 
     return command, additional_command    
+
+# originall in submit_main.py
+
+"""
+def train_submit(script_name, kwargss, **kwargs):
+
+    assert isfile(script_name), f"{script_name} does not exist!"
+
+    # system
+    system = kwargs.get('system')
+    nstack = kwargs.get('nstack', 1)
+
+    # computing resource settings
+    ncpus = kwargs.get('ncpus', 1) 
+    ngpus = kwargs.get('ngpus', 0)
+    select = kwargs.get('select', 1)  # number of nodes    
+    walltime = kwargs.get('walltime', '23:59:59')
+    mem = kwargs.get('mem', '8GB')            
+    
+    pbs_array_data = get_pbs_array_data(kwargss)     
+    if system == 'ARTEMIS':   
+        perm, pbss = job_divider(pbs_array_data, len(PROJECTS))
+    elif system == 'PHYSICS':
+        perm, pbss = job_divider(pbs_array_data, 1)  # not needed for projects
+
+    #master_port = 0
+    HOST_NODE_ADDR = 0
+    for idx, pidx in enumerate(perm):
+        pbs_array_true = pbss[idx]        
+        kwargs_qsub = {"path":        kwargs.get("job_path"),  # acts as PBSout                       
+                       "ngpus":       ngpus, 
+                       "ncpus":       ncpus, 
+                       "select":      select,
+                       "walltime":    walltime,
+                       "mem":         mem,
+                       "nstack":      nstack                       
+                       }        
+
+        kwargs_command = kwargs_qsub; del kwargs_command["path"]
+        kwargs_command["system"] = system
+
+        # ----- ARTEMIS -----
+        if system == 'ARTEMIS':            
+            # project names
+            kwargs_qsub["P"] = PROJECTS[pidx]
+            print(PROJECTS[pidx])
+
+            if select * max(ncpus, ngpus) > 1:
+                # master_port += 1            
+                HOST_NODE_ADDR += 1
+
+            kwargs_command["HOST_NODE_ADDR"] = HOST_NODE_ADDR
+            kwargs_command["singularity_path"] = SPATH
+
+        # ----- PHYSICS -----
+        elif system == 'PHYSICS':
+            if ngpus >= 1:
+                kwargs_qsub["q"] = 'l40s'
+            else:
+                #kwargs_qsub["q"] = 'yossarian'
+                pass
+
+            kwargs_qsub["source"] = PHYSICS_SOURCE 
+            kwargs_qsub["conda"] = PHYSICS_CONDA
+
+        command, additional_command = command_setup_ddp(**kwargs_command)                
+
+        if len(additional_command) > 0:
+            kwargs_qsub["additional_command"] = additional_command
+
+        qsub(f'{command} {script_name}', pbs_array_true, **kwargs_qsub)   
+        print("\n")
+"""  

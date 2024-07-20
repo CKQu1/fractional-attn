@@ -135,7 +135,8 @@ def create_lra_path32_classification_dataset(cache_dir: Union[str, Path] = DEFAU
 	resolution = 32
 	dir_name = f'./.raw_datasets/lra_release/lra_release/pathfinder{resolution}'
 
-	dataset_obj = PathFinder(name, data_dir=dir_name, resolution=resolution)
+	kwargs = {'tokenize': True}  # Tokenize into vocabulary of 256 values.
+	dataset_obj = PathFinder(name, data_dir=dir_name, resolution=resolution, **kwargs)
 	dataset_obj.cache_dir = Path(cache_dir) / name
 	dataset_obj.setup()
 

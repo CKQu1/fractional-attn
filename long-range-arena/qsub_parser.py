@@ -91,11 +91,19 @@ END""")
 
     # ---------- end{ARTEMIS} ----------s
 
-    # ---------- begin{PHYSICS} ----------
+    # ---------- begin{PHYSICS1} ----------
     elif system == 'PHYSICS':
-        MAX_SUBJOBS = 100
+        MAX_SUBJOBS = 1000
         
         for i, pbs_array_data_point in enumerate(pbs_array_data):
+
+            # old args
+            # args=($(python -c "import sys;print(' '.join(map(str, {pbs_array_data_point})))"))
+            # echo "pbs_array_args = ${{args[*]}}"
+            # {command} ${{args}} {additional_command} {post_command}
+
+            args = ' '.join(map(str, pbs_array_data_point))
+            full_command = f'{command} {args} {additional_command} {post_command}'
 
             # https://stackoverflow.com/questions/2500436/how-does-cat-eof-work-in-bash
             PBS_SCRIPT = f"""<<eof
@@ -104,30 +112,129 @@ END""")
                 #PBS -q {kwargs.get('q','defaultQ')}
                 #PBS -V
                 #PBS -m n
-                #PBS -o {path}job -e {path}job
+                #PBS -o {path} -e {path}
                 #PBS -l select={kwargs.get('select',1)}:ncpus={kwargs.get('ncpus',1)}:mem={kwargs.get('mem','1GB')}{':ngpus='+str(kwargs['ngpus']) if 'ngpus' in kwargs else ''}
                 #PBS -l walltime={kwargs.get('walltime','23:59:00')}                       
-                ##PBS -J {MAX_SUBJOBS*i}-{MAX_SUBJOBS*i + len(pbs_array_data_point)-1}
-                args=($(python -c "import sys;print(' '.join(map(str, {pbs_array_data_point}[{i}])))"))
-                cd {kwargs.get('cd', '$PBS_O_WORKDIR')}
-                echo "pbs_array_args = ${{args[*]}}"
-                if [ {source_exists} ]; then
-                    source {kwargs.get('source')}
-                fi
-                if [ {conda_exists} ]; then
-                    conda activate {kwargs.get('conda')}
-                fi         
+                
+                #cd {kwargs.get('cd', '$PBS_O_WORKDIR')}
+                echo "pbs_array_args = ${args}"
+                # if [ {source_exists} ]; then
+                #     source {kwargs.get('source')}
+                # fi
+                # if [ {conda_exists} ]; then
+                #     conda activate {kwargs.get('conda')}
+                # fi         
 
-                # source /usr/physics/python/Anaconda3-2022.10/etc/profile.d/conda.sh
-                # conda activate frac_attn                                                        
-                {command} ${{args[*]}} {additional_command} {post_command}
+                cd fractional-attn/long-range-arena
+                source /usr/physics/python/Anaconda3-2022.10/etc/profile.d/conda.sh
+                conda activate frac_attn                                                        
+                {full_command}
                 exit
             eof"""
 
-        os.system(f'qsub {PBS_SCRIPT}')
-        #print(PBS_SCRIPT)
+            os.system(f'qsub {PBS_SCRIPT}')
+            #print(PBS_SCRIPT)
 
-        # ---------- end{PHYSICS} ----------
+    # ---------- end{PHYSICS1} ----------
+
+    # ---------- begin{PHYSICS2} ----------
+    # elif system == 'PHYSICS':
+    #     MAX_SUBJOBS = 1000
+        
+    #     # ##PBS -J {MAX_SUBJOBS*i}-{MAX_SUBJOBS*i + len(pbs_array_data_point)-1}
+    #     PBS_SCRIPT_TEMPLATE = f"""<<eof
+    #         #!/bin/bash
+    #         #PBS -N {kwargs.get('N', sys.argv[0] or 'job')}
+    #         #PBS -q {kwargs.get('q','defaultQ')}
+    #         #PBS -V
+    #         #PBS -m n
+    #         #PBS -o {path} -e {path}
+    #         #PBS -l select={kwargs.get('select',1)}:ncpus={kwargs.get('ncpus',1)}:mem={kwargs.get('mem','1GB')}{':ngpus='+str(kwargs['ngpus']) if 'ngpus' in kwargs else ''}
+    #         #PBS -l walltime={kwargs.get('walltime','23:59:00')}                                   
+            
+
+    #         #cd {kwargs.get('cd', '$PBS_O_WORKDIR')}            
+    #         # if [ {source_exists} ]; then source {kwargs.get('source')} ; fi;
+    #         # if [ {conda_exists} ]; then conda activate {kwargs.get('conda')} ; fi;    
+    #         cd fractional-attn/long-range-arena
+    #         source /usr/physics/python/Anaconda3-2022.10/etc/profile.d/conda.sh
+    #         conda activate frac_attn                                                        
+    #         """
+    #     PBS_SCRIPT_END = '\n echo "pbs_array_args = ${args}" \n exit \n eof'
+
+    #     PBS_SCRIPT = ''
+    #     for i, pbs_array_data_point in enumerate(pbs_array_data):
+
+    #         # old args
+    #         # args=($(python -c "import sys;print(' '.join(map(str, {pbs_array_data_point})))"))
+    #         # echo "pbs_array_args = ${{args[*]}}"
+    #         # {command} ${{args}} {additional_command} {post_command}
+
+    #         args = ' '.join(map(str, pbs_array_data_point))
+
+    #         # https://stackoverflow.com/questions/2500436/how-does-cat-eof-work-in-bash            
+
+    #         full_command = f'\n {command} {args} {additional_command} {post_command}'
+    #         if len(PBS_SCRIPT) == 0:
+    #             PBS_SCRIPT = PBS_SCRIPT_TEMPLATE + full_command
+    #         else:
+    #             PBS_SCRIPT += full_command
+
+    #         if i == len(pbs_array_data) - 1 or (i % nstack == nstack - 1):                                
+    #             PBS_SCRIPT += PBS_SCRIPT_END
+
+    #             os.system(f'qsub {PBS_SCRIPT}')
+    #             #print(PBS_SCRIPT)
+
+    #             PBS_SCRIPT = ''            
+                                
+    # ---------- end{PHYSICS2} ----------
+
+    # ---------- begin{PHYSICS3} ----------
+    # elif system == 'PHYSICS':
+    #     MAX_SUBJOBS = 1000
+    #     # PBS array jobs are limited to 1000 subjobs by default
+    #     pbs_array_data_chunks = [pbs_array_data[x:x+MAX_SUBJOBS]
+    #                              for x in range(0, len(pbs_array_data), MAX_SUBJOBS)]
+    #     if len(pbs_array_data_chunks[-1]) == 1:  # array jobs must have length >1
+    #         pbs_array_data_chunks[-1].insert(0, pbs_array_data_chunks[-2].pop())
+    #     for i, pbs_array_data_chunk in enumerate(pbs_array_data_chunks):
+        
+    #         # old args          
+    #         # args=($(python -c "import sys;print(' '.join(map(str, {pbs_array_data_point})))"))  
+    #         # echo "pbs_array_args = ${{args[*]}}"
+    #         # {command} ${{args}} {additional_command} {post_command}
+
+    #         # https://stackoverflow.com/questions/2500436/how-does-cat-eof-work-in-bash
+    #         PBS_SCRIPT = f"""<<eof
+    #             #!/bin/bash
+    #             #PBS -N {kwargs.get('N', sys.argv[0] or 'job')}
+    #             #PBS -q {kwargs.get('q','defaultQ')}
+    #             #PBS -V
+    #             #PBS -m n
+    #             #PBS -o {path} -e {path}
+    #             #PBS -l select={kwargs.get('select',1)}:ncpus={kwargs.get('ncpus',1)}:mem={kwargs.get('mem','1GB')}{':ngpus='+str(kwargs['ngpus']) if 'ngpus' in kwargs else ''}
+    #             #PBS -l walltime={kwargs.get('walltime','23:59:00')}                       
+    #             #PBS -J {MAX_SUBJOBS*i}-{MAX_SUBJOBS*i + len(pbs_array_data_chunk)-1}                                
+
+    #             args=($(python -c $PBS_ARRAY_INDEX "import sys;print(' '.join(map(str, {pbs_array_data_chunk}[int(sys.argv[1])-{MAX_SUBJOBS*i}])))"))
+
+    #             cd {kwargs.get('cd', '$PBS_O_WORKDIR')}
+    #             echo "pbs_array_args = ${{args[*]}}"     
+
+    #             # cd fractional-attn/long-range-arena
+    #             source /usr/physics/python/Anaconda3-2022.10/etc/profile.d/conda.sh
+    #             conda activate frac_attn                                                        
+    #             {command} ${{args[*]}} {additional_command} {post_command}
+    #             exit
+    #         eof"""
+
+    #     os.system(f'qsub {PBS_SCRIPT}')
+    #     #print(PBS_SCRIPT)
+
+    # ---------- end{PHYSICS3} ----------
+
+
 
 def job_setup(script_name, kwargss, **kwargs):
 

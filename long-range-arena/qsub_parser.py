@@ -7,6 +7,7 @@ from constants import BPATH
 from mutils import njoin
 
 def qsub(command, pbs_array_data, **kwargs):
+    global pbs_array_data_chunks
 
     system = kwargs.get('system')
     nstack = kwargs.get('nstack', 1)
@@ -50,9 +51,14 @@ END""")
     pbs_array_data = random.sample(pbs_array_data, len(pbs_array_data))
     # Submit array job.
     print(f"Submitting {len(pbs_array_data)} subjobs")
+
+    if system == 'ARTEMIS':
+        subjobs_limit = 1000
+    elif system == 'PHYSICS':
+        subjobs_limit = 100
     # PBS array jobs are limited to 1000 subjobs by default
-    pbs_array_data_chunks = [pbs_array_data[x:x+1000]
-                             for x in range(0, len(pbs_array_data), 1000)]
+    pbs_array_data_chunks = [pbs_array_data[x:x+subjobs_limit]
+                             for x in range(0, len(pbs_array_data), subjobs_limit)]
     if len(pbs_array_data_chunks[-1]) == 1:  # array jobs must have length >1
         pbs_array_data_chunks[-1].insert(0, pbs_array_data_chunks[-2].pop())
     for i, pbs_array_data_chunk in enumerate(pbs_array_data_chunks):
@@ -69,8 +75,8 @@ END""")
                 #PBS -o {path}job -e {path}job
                 #PBS -l select={kwargs.get('select',1)}:ncpus={kwargs.get('ncpus',1)}:mem={kwargs.get('mem','1GB')}{':ngpus='+str(kwargs['ngpus']) if 'ngpus' in kwargs else ''}
                 #PBS -l walltime={kwargs.get('walltime','23:59:00')}
-                #PBS -J {1000*i}-{1000*i + len(pbs_array_data_chunk)-1}
-                args=($(python -c "import sys;print(' '.join(map(str, {pbs_array_data_chunk}[int(sys.argv[1])-{1000*i}])))" $PBS_ARRAY_INDEX))
+                #PBS -J {subjobs_limit*i}-{subjobs_limit*i + len(pbs_array_data_chunk)-1}
+                args=($(python -c "import sys;print(' '.join(map(str, {pbs_array_data_chunk}[int(sys.argv[1])-{subjobs_limit*i}])))" $PBS_ARRAY_INDEX))
                 cd {kwargs.get('cd', '$PBS_O_WORKDIR')}
                 echo "pbs_array_args = ${{args[*]}}"
                 #if [ {source_exists} ]; then
@@ -81,10 +87,11 @@ END""")
                 #fi
                 {command} ${{args[*]}} {additional_command} {post_command}
     END"""
-        # ---------- end{ARTEMIS} ----------
+        # ---------- end{ARTEMIS} ----------s
 
         # ---------- begin{PHYSICS} ----------
         elif system == 'PHYSICS':
+            # https://stackoverflow.com/questions/2500436/how-does-cat-eof-work-in-bash
             PBS_SCRIPT = f"""<<eof
                 #!/bin/bash
                 #PBS -N {kwargs.get('N', sys.argv[0] or 'job')}
@@ -93,9 +100,9 @@ END""")
                 #PBS -m n
                 #PBS -o {path}job -e {path}job
                 #PBS -l select={kwargs.get('select',1)}:ncpus={kwargs.get('ncpus',1)}:mem={kwargs.get('mem','1GB')}{':ngpus='+str(kwargs['ngpus']) if 'ngpus' in kwargs else ''}
-                #PBS -l walltime={kwargs.get('walltime','23:59:00')}
-                #PBS -J {1000*i}-{1000*i + len(pbs_array_data_chunk)-1}                             
-                args=($(python -c "import sys;print(' '.join(map(str, {pbs_array_data_chunk}[int(sys.argv[1])-{1000*i}])))" $PBS_ARRAY_INDEX))
+                #PBS -l walltime={kwargs.get('walltime','23:59:00')}    
+                ##PBS -J {subjobs_limit*i}-{subjobs_limit*i + len(pbs_array_data_chunk)-1}                       
+                args=($(python -c "import sys;print(' '.join(map(str, {pbs_array_data_chunk}[int(sys.argv[1])-{subjobs_limit*i}])))" $PBS_ARRAY_INDEX))
                 cd {kwargs.get('cd', '$PBS_O_WORKDIR')}
                 echo "pbs_array_args = ${{args[*]}}"
                 # if [ {source_exists} ]; then
@@ -112,8 +119,8 @@ END""")
             eof"""
         # ---------- end{PHYSICS} ----------
 
-        os.system(f'qsub {PBS_SCRIPT}')
-        #print(PBS_SCRIPT)
+        #os.system(f'qsub {PBS_SCRIPT}')
+        print(PBS_SCRIPT)
 
 def add_common_kwargs(kwargss, common_kwargs):
     for i in range(len(kwargss)):

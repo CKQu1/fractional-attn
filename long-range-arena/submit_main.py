@@ -7,75 +7,7 @@ from constants import *
 from mutils import njoin, get_instance, structural_model_root
 from qsub_parser import command_setup_ddp, qsub, job_divider
 from qsub_parser import add_common_kwargs, get_pbs_array_data
-
-def train_submit(script_name, kwargss, **kwargs):
-
-    assert isfile(script_name), f"{script_name} does not exist!"
-
-    # system
-    system = kwargs.get('system')
-    nstack = kwargs.get('nstack', 1)
-
-    # computing resource settings
-    ncpus = kwargs.get('ncpus', 1) 
-    ngpus = kwargs.get('ngpus', 0)
-    select = kwargs.get('select', 1)  # number of nodes    
-    walltime = kwargs.get('walltime', '23:59:59')
-    mem = kwargs.get('mem', '8GB')            
-    
-    pbs_array_data = get_pbs_array_data(kwargss)     
-    if system == 'ARTEMIS':   
-        perm, pbss = job_divider(pbs_array_data, len(PROJECTS))
-    elif system == 'PHYSICS':
-        perm, pbss = job_divider(pbs_array_data, 1)  # not need for projects
-
-    #master_port = 0
-    HOST_NODE_ADDR = 0
-    for idx, pidx in enumerate(perm):
-        pbs_array_true = pbss[idx]        
-        kwargs_qsub = {"path":        kwargs.get("job_path"),  # acts as PBSout                       
-                       "ngpus":       ngpus, 
-                       "ncpus":       ncpus, 
-                       "select":      select,
-                       "walltime":    walltime,
-                       "mem":         mem,
-                       "nstack":      nstack                       
-                       }        
-
-        kwargs_command = kwargs_qsub; del kwargs_command["path"]
-        kwargs_command["system"] = system
-
-        # ----- ARTEMIS -----
-        if system == 'ARTEMIS':            
-            # project names
-            kwargs_qsub["P"] = PROJECTS[pidx]
-            print(PROJECTS[pidx])
-
-            if select * max(ncpus, ngpus) > 1:
-                # master_port += 1            
-                HOST_NODE_ADDR += 1
-
-            kwargs_command["HOST_NODE_ADDR"] = HOST_NODE_ADDR
-            kwargs_command["singularity_path"] = SPATH
-
-        # ----- PHYSICS -----
-        elif system == 'PHYSICS':
-            if ngpus >= 1:
-                kwargs_qsub["q"] = 'l40s'
-            else:
-                #kwargs_qsub["q"] = 'yossarian'
-                pass
-
-            kwargs_qsub["source"] = '/usr/physics/python/Anaconda3-2022.10/etc/profile.d/conda.csh' 
-            kwargs_qsub["conda"] = 'frac_attn'
-
-        command, additional_command = command_setup_ddp(**kwargs_command)                
-
-        if len(additional_command) > 0:
-            kwargs_qsub["additional_command"] = additional_command
-
-        qsub(f'{command} {script_name}', pbs_array_true, **kwargs_qsub)   
-        print("\n")
+from qsub_parser import job_setup
 
 if __name__ == '__main__':
     
@@ -83,15 +15,10 @@ if __name__ == '__main__':
     system = 'ARTEMIS' if 'project' in DROOT else 'PHYSICS'    
     date_str = datetime.today().strftime('%Y-%m-%d')    
     script_name = "main.py"  
-    nstack = 1
-    
-    # ----- Dataset -----
-    dataset_epochs = {'imdb-classification':5, 'lra-cifar-classification':100,
-                      'listops-classification':5, 'aan-classification':5,
-                      'pathfinder-classification':5, 'pathx-classification':5}
+    nstack = 1    
     
     # ----- Paths -----
-    ROOT = njoin(DROOT, 'trained_models')
+    ROOT = njoin(DROOT, 'qsub_test2')
     job_path = njoin(ROOT, 'jobs_all', date_str)
     if not isdir(job_path): makedirs(job_path)
 
@@ -102,7 +29,7 @@ if __name__ == '__main__':
         #for didx, dataset_name in enumerate(DATASET_NAMES):
         #for didx, dataset_name in enumerate(DATASET_NAMES[1:3]):
         for didx, dataset_name in enumerate(DATASET_NAMES[2:3]):
-            select = 1; ngpus, ncpus = 1, 0                            
+            select = 1; ngpus, ncpus = 0, 1                            
             walltime, mem = '23:59:59', '8GB'                                         
             num_proc = ngpus if ngpus > 1 else ncpus
                         
@@ -122,7 +49,7 @@ if __name__ == '__main__':
                 # kwargss.append({'model_name':'sinkformer', 'n_it': 3})
                 # kwargss.append({'model_name':'dpformer'})
 
-                #epochs = dataset_epochs[dataset_name]
+                #epochs = DATASET_EPOCHS[dataset_name]
                 epochs = None                                                              
                 common_kwargs = {'instance':            instance,
                                 'qk_share':             qk_share,
@@ -167,13 +94,32 @@ if __name__ == '__main__':
     # for xx in kwargss_all:
     #     print(xx)  
     #     print('\n')
-    #quit()  # delete      
-    train_submit(script_name, kwargss_all,
-                 ncpus=ncpus,
-                 ngpus=ngpus,
-                 select=select, 
-                 walltime=walltime,
-                 mem=mem,
-                 job_path=job_path,
-                 nstack=nstack,
-                 system=system)
+    #quit()  # delete     
+     
+    # ----- version 1 ----- 
+    # train_submit(script_name, kwargss_all,
+    #              ncpus=ncpus,
+    #              ngpus=ngpus,
+    #              select=select, 
+    #              walltime=walltime,
+    #              mem=mem,
+    #              job_path=job_path,
+    #              nstack=nstack,
+    #              system=system)
+
+
+    # ----- verion 2 -----
+
+    commands, script_names, pbs_array_trues, kwargs_qsubs =\
+            job_setup(script_name, kwargss_all,
+                    ncpus=ncpus,
+                    ngpus=ngpus,
+                    select=select, 
+                    walltime=walltime,
+                    mem=mem,
+                    job_path=job_path,
+                    nstack=nstack,
+                    system=system)
+
+    for i in range(len(commands)):
+        qsub(f'{command} {script_name}', pbs_array_true, **kwargs_qsub)      

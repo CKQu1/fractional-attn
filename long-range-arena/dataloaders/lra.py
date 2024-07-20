@@ -546,7 +546,8 @@ class PathFinder(ImageResolutionSequenceDataset):
 
     @property
     def _cache_dir_name(self):
-        return f"pathfinder-resolution-{self.resolution}"
+        #return f"pathfinder-resolution-{self.resolution}"
+        return f"pathfinder-resolution-{self.resolution}-tokenize-{self.tokenize}"
 
 
 class AAN(SequenceDataset):

@@ -18,7 +18,7 @@ if __name__ == '__main__':
     nstack = 1    
     
     # ----- Paths -----
-    ROOT = njoin(DROOT, 'full_model')
+    ROOT = njoin(DROOT, 'single_head-full_model')
     job_path = njoin(ROOT, 'jobs_all', date_str)
     if not isdir(job_path): makedirs(job_path)
 
@@ -26,8 +26,8 @@ if __name__ == '__main__':
     instances = [0]
     kwargss_all = []    
 
-    DATASET_NAMES = ['imdb-classification', 'lra-cifar-classification',
-                     'listops-classification', 'pathfinder-classification']  
+    DATASET_NAMES = ['imdb-classification', 'lra-cifar-classification', 'pathfinder-classification' 
+                     'listops-classification']  # 
     for instance in instances:        
         for didx, dataset_name in enumerate(DATASET_NAMES):
         #for didx, dataset_name in enumerate(DATASET_NAMES[0:1]):
@@ -44,12 +44,13 @@ if __name__ == '__main__':
                     #for alpha in [1, 1.2, 1.4, 1.6, 1.8, 2]:
                     for alpha in [1.2, 1.6, 2]:
                         #for bandwidth in [0.01, 0.1, 0.5, 1]:
-                        for bandwidth in [0.01, 0.1, 1]:
-                        #for bandwidth in [0.1]:
+                        #for bandwidth in [0.01, 0.1, 1]:
+                        for bandwidth in [1]:
                             kwargss.append({'model_name':model_name, 'alpha': alpha, 'a': 0,'bandwidth':bandwidth,'manifold':'sphere'})
 
                 kwargss.append({'model_name':'sinkformer', 'n_it': 1})
                 kwargss.append({'model_name':'sinkformer', 'n_it': 3})
+
                 kwargss.append({'model_name':'dpformer'})
 
                 #epochs = DATASET_EPOCHS[dataset_name]
@@ -121,14 +122,14 @@ if __name__ == '__main__':
 
     commands, script_names, pbs_array_trues, kwargs_qsubs =\
             job_setup(script_name, kwargss_all,
-                    ncpus=ncpus,
-                    ngpus=ngpus,
-                    select=select, 
-                    walltime=walltime,
-                    mem=mem,
-                    job_path=job_path,
-                    nstack=nstack,
-                    system=system)
-
+                     ncpus=ncpus,
+                     ngpus=ngpus,
+                     select=select, 
+                     walltime=walltime,
+                     mem=mem,
+                     job_path=job_path,
+                     nstack=nstack,
+                     system=system)
+    
     for i in range(len(commands)):
-        qsub(f'{commands[i]} {script_names[i]}', pbs_array_trues[i], **kwargs_qsubs[i])      
+        qsub(f'{commands[i]} {script_names[i]}', pbs_array_trues[i], path=job_path, **kwargs_qsubs[i])      

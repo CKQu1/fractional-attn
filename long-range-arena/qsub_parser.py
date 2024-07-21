@@ -86,8 +86,8 @@ END""")
                 {command} ${{args[*]}} {additional_command} {post_command}
     END"""        
 
-        os.system(f'qsub {PBS_SCRIPT}')
-        #print(PBS_SCRIPT)
+            os.system(f'qsub {PBS_SCRIPT}')
+            #print(PBS_SCRIPT)
 
     # ---------- end{ARTEMIS} ----------s
 

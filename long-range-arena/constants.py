@@ -37,9 +37,9 @@ DATASET_NAMES = ['imdb-classification', 'lra-cifar-classification',
                  'listops-classification', 'aan-classification',
                  'pathfinder-classification', 'pathx-classification']     
 
-DATASET_EPOCHS = {'imdb-classification':5, 'lra-cifar-classification':100,
-                  'listops-classification':5, 'aan-classification':5,
-                  'pathfinder-classification':5, 'pathx-classification':5}                
+DATASET_EPOCHS = {'imdb-classification':20, 'lra-cifar-classification':200,
+                  'listops-classification':20, 'aan-classification':20,
+                  'pathfinder-classification':200, 'pathx-classification':200}                
 
 DATASET_STEPS = {'imdb-classification':100000, 'lra-cifar-classification':100000,
                   'listops-classification':500000, 'aan-classification':500000,

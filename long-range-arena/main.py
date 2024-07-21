@@ -151,7 +151,7 @@ if __name__ == '__main__':
             args.num_encoder_layers = 6 # IMMUTABLE
             args.intermediate_size = 2048 # IMMUTABLE
             args.pooling_mode = 'CLS' # Pooling not currently done in non-retrieval model
-            args.max_iter = 5000 # Can probably change this
+            args.max_iters = 5000 # Can probably change this
         elif args.dataset_name == 'imdb-classification':
             args.hidden_size = 512 # IMMUTABLE
             if not args.force_num_heads:
@@ -160,7 +160,10 @@ if __name__ == '__main__':
             args.intermediate_size = 2048 # IMMUTABLE
             args.pooling_mode = 'CLS'
             args.num_classifier_layers = 2 # 2-layer MLP
-            args.max_iter = 20000 # Can probably change this
+
+            args.max_iters = 20000 # Can probably change this
+            args.eval_interval = 500
+            args.log_interval = 500
         elif args.dataset_name == 'aan-classification':
             args.hidden_size = 128 # IMMUTABLE
             if not args.force_num_heads:
@@ -169,7 +172,9 @@ if __name__ == '__main__':
             args.intermediate_size = 512 # IMMUTABLE
             args.pooling_mode = 'CLS'
             args.interaction = 'NLI'
-            args.max_iter = 5000 # Can probably change this
+            args.max_iters = 5000 # Can probably change this
+            args.eval_interval = 10
+            args.log_interval = 10            
         elif args.dataset_name == 'lra-cifar-classification':
             args.hidden_size = 64 # IMMUTABLE
             if not args.force_num_heads:
@@ -219,8 +224,7 @@ if __name__ == '__main__':
     bias = False # do we use bias inside LayerNorm and Linear layers?
     
     config = {
-        "model_name": model_name,
-        "sphere_radius": args.sphere_radius,
+        "model_name": model_name,        
         "hidden_size": args.hidden_size,
         "num_encoder_layers": args.num_encoder_layers,
         "num_heads": args.num_heads,
@@ -437,6 +441,12 @@ if __name__ == '__main__':
                               device_name
                               ]
     train_settings.to_csv(njoin(out_dir, "train_setting.csv")) 
+
+    # ----- Message -----
+    print(config)
+    print('\n')
+    print(train_settings)
+    # -------------------
 
     def get_batch(split):
         """Get batch from data iterator. Returns:

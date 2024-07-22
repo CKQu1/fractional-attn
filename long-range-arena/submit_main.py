@@ -18,7 +18,7 @@ if __name__ == '__main__':
     nstack = 1    
     
     # ----- Paths -----
-    ROOT = njoin(DROOT, 'single_head-full_model')
+    ROOT = njoin(DROOT, 'fns-debug')
     job_path = njoin(ROOT, 'jobs_all', date_str)
     if not isdir(job_path): makedirs(job_path)
 
@@ -26,8 +26,7 @@ if __name__ == '__main__':
     instances = [0]
     kwargss_all = []    
 
-    DATASET_NAMES = ['imdb-classification', 'lra-cifar-classification', 'pathfinder-classification' 
-                     'listops-classification']  # 
+    DATASET_NAMES = ['imdb-classification']  # , 'lra-cifar-classification', 'pathfinder-classification', 'listops-classification'
     for instance in instances:        
         for didx, dataset_name in enumerate(DATASET_NAMES):
         #for didx, dataset_name in enumerate(DATASET_NAMES[0:1]):
@@ -39,25 +38,25 @@ if __name__ == '__main__':
             for qk_share in [True]:
                 kwargss = []
 
-                for model_name in ['fnsformer', 'opfnsformer']:
+                for model_name in ['fnsformer']:  # 'opfnsformer'
                 #for model_name in ['fnsformer']:
                     #for alpha in [1, 1.2, 1.4, 1.6, 1.8, 2]:
-                    for alpha in [1.2, 1.6, 2]:
+                    for alpha in [1.2, 2]:
                         #for bandwidth in [0.01, 0.1, 0.5, 1]:
                         #for bandwidth in [0.01, 0.1, 1]:
                         for bandwidth in [1]:
                             kwargss.append({'model_name':model_name, 'alpha': alpha, 'a': 0,'bandwidth':bandwidth,'manifold':'sphere'})
 
-                kwargss.append({'model_name':'sinkformer', 'n_it': 1})
-                kwargss.append({'model_name':'sinkformer', 'n_it': 3})
+                # kwargss.append({'model_name':'sinkformer', 'n_it': 1})
+                # kwargss.append({'model_name':'sinkformer', 'n_it': 3})
 
-                kwargss.append({'model_name':'dpformer'})
+                # kwargss.append({'model_name':'dpformer'})
 
                 #epochs = DATASET_EPOCHS[dataset_name]
                 epochs = None                                                              
                 common_kwargs = {'instance':            instance,
                                 'qk_share':             qk_share,
-                                'num_encoder_layers':   1,
+                                'num_encoder_layers':   2,
                                 'num_heads':            1,                      
                                 'train_bs':             16,   
                                 'eval_bs':              16,                                                                       
@@ -76,9 +75,9 @@ if __name__ == '__main__':
                         common_kwargs['epochs'] = epochs
                         #common_kwargs['eval_iters'] = 250
                     else:
-                        common_kwargs['max_iters'] = 50
-                        common_kwargs['eval_interval'] = 10
-                        common_kwargs['eval_iters'] = 50                
+                        common_kwargs['max_iters'] = 10000
+                        common_kwargs['log_interval'] = common_kwargs['eval_interval'] = 200
+                        common_kwargs['eval_iters'] = 0                
                 
                 # if num_proc > 1:
                 #     common_kwargs['grad_accum_step'] = num_proc * 2

@@ -134,7 +134,7 @@ if __name__ == '__main__':
     parser.add_argument('--qk_share', type=str2bool, nargs='?', const=True, default=False)
     parser.add_argument('--qkv_bias', default=False, type=bool)
     parser.add_argument('--use_faster_attn', default=True, type=bool)
-    parser.add_argument('--pooling_mode', default='MEAN', type=str)
+    parser.add_argument('--pooling_mode', default=None, type=str)
     parser.add_argument('--interaction', default='none', type=str) # 'NLI' = NLI, else not
     
     # CHANGES HERE
@@ -150,7 +150,8 @@ if __name__ == '__main__':
                 args.num_heads = 8 
             args.num_encoder_layers = 6 # IMMUTABLE
             args.intermediate_size = 2048 # IMMUTABLE
-            args.pooling_mode = 'CLS' # Pooling not currently done in non-retrieval model
+            #args.pooling_mode = 'CLS' # Pooling not currently done in non-retrieval model
+            args.pooling_model = None
             args.max_iters = 5000 # Can probably change this
         elif args.dataset_name == 'imdb-classification':
             args.hidden_size = 512 # IMMUTABLE
@@ -158,7 +159,8 @@ if __name__ == '__main__':
                 args.num_heads = 8 
             args.num_encoder_layers = 6 # IMMUTABLE
             args.intermediate_size = 2048 # IMMUTABLE
-            args.pooling_mode = 'CLS'
+            #args.pooling_mode = 'CLS'
+            args.pooling_model = None
             args.num_classifier_layers = 2 # 2-layer MLP
 
             args.max_iters = 20000 # Can probably change this
@@ -204,7 +206,8 @@ if __name__ == '__main__':
     
     eval_interval = args.eval_interval
     log_interval = args.log_interval
-    eval_iters = args.eval_iters
+    if args.eval_iters != 0
+        eval_iters = args.eval_iters
     eval_only = args.eval_only # if True, script exits right after the first eval
     always_save_checkpoint = args.always_save_checkpoint # if True, always save a checkpoint after each eval
     init_from = args.init_from
@@ -366,7 +369,7 @@ if __name__ == '__main__':
     # Create dataset...
     trainloader, valloader, testloader, num_classes, seq_len, in_dim, train_size, vocab_size = \
         create_dataset_fn(cache_dir=args.cache_dir, seed=args.seed, train_bs=train_batch_size, eval_bs=eval_batch_size)
-    eval_size = len(testloader)  
+    eval_size = len(testloader.dataset)  
 
     # ----- DOUBLE-CHECK -----
     # if 'path' in args.dataset_name and vocab_size is None:

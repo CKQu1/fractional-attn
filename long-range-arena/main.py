@@ -369,7 +369,7 @@ if __name__ == '__main__':
     trainloader, valloader, testloader, num_classes, seq_len, in_dim, train_size, vocab_size = \
         create_dataset_fn(cache_dir=args.cache_dir, seed=args.seed, train_bs=train_batch_size, eval_bs=eval_batch_size)
     eval_size = len(testloader.dataset)  
-    if args.eval_iters != 0
+    if args.eval_iters != 0:
         eval_iters = args.eval_iters
         #train_iters = eval_iters        
     else:

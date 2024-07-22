@@ -206,8 +206,7 @@ if __name__ == '__main__':
     
     eval_interval = args.eval_interval
     log_interval = args.log_interval
-    if args.eval_iters != 0
-        eval_iters = args.eval_iters
+
     eval_only = args.eval_only # if True, script exits right after the first eval
     always_save_checkpoint = args.always_save_checkpoint # if True, always save a checkpoint after each eval
     init_from = args.init_from
@@ -370,6 +369,12 @@ if __name__ == '__main__':
     trainloader, valloader, testloader, num_classes, seq_len, in_dim, train_size, vocab_size = \
         create_dataset_fn(cache_dir=args.cache_dir, seed=args.seed, train_bs=train_batch_size, eval_bs=eval_batch_size)
     eval_size = len(testloader.dataset)  
+    if args.eval_iters != 0
+        eval_iters = args.eval_iters
+        #train_iters = eval_iters        
+    else:
+        eval_iters = min(eval_size // eval_batch_size, train_size // train_batch_size)
+        #train_iters = train_size // train_batch_size
 
     # ----- DOUBLE-CHECK -----
     # if 'path' in args.dataset_name and vocab_size is None:

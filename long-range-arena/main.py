@@ -9,7 +9,7 @@ import time
 import torch.nn as nn
 import torch.nn.functional as F
 from contextlib import nullcontext
-from os.path import isfile
+from os.path import isfile, isdir
 import math
 
 import numpy as np
@@ -246,46 +246,6 @@ if __name__ == '__main__':
     assert config["hidden_size"] % config["num_heads"] == 0
     #assert config['intermediate_size'] == 4 * config['hidden_size']
 
-    instance = int(args.instance) if args.instance.lower() != 'none' else None
-    attn_setup = {'qk_share': args.qk_share, 'qkv_bias': args.qkv_bias}
-    if instance is not None:
-        attn_setup['instance'] = instance    
-    attn_setup['dataset_name'] = args.dataset_name    
-    if 'fnsformer' in model_name:
-        attn_setup['manifold'] = args.manifold
-        config['alpha'] = attn_setup['alpha'] = args.alpha      
-        config['bandwidth'] = attn_setup['bandwidth'] = args.bandwidth          
-        config['a'] = attn_setup['a'] = args.a
-        if args.manifold == 'sphere':
-
-            if args.alpha < 2:
-                config['d_intrinsic'] = attn_setup['d_intrinsic'] = args.hidden_size//args.num_heads - 1
-                config['sphere_radius'] = ((np.pi**(1/config['d_intrinsic'])-1)/np.pi)   
-                #config.sphere_radius = 1                
-            elif args.alpha >= 2:
-                config['sphere_radius'] = attn_setup['d_intrinsic'] = 1                 
-        
-            # mask for distance
-            config['mask_val'] = attn_setup['mask_val'] = config['sphere_radius'] * np.pi
-            attn_setup['sphere_radius'] = config['sphere_radius']   
-
-            model_name = 'sp' + model_name
-
-        elif args.manifold == 'rd':
-            if args.alpha < 2:
-                config['d_intrinsic'] = attn_setup['d_intrinsic'] = args.hidden_size//args.num_heads  # head_dim                
-            config['mask_val'] = 1e9
-
-            model_name = 'rd' + model_name
-
-        # degree index
-        config['a'] = attn_setup['a'] = args.a       
-    elif model_name == 'sinkformer':
-        config['n_it'] = attn_setup['n_it'] = args.n_it
-        config['bandwidth'] = attn_setup['bandwidth'] = args.bandwidth           
-
-    config['model_name'] = attn_setup['model_name'] = model_name
-
     # adamw optimizer
     learning_rate = args.max_lr  # max learning rate
     epochs = args.epochs
@@ -325,18 +285,7 @@ if __name__ == '__main__':
                                            )       
         model_root = njoin(DROOT, 'ddp_formers', model_root)
     else:
-        model_root = args.model_root  
-    models_dir, out_dir = create_model_dir(model_root, **attn_setup)    
-    
-    # makedir of out_dir
-    os.makedirs(out_dir, exist_ok=True)
-
-    # save config
-    with open(njoin(out_dir,"config.json"), "w") as ofile: 
-        json.dump(config, ofile)   
-    # save attn_setup
-    with open(njoin(out_dir,"attn_setup.json"), "w") as ofile: 
-        json.dump(attn_setup, ofile)                      
+        model_root = args.model_root                 
 
     torch.manual_seed(1337)
     if torch.cuda.is_available():
@@ -388,6 +337,57 @@ if __name__ == '__main__':
     config["vocab_size"] = vocab_size
     config["padding_idx"] = 0
     
+    instance = int(args.instance) if args.instance.lower() != 'none' else None
+    attn_setup = {'qk_share': args.qk_share, 'qkv_bias': args.qkv_bias}
+    if instance is not None:
+        attn_setup['instance'] = instance    
+    attn_setup['dataset_name'] = args.dataset_name    
+    if 'fnsformer' in model_name:
+        attn_setup['manifold'] = args.manifold
+        config['alpha'] = attn_setup['alpha'] = args.alpha      
+        config['bandwidth'] = attn_setup['bandwidth'] = args.bandwidth          
+        config['a'] = attn_setup['a'] = args.a
+        if args.manifold == 'sphere':
+
+            if args.alpha < 2:
+                config['d_intrinsic'] = attn_setup['d_intrinsic'] = args.hidden_size//args.num_heads - 1
+                config['sphere_radius'] = ((np.pi**(1/config['d_intrinsic'])-1)/np.pi)   
+                #config.sphere_radius = 1                
+            elif args.alpha >= 2:
+                config['sphere_radius'] = attn_setup['d_intrinsic'] = 1                 
+        
+            # mask for distance
+            config['mask_val'] = attn_setup['mask_val'] = config['sphere_radius'] * np.pi
+            attn_setup['sphere_radius'] = config['sphere_radius']   
+
+            model_name = 'sp' + model_name
+
+        elif args.manifold == 'rd':
+            if args.alpha < 2:
+                config['d_intrinsic'] = attn_setup['d_intrinsic'] = args.hidden_size//args.num_heads  # head_dim                
+            config['mask_val'] = 1 / config["max_length"]
+
+            model_name = 'rd' + model_name
+
+        # degree index
+        config['a'] = attn_setup['a'] = args.a       
+    elif model_name == 'sinkformer':
+        config['n_it'] = attn_setup['n_it'] = args.n_it
+        config['bandwidth'] = attn_setup['bandwidth'] = args.bandwidth           
+
+    config['model_name'] = attn_setup['model_name'] = model_name
+
+    models_dir, out_dir = create_model_dir(model_root, **attn_setup)        
+    # makedir of out_dir
+    if not isdir(out_dir): os.makedirs(out_dir, exist_ok=True)    
+
+    # save config
+    with open(njoin(out_dir,"config.json"), "w") as ofile: 
+        json.dump(config, ofile)   
+    # save attn_setup
+    with open(njoin(out_dir,"attn_setup.json"), "w") as ofile: 
+        json.dump(attn_setup, ofile)   
+
     # Create fnsformer model; I don't anticipate we would need to run sinkformer
     # since its results on LRA are available.
     if init_from == 'scratch':
@@ -402,8 +402,7 @@ if __name__ == '__main__':
             print("Using ClassificationModel for {} task".format(dataset))
             model = ClassificationModel(config)
     model.to(device)
-    
-    
+        
     scaler = torch.cuda.amp.GradScaler(enabled=(dtype == 'float16'))
     loss_fn = nn.CrossEntropyLoss()
     optimizer = AdamW(model.parameters(), lr=learning_rate, betas=(beta1,beta2), weight_decay=args.weight_decay)

@@ -1,14 +1,26 @@
 import os
 from mutils import njoin
 
-PROJECTS = ['phys_DL','PDLAI','dnn_maths','dyson','vortex_dl','frac_attn']
+# ----- ARTEMIS -----
+PROJECTS = ['phys_DL','PDLAI','dnn_maths','dyson','vortex_dl','frac_attn', 'ddl']
+# -------------------
 
-#DROOT = njoin(os.path.abspath(os.getcwd()), 'droot')
-DROOT = njoin('/project/frac_attn/fractional-attn/vit-pytorch', '.droot')
+# ----- PHYSICS -----
+PHYSICS_SOURCE = '/usr/physics/python/Anaconda3-2022.10/etc/profile.d/conda.sh'
+PHYSICS_CONDA = 'frac_attn'
+# -------------------
+
+# ----- PATHS -----
+RT = os.path.abspath(os.getcwd())
+if 'project' in RT:
+    DROOT = njoin('/project/frac_attn/fractional-attn/long-range-arena', '.droot')
+else:
+    DROOT = njoin(RT, '.droot')
+
 FIGS_DIR = njoin(DROOT, 'figs_dir')
 
 BPATH = njoin('/project')  # path for binding to singularity container
-SPATH = njoin('/project/frac_attn/built_containers/FaContainer_v3.sif')  # singularity container path
+SPATH = njoin('/project/frac_attn/built_containers/FaContainer_v5.sif')  # singularity container path
 
 MODEL_NAMES = ['fnsvit', 'opfnsvit', 'sinkvit', 'dpvit',
                'spfnsvit', 'spopfnsvit',

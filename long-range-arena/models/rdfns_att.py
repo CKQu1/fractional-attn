@@ -271,7 +271,7 @@ class FasterRDFNSMultiHeadAttention(nn.Module):
         attention_mask=None,
         output_attentions=False
     ):
-
+        torch.autograd.set_detect_anomaly(True)
         # Project the query, key, and value
         # (batch_size, sequence_length, hidden_size) -> (batch_size, sequence_length, all_head_size * 3)        
         #qkv = self.qkv_projection(x)
@@ -319,21 +319,35 @@ class FasterRDFNSMultiHeadAttention(nn.Module):
             batch_size, trg_sequence_length, num_attention_heads, attention_head_size
         ).transpose(1, 2)
 
-        # geodesic distance on R^d
-        eps = 1e-7  # for limiting the divergence from acos
+        # geodesic distance on R^d        
         if self.use_key:
             g_dist = torch.cdist(query, key)
         else:
             g_dist = torch.cdist(query, query)
 
-        if attention_mask is not None:
-            g_dist = g_dist.masked_fill_(attention_mask == 0, mask_val)
+        # print(f'g_dist: {torch.isnan(g_dist).sum()}')
+        # print(f'g_dist min: {g_dist.min()}')
+        # print(f'g_dist max: {g_dist.max()}')
+        # print('\n')
+
+        # if attention_mask is not None:
+        #     g_dist = g_dist.masked_fill_(attention_mask == 0, mask_val)
 
         # Calculate the attention scores
         if alpha < 2:
-            attn_score = (1 + g_dist / bandwidth**0.5) ** (-d_intrinsic - alpha)
+            #attn_score = (1 + g_dist / bandwidth**0.5) ** (-d_intrinsic - alpha)
+            attn_score = (1 + g_dist / math.sqrt(attention_head_size) / bandwidth**0.5) ** (-d_intrinsic - alpha)
         else:
-            attn_score = torch.exp((-g_dist / bandwidth**0.5) ** (alpha / (alpha - 1)))
+            #attn_score = torch.exp((-g_dist / bandwidth**0.5) ** (alpha / (alpha - 1)))
+            attn_score = torch.exp((-g_dist / math.sqrt(attention_head_size) / bandwidth**0.5) ** (alpha / (alpha - 1)))
+
+        # if attention_mask is not None:
+        #     attn_score = attn_score.masked_fill_(attention_mask == 0, mask_val)
+
+        # print(f'attn_score: {torch.isnan(attn_score).sum()}')
+        # print(f'attn_score min: {attn_score.min()}')
+        # print(f'attn_score max: {attn_score.max()}')
+        # print('\n')
 
         if a == 0:
             # attn_score = attn_score.masked_fill_(attention_mask.expand(-1,self.num_attention_heads,-1,-1)==0, -1e9) # Mask
@@ -350,13 +364,19 @@ class FasterRDFNSMultiHeadAttention(nn.Module):
             )  # inverse of degree matrix of attn_score
             K_tilde = D_inv_row @ attn_score @ D_inv_col
             # K_tilde = K_tilde.masked_fill_(attention_mask.expand(-1,self.num_attention_heads,-1,-1)==0, -1e9) # Mask
-            attention_probs = F.normalize(
-                K_tilde, p=1, dim=3
-            )  # can do this as the attn weights are always positive
             """
             N_R = attn_score.sum(-1)  # row sum
             N_C = attn_score.sum(-2)  # col sum                
             K_tilde = (N_R**(-a)).unsqueeze(-1) * attn_score * (N_C**(-a)).unsqueeze(-2) 
+
+            attention_probs = F.normalize(
+                K_tilde, p=1, dim=3
+            )  # can do this as the attn weights are always positive
+
+        # print(f'attention_probs: {torch.isnan(attention_probs).sum()}')
+        # print(f'attention_probs min: {attention_probs.min()}')
+        # print(f'attention_probs max: {attention_probs.max()}')
+        # print('\n')
 
         attention_probs = self.attn_dropout(attention_probs)
         

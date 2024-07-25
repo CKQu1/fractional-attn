@@ -125,7 +125,7 @@ END""")
                 #     conda activate {kwargs.get('conda')}
                 # fi         
 
-                cd fractional-attn/long-range-arena
+                cd fractional-attn/vit-pytorch
                 source /usr/physics/python/Anaconda3-2022.10/etc/profile.d/conda.sh
                 conda activate frac_attn                                                        
                 {full_command}
@@ -156,7 +156,7 @@ END""")
     #         #cd {kwargs.get('cd', '$PBS_O_WORKDIR')}            
     #         # if [ {source_exists} ]; then source {kwargs.get('source')} ; fi;
     #         # if [ {conda_exists} ]; then conda activate {kwargs.get('conda')} ; fi;    
-    #         cd fractional-attn/long-range-arena
+    #         cd fractional-attn/vit-pytorch
     #         source /usr/physics/python/Anaconda3-2022.10/etc/profile.d/conda.sh
     #         conda activate frac_attn                                                        
     #         """
@@ -222,7 +222,7 @@ END""")
     #             cd {kwargs.get('cd', '$PBS_O_WORKDIR')}
     #             echo "pbs_array_args = ${{args[*]}}"     
 
-    #             # cd fractional-attn/long-range-arena
+    #             # cd fractional-attn/vit-pytorch
     #             source /usr/physics/python/Anaconda3-2022.10/etc/profile.d/conda.sh
     #             conda activate frac_attn                                                        
     #             {command} ${{args[*]}} {additional_command} {post_command}

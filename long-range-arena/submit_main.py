@@ -18,7 +18,7 @@ if __name__ == '__main__':
     nstack = 1    
     
     # ----- Paths -----
-    ROOT = njoin(DROOT, 'fns-debug')
+    ROOT = njoin(DROOT, 'archi-test')
     job_path = njoin(ROOT, 'jobs_all', date_str)
     if not isdir(job_path): makedirs(job_path)
 
@@ -26,48 +26,49 @@ if __name__ == '__main__':
     instances = [0]
     kwargss_all = []    
 
-    DATASET_NAMES = ['imdb-classification']  # , 'lra-cifar-classification', 'pathfinder-classification', 'listops-classification'
+    # 'imdb-classification' , 'lra-cifar-classification', 'pathfinder-classification', 'listops-classification'
+    DATASET_NAMES = ['listops-classification']  
     for instance in instances:        
         for didx, dataset_name in enumerate(DATASET_NAMES):
         #for didx, dataset_name in enumerate(DATASET_NAMES[0:1]):
-            select = 1; ngpus, ncpus = 1, 0                            
-            walltime, mem = '23:59:59', '32GB'                                         
+            select = 1; ngpus, ncpus = 0, 1                           
+            walltime, mem = '23:59:59', '16GB'                                         
             num_proc = ngpus if ngpus > 1 else ncpus
                         
             #for qk_share in [True, False]:
             for qk_share in [True]:
                 kwargss = []
 
-                for model_name in ['fnsformer']:  # 'opfnsformer'
-                #for model_name in ['fnsformer']:
+                for model_name in ['opfnsformer']:  # 'fnsformer'                
                     #for alpha in [1, 1.2, 1.4, 1.6, 1.8, 2]:
                     for alpha in [1.2, 2]:
                         #for bandwidth in [0.01, 0.1, 0.5, 1]:
                         #for bandwidth in [0.01, 0.1, 1]:
                         for bandwidth in [1]:
-                            kwargss.append({'model_name':model_name, 'alpha': alpha, 'a': 0,'bandwidth':bandwidth,'manifold':'sphere'})
+                            for manifold in ['rd', 'sphere']:
+                                kwargss.append({'model_name':model_name, 'alpha': alpha, 'a': 0,'bandwidth':bandwidth,'manifold':manifold})
 
                 # kwargss.append({'model_name':'sinkformer', 'n_it': 1})
                 # kwargss.append({'model_name':'sinkformer', 'n_it': 3})
 
-                # kwargss.append({'model_name':'dpformer'})
+                kwargss.append({'model_name':'dpformer'})
 
                 #epochs = DATASET_EPOCHS[dataset_name]
-                epochs = None                                                              
+                epochs = 5                                                              
                 common_kwargs = {'instance':            instance,
                                 'qk_share':             qk_share,
-                                'num_encoder_layers':   2,
+                                'num_encoder_layers':   1,
                                 'num_heads':            1,                      
                                 'train_bs':             16,   
                                 'eval_bs':              16,                                                                       
                                 'weight_decay':         0,
-                                #'lr_scheduler_type':    'constant',
-                                'lr_scheduler_type':    'cosine',
+                                'lr_scheduler_type':    'constant',
+                                #'lr_scheduler_type':    'cosine',
                                 'max_lr':               1e-4,
                                 'min_lr':               1e-5,
                                 }  
                     
-                common_kwargs['apples_to_apples'] = True
+                common_kwargs['apples_to_apples'] = False
                 common_kwargs['force_num_heads'] = True
 
                 if not common_kwargs['apples_to_apples']:

@@ -1,4 +1,5 @@
 import os
+from datetime import datetime
 from os.path import isfile, isdir
 from time import sleep
 from constants import *
@@ -71,13 +72,19 @@ torchrun --nnodes=1 --nproc_per_node=2 ddp_main.py --max_iters=5 --eval_interval
 
 if __name__ == '__main__':
     
-    script_name = "ddp_main.py"       # script for running
+    # ----- System -----
+    system = 'ARTEMIS' if 'project' in DROOT else 'PHYSICS'    
+    date_str = datetime.today().strftime('%Y-%m-%d')    
+    script_name = "ddp_main.py"  
+    nstack = 1  
+
     dataset_names = ['cifar10']   # add or change datasets here    
     
     debug_mode = False
     print(f'---------- debug_mode = {debug_mode} ---------- \n')
     
     ROOT = njoin(DROOT, 'smallest-model')
+    job_path = njoin(ROOT, 'jobs_all', date_str)
 
     #instances = list(range(5))    
     instances = [0]

@@ -405,7 +405,7 @@ class DMFNSEncoder(nn.Module):
             return (x, all_attentions)
 
 
-class DMFNSViTForClassfication(nn.Module):
+class SPFNSViTForClassfication(nn.Module):
     """
     The ViT model for classification.
     """
@@ -425,8 +425,8 @@ class DMFNSViTForClassfication(nn.Module):
         # Initialize the weights
         self.apply(self._init_weights)
 
-    def forward(self, x, output_attentions=False):
-        # Calculate the embedding output
+    def forward(self, x, output_attentions=False):        
+        # Calculate the embedding output        
         embedding_output = self.embedding(x)
         # Calculate the encoder's output
         encoder_output, all_attentions = self.encoder(embedding_output, output_attentions=output_attentions)

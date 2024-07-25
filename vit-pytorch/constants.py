@@ -13,7 +13,7 @@ PHYSICS_CONDA = 'frac_attn'
 # ----- PATHS -----
 RT = os.path.abspath(os.getcwd())
 if 'project' in RT:
-    DROOT = njoin('/project/frac_attn/fractional-attn/long-range-arena', '.droot')
+    DROOT = njoin('/project/frac_attn/fractional-attn/vit-pytorch', '.droot')
 else:
     DROOT = njoin(RT, '.droot')
 

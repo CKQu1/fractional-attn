@@ -71,9 +71,6 @@ class SPFNSAttentionHead(nn.Module):
 
     def forward(self, x, encoder_output_states=None, attention_mask=None):
         if encoder_output_states is not None:
-            x = F.normalize(x, p=2, dim=-1)
-            encoder_output_states = F.normalize(encoder_output_states, p=2, dim=-1)
-
             assert (
                 self.is_cross_attention
             ), "Please make sure to instantiate class with `Attention(..., is_cross_attention=True)`."

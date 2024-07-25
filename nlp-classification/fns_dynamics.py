@@ -119,6 +119,9 @@ if __name__ == '__main__':
                     f = open(njoin(models_root, dirname, subdir,'attn_setup.json'))
                     attn_setup = json.load(f)
                     f.close()  
+                    f = open(njoin(models_root, dirname, subdir,'config.json'))
+                    config = json.load(f)
+                    f.close()  
                     alpha = attn_setup['alpha']
                     if alpha not in alphas:
                         alphas.append(alpha)
@@ -132,20 +135,26 @@ if __name__ == '__main__':
     for ii, dirname_idx in enumerate(dirname_idxs):
         model_dirs.append(njoin(models_root, dirnames[dirname_idx], model_instances[ii]))
     
+    num_hidden_layers = config['num_hidden_layers']
+    EDs = np.zeros([num_hidden_layers, len(alphas), len(epss)])
 
-    # Set up plots for later
-    #nrows, ncols = 2, len(epss)
+    # Set up plots for later    
     nrows, ncols = 1 + len(alphas), len(epss)
     figsize = (3*ncols,3*nrows)
-    fig, axs = plt.subplots(nrows,ncols,figsize=figsize,
-                            sharex=False,sharey=False)
-                            #sharex=True,sharey=True)          
-    if nrows == 1:
-        if ncols > 1:
-            axs = np.expand_dims(axs, axis=0)
-        else:
-            axs = np.expand_dims(axs, axis=[0,1])     
-    axs = axs.flatten()    
+
+    figs, axss = [], []
+    for _ in range(num_hidden_layers):
+        fig, axs = plt.subplots(nrows,ncols,figsize=figsize,
+                                sharex=False,sharey=False)
+                                #sharex=True,sharey=True)          
+        if nrows == 1:
+            if ncols > 1:
+                axs = np.expand_dims(axs, axis=0)
+            else:
+                axs = np.expand_dims(axs, axis=[0,1])     
+        axs = axs.flatten()    
+
+        figs.append(fig); axss.append(axs)
       
     row_labels = ['Uniform', 'Non-uniform']
     for model_idx, model_dir in enumerate(model_dirs):        
@@ -228,8 +237,7 @@ if __name__ == '__main__':
             train_dataset.set_format('torch')
             eval_dataset.set_format('torch')
 
-            # data
-            N_batch = 5
+            # data            
             dataset = attn_setup['dataset_name']
             #train_bs = int(train_setting.loc[0,'batch_size'])
             train_bs = 1
@@ -259,20 +267,23 @@ if __name__ == '__main__':
                 checkpoint_steps.append(int(subdir.split('-')[-1]))
         checkpoint = torch.load(njoin(model_dir, f'checkpoint-{checkpoint_steps[-1]}', 'pytorch_model.bin'), map_location=dev)
         model.load_state_dict(checkpoint)
-         
+        model.eval() 
 
+
+        N_batch = 4
+        c_clears = [0.5, 1]
+        markers = ['o', 'x']
         ###### 1. Compute geodesic distances and attention-score ######
 
         dist_mses = []
         seq_lens = train_dataset['attention_mask'].sum(-1)
         idxs_max = torch.argsort(seq_lens, descending=True)
-        #bidxs = list(idxs_max[:N_batch].numpy())
-        bidxs = [idxs_max[1].item()]
-
+        bidxs = list(idxs_max[:N_batch].numpy())
+        #bidxs = [idxs_max[1].item()]        
         for bidx in tqdm(bidxs):         
 
-        ###### 2. Extract single data-point only ######
-            X = train_dataset['input_ids'][bidx * train_bs : (bidx+1) * train_bs]  # batch_size must be one if jask is set to None
+            ###### 2. Extract single data-point only ######
+            X = train_dataset['input_ids'][bidx * train_bs : (bidx+1) * train_bs]  # batch_size must be one if mask is set to None
             Y = train_dataset['label'][bidx * train_bs : (bidx+1) * train_bs]
             bool_mask = train_dataset['attention_mask'][bidx * train_bs : (bidx+1) * train_bs]        
             if train_bs == 1:  # remove padding, only keep the seq from sos to eos        
@@ -280,255 +291,272 @@ if __name__ == '__main__':
                 X = X[:,:X_len]  
                 attention_mask = None
 
-            hidden_states = model.transformer.embeddings(X)
-            if manifold == 'sphere':
-                hidden_states = F.normalize(hidden_states,p=2,dim=-1)
-            
-            query_vectors = model.transformer.encoder.layer[0].attention.self.query(hidden_states)  # (N,B,HD)
-            value_vectors = model.transformer.encoder.layer[0].attention.self.value(hidden_states)
+            for hidx in range(num_hidden_layers):
 
-            batch_size, seq_len, embed_dim = hidden_states.size()
-            num_heads, head_dim = model.transformer.encoder.layer[0].attention.self.num_heads, model.transformer.encoder.layer[0].attention.self.head_dim                
-            assert (
-                embed_dim == model.transformer.encoder.layer[0].attention.self.embed_dim
-            ), f"hidden_states should have embed_dim = {model.transformer.encoder.layer[0].attention.self.embed_dim}, but has {embed_dim}"        
+                if hidx == 0:
+                    pre_sa_hidden_states = model.transformer.embeddings(X)
+                else:            
+                    pre_sa_hidden_states = model.transformer.encoder.layer[hidx-1](pre_sa_hidden_states)
 
+                if isinstance(pre_sa_hidden_states, tuple):
+                    pre_sa_hidden_states = pre_sa_hidden_states[0]    
 
-            # (B, N, H, D) = (batch_size, seq_len, num_heads, head_dim)                
-            query_vectors = query_vectors.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2)  # (B,N,H,D)       
-            value_vectors = value_vectors.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2)                                         
+                if manifold == 'sphere':
+                    hidden_states = F.normalize(pre_sa_hidden_states,p=2,dim=-1)
+                elif manifold == 'rd':
+                    hidden_states = pre_sa_hidden_states
 
-            # pairwise Euclidean distance (H,BN,D) @ (H,D,BN)
-            if not config['qk_share']:
-                key_vectors = model.transformer.encoder.layer[0].attention.self.key(hidden_states)    
-                key_vectors = key_vectors.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2)  # (B,H,N,D)   
+                query_vectors = model.transformer.encoder.layer[hidx].attention.self.query(hidden_states)  # (N,B,HD)
+                value_vectors = model.transformer.encoder.layer[hidx].attention.self.value(hidden_states)
 
-                if manifold == 'rd':
-                    Dist = torch.cdist(query_vectors, key_vectors, p=2)
-                elif manifold == 'sphere':
-                    eps = 1e-7  # for limiting the divergence from acos
-                    query_vectors = F.normalize(query_vectors, p=2, dim=-1)
-                    key_vectors = F.normalize(key_vectors, p=2, dim=-1)
-                    Dist = torch.acos(torch.clamp(query_vectors @ key_vectors.transpose(-2, -1), -1+eps, 1-eps)) * sphere_radius
-                    #Dist_true = torch.acos(hidden_states @ hidden_states.transpose(-2, -1)) * sphere_radius                
-            else:
-                if manifold == 'rd':
-                    Dist = torch.cdist(query_vectors, query_vectors, p=2)     
-                    Dist_true = torch.cdist(hidden_states, hidden_states, p=2)   
-                elif manifold == 'sphere':
-                    eps = 1e-7  # for limiting the divergence from acos
-                    query_vectors = F.normalize(query_vectors, p=2, dim=-1)
-                    Dist = torch.acos(torch.clamp(query_vectors @ query_vectors.transpose(-2, -1), -1+eps, 1-eps)) * sphere_radius                 
-                    Dist_true = torch.acos(hidden_states @ hidden_states.transpose(-2, -1)) * sphere_radius      
-                    Dist_true.masked_fill_(torch.eye(Dist_true.shape[1], Dist_true.shape[2])==1, 0)
+                batch_size, seq_len, embed_dim = hidden_states.size()
+                num_heads, head_dim = model.transformer.encoder.layer[hidx].attention.self.num_heads, model.transformer.encoder.layer[hidx].attention.self.head_dim                
+                assert (
+                    embed_dim == model.transformer.encoder.layer[hidx].attention.self.embed_dim
+                ), f"hidden_states should have embed_dim = {model.transformer.encoder.layer[hidx].attention.self.embed_dim}, but has {embed_dim}"        
 
-                dist_mse = ((Dist[0,0] - Dist_true[0])**2).sum().detach().item() / Dist[0,0].numel()
-                dist_mses.append(dist_mse)                      
+                # (B, N, H, D) = (batch_size, seq_len, num_heads, head_dim)                
+                query_vectors = query_vectors.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2)  # (B,N,H,D)       
+                value_vectors = value_vectors.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2)                                         
 
-            if attention_mask is not None:
-                # type 1: key_pad_mask
-                bool_mask = (attention_mask>=0).long()       
-                attention_mask_expanded = bool_mask.unsqueeze(1).unsqueeze(2).expand([-1,model.transformer.encoder.layer[0].attention.self.num_heads,1,-1])
-                # type 2: symmetrical mask
-                # bool_mask = (attention_mask>=0).long()
-                # attention_mask_expanded = (bool_mask.unsqueeze(-1)@bool_mask.unsqueeze(1)).view(batch_size, 1, seq_len, seq_len).expand(-1, num_heads, -1, -1)     
+                # pairwise Euclidean distance (H,BN,D) @ (H,D,BN)
+                if not config['qk_share']:
+                    key_vectors = model.transformer.encoder.layer[hidx].attention.self.key(hidden_states)    
+                    key_vectors = key_vectors.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2)  # (B,H,N,D)   
 
-            #g_dist = g_dist.masked_fill(attention_mask_expanded==0, 1e5)                   
+                    if manifold == 'rd':
+                        Dist = torch.cdist(query_vectors, key_vectors, p=2)
+                    elif manifold == 'sphere':
+                        eps = 1e-7  # for limiting the divergence from acos
+                        query_vectors = F.normalize(query_vectors, p=2, dim=-1)
+                        key_vectors = F.normalize(key_vectors, p=2, dim=-1)
+                        Dist = torch.acos(torch.clamp(query_vectors @ key_vectors.transpose(-2, -1), -1+eps, 1-eps)) * sphere_radius
+                        #Dist_true = torch.acos(hidden_states @ hidden_states.transpose(-2, -1)) * sphere_radius                
+                else:
+                    if manifold == 'rd':
+                        Dist = torch.cdist(query_vectors, query_vectors, p=2)     
+                        Dist_true = torch.cdist(hidden_states, hidden_states, p=2)   
+                    elif manifold == 'sphere':
+                        eps = 1e-7  # for limiting the divergence from acos
+                        query_vectors = F.normalize(query_vectors, p=2, dim=-1)
+                        Dist = torch.acos(torch.clamp(query_vectors @ query_vectors.transpose(-2, -1), -1+eps, 1-eps)) * sphere_radius                 
+                        Dist_true = torch.acos(hidden_states @ hidden_states.transpose(-2, -1)) * sphere_radius      
+                        Dist_true.masked_fill_(torch.eye(Dist_true.shape[1], Dist_true.shape[2])==1, 0)
 
-        if alpha < 2:
-            # g_dist = Dist / head_dim  # (H,B,N,N)
-            if manifold == 'rd':
-                g_dist = Dist * (2**(1/head_dim) - 1) / head_dim    
-            elif manifold == 'sphere':
-                g_dist = Dist
-            attn_score = (1 + g_dist/bandwidth**0.5)**(-d_intrinsic-alpha)
-        else:
-            if manifold == 'rd':
-                g_dist = Dist / head_dim**0.5  # (H,B,N,N)
-            elif manifold == 'sphere':
-                g_dist = Dist                
-            attn_score = torch.exp(-(g_dist/bandwidth**0.5)**(alpha/(alpha-1)))
-        #attn_score = attn_score.masked_fill(attention_mask_expanded==0, -1e9)
+                    dist_mse = ((Dist[0,0] - Dist_true[0])**2).sum().detach().item() / Dist[0,0].numel()
+                    dist_mses.append(dist_mse)                      
 
-        #assert (attn_score==attn_score.transpose(2,3)).sum() == attn_score.numel()
+                if attention_mask is not None:
+                    # type 1: key_pad_mask
+                    bool_mask = (attention_mask>=0).long()       
+                    attention_mask_expanded = bool_mask.unsqueeze(1).unsqueeze(2).expand([-1,model.transformer.encoder.layer[hidx].attention.self.num_heads,1,-1])
+                    # type 2: symmetrical mask
+                    # bool_mask = (attention_mask>=0).long()
+                    # attention_mask_expanded = (bool_mask.unsqueeze(-1)@bool_mask.unsqueeze(1)).view(batch_size, 1, seq_len, seq_len).expand(-1, num_heads, -1, -1)     
 
-        ###### 3. Extended analysis on removing non-uniform sampling (MC equiv to attn-score) ######
+                #g_dist = g_dist.masked_fill(attention_mask_expanded==0, 1e5)                   
 
-        WQ = model.transformer.encoder.layer[0].attention.self.query.weight
-        WQ_eigvals, WQ_eigvecs = torch.linalg.eig(WQ)        
-        WQ_eigvals = WQ_eigvals.detach().numpy()
-        WQ_eigvecs = WQ_eigvecs.detach().numpy()
+                if alpha < 2:
+                    # g_dist = Dist / head_dim  # (H,B,N,N)
+                    if manifold == 'rd':
+                        g_dist = Dist * (2**(1/head_dim) - 1) / head_dim    
+                    elif manifold == 'sphere':
+                        g_dist = Dist
+                    attn_score = (1 + g_dist/bandwidth**0.5)**(-d_intrinsic-alpha)
+                else:
+                    if manifold == 'rd':
+                        g_dist = Dist / head_dim**0.5  # (H,B,N,N)
+                    elif manifold == 'sphere':
+                        g_dist = Dist                
+                    attn_score = torch.exp(-(g_dist/bandwidth**0.5)**(alpha/(alpha-1)))
+                #attn_score = attn_score.masked_fill(attention_mask_expanded==0, -1e9)
 
-        a_ = 1
-        if alpha != 2:
-            attn_score_ = torch.exp(-(g_dist/bandwidth**0.5)**(alpha/(alpha-1)))
+                #assert (attn_score==attn_score.transpose(2,3)).sum() == attn_score.numel()
 
-            N_R_ = attn_score_.sum(-1)  # row sum
-            N_C_ = attn_score_.sum(-2)  # col su                
-            K_tilde = (N_R_**(-a_)).unsqueeze(-1) * attn_score_ * (N_C_**(-a_)).unsqueeze(-2)
-        else:
-            N_R = attn_score.sum(-1)  # row sum
-            N_C = attn_score.sum(-2)  # col su              
-            K_tilde = (N_R**(-a_)).unsqueeze(-1) * attn_score * (N_C**(-a_)).unsqueeze(-2)
+                ###### 3. Extended analysis on removing non-uniform sampling (MC equiv to attn-score) ######
 
-        # ----- V1 -----
-        """
-        MC_ = F.normalize(K_tilde,p=1,dim=3)  # can do this as the attn weights are always positive
-        eigvals_, eigvecs_ = torch.linalg.eigh(MC_)
-        eigvals_ = eigvals_.detach().numpy()
-        eigvecs_ = eigvecs_.detach().numpy()
-        # order based on eigvals from small to large
-        ii = np.argsort(eigvals_[0,0])
-        eigvals_ = eigvals_[:,:,ii]
-        eigvecs_ = eigvecs_[:,:,:,ii]
+                WQ = model.transformer.encoder.layer[hidx].attention.self.query.weight
+                WQ_eigvals, WQ_eigvecs = torch.linalg.eig(WQ)        
+                WQ_eigvals = WQ_eigvals.detach().numpy()
+                WQ_eigvecs = WQ_eigvecs.detach().numpy()
 
-        ###### 4. Obtain attention weights based on model settings ######
+                a_ = 1
+                if alpha != 2:
+                    attn_score_ = torch.exp(-(g_dist/bandwidth**0.5)**(alpha/(alpha-1)))
 
-        if a > 0:            
-            N_R = attn_score.sum(-1)  # row sum
-            N_C = attn_score.sum(-2)  # col su                
-            K_tilde = (N_R**(-a)).unsqueeze(-1) * attn_score * (N_C**(-a)).unsqueeze(-2)       
+                    N_R_ = attn_score_.sum(-1)  # row sum
+                    N_C_ = attn_score_.sum(-2)  # col su                
+                    K_tilde = (N_R_**(-a_)).unsqueeze(-1) * attn_score_ * (N_C_**(-a_)).unsqueeze(-2)
+                else:
+                    N_R = attn_score.sum(-1)  # row sum
+                    N_C = attn_score.sum(-2)  # col su              
+                    K_tilde = (N_R**(-a_)).unsqueeze(-1) * attn_score * (N_C**(-a_)).unsqueeze(-2)
 
-            attn_weights = F.normalize(K_tilde,p=1,dim=3)  # can do this as the attn weights are always positive
-        else:
-            attn_weights = F.normalize(attn_score,p=1,dim=3)  # can do this as the attn weights are always positive     
+                # ----- V1 -----
+                """
+                MC_ = F.normalize(K_tilde,p=1,dim=3)  # can do this as the attn weights are always positive
+                eigvals_, eigvecs_ = torch.linalg.eigh(MC_)
+                eigvals_ = eigvals_.detach().numpy()
+                eigvecs_ = eigvecs_.detach().numpy()
+                # order based on eigvals from small to large
+                ii = np.argsort(eigvals_[0,0])
+                eigvals_ = eigvals_[:,:,ii]
+                eigvecs_ = eigvecs_[:,:,:,ii]
 
-        # remove dropout for eval
-        # attn_weights = F.dropout(attn_weights, p=model.transformer.encoder.layer[0].attention.self.dropout, 
-        #                          training=model.transformer.encoder.layer[0].attention.self.training)           
+                ###### 4. Obtain attention weights based on model settings ######
 
-        #eigvals, eigvecs = torch.linalg.eigh(attn_weights)
-        eigvals, eigvecs = torch.linalg.eig(attn_weights)
-        eigvals = eigvals.detach().numpy()
-        eigvecs = eigvecs.detach().numpy()      
-        # order based on eigvals from large to small
-        ii = np.argsort(eigvals[0,0])
-        eigvals = eigvals[:,:,ii]
-        eigvecs = eigvecs[:,:,:,ii]         
-        """
+                if a > 0:            
+                    N_R = attn_score.sum(-1)  # row sum
+                    N_C = attn_score.sum(-2)  # col su                
+                    K_tilde = (N_R**(-a)).unsqueeze(-1) * attn_score * (N_C**(-a)).unsqueeze(-2)       
 
-        # ----- V2 -----
-        K_tilde = K_tilde[0,0]
-        D_tilde = K_tilde.sum(-1)        
-        # can do this as the attn weights are always positive  
-        MC = torch.diag(D_tilde**(-1)) @ K_tilde  # same as MC_ = F.normalize(K_tilde,p=1,dim=-1)
+                    attn_weights = F.normalize(K_tilde,p=1,dim=3)  # can do this as the attn weights are always positive
+                else:
+                    attn_weights = F.normalize(attn_score,p=1,dim=3)  # can do this as the attn weights are always positive     
 
-        # K_hat_ = torch.diag(D_tilde_**(-0.5)) @ K_tilde_ @ torch.diag(D_tilde_**(-0.5))
-        # K_hat_sym_ = 0.5*(K_hat_ + K_hat_.T)
-        # eigvals_, eigvecs_ = torch.linalg.eigh(K_hat_sym_)                                
-        # eigvals_, eigvecs_ = torch.linalg.eigh(MC_)
-        # eigvals_ = eigvals_.detach().numpy()
-        # eigvecs_ = eigvecs_.detach().numpy()
-        # # order based on eigvals from small to large
-        # ii = np.argsort(eigvals_[0,0])
-        # eigvals_ = eigvals_[:,:,ii]
-        # eigvecs_ = eigvecs_[:,:,:,ii]
-        
+                # remove dropout for eval
+                # attn_weights = F.dropout(attn_weights, p=model.transformer.encoder.layer[hidx].attention.self.dropout, 
+                #                          training=model.transformer.encoder.layer[hidx].attention.self.training)           
 
-        ###### 4. Obtain attention weights based on model settings ######
+                #eigvals, eigvecs = torch.linalg.eigh(attn_weights)
+                eigvals, eigvecs = torch.linalg.eig(attn_weights)
+                eigvals = eigvals.detach().numpy()
+                eigvecs = eigvecs.detach().numpy()      
+                # order based on eigvals from large to small
+                ii = np.argsort(eigvals[0,0])
+                eigvals = eigvals[:,:,ii]
+                eigvecs = eigvecs[:,:,:,ii]         
+                """
 
-        if a > 0:            
-            N_R = attn_score.sum(-1)  # row sum
-            N_C = attn_score.sum(-2)  # col su                
-            K_tilde = (N_R**(-a)).unsqueeze(-1) * attn_score * (N_C**(-a)).unsqueeze(-2)       
+                # ----- V2 -----
+                K_tilde = K_tilde[0,0]
+                D_tilde = K_tilde.sum(-1)        
+                # can do this as the attn weights are always positive  
+                MC = torch.diag(D_tilde**(-1)) @ K_tilde  # same as MC_ = F.normalize(K_tilde,p=1,dim=-1)
 
-            attn_weights = F.normalize(K_tilde,p=1,dim=3)  # can do this as the attn weights are always positive
-        else:
-            attn_weights = F.normalize(attn_score,p=1,dim=3)  # can do this as the attn weights are always positive     
+                # K_hat_ = torch.diag(D_tilde_**(-0.5)) @ K_tilde_ @ torch.diag(D_tilde_**(-0.5))
+                # K_hat_sym_ = 0.5*(K_hat_ + K_hat_.T)
+                # eigvals_, eigvecs_ = torch.linalg.eigh(K_hat_sym_)                                
+                # eigvals_, eigvecs_ = torch.linalg.eigh(MC_)
+                # eigvals_ = eigvals_.detach().numpy()
+                # eigvecs_ = eigvecs_.detach().numpy()
+                # # order based on eigvals from small to large
+                # ii = np.argsort(eigvals_[0,0])
+                # eigvals_ = eigvals_[:,:,ii]
+                # eigvecs_ = eigvecs_[:,:,:,ii]
+                
 
-        # remove dropout for eval
-        # attn_weights = F.dropout(attn_weights, p=model.transformer.encoder.layer[0].attention.self.dropout, 
-        #                          training=model.transformer.encoder.layer[0].attention.self.training)           
+                ###### 4. Obtain attention weights based on model settings ######
 
-        K_hat = torch.diag(D_tilde**(-0.5)) @ K_tilde @ torch.diag(D_tilde**(-0.5))
-        K_hat_sym = 0.5*(K_hat + K_hat.T)
-        eigvals, eigvecs = torch.linalg.eigh(K_hat_sym)    
-        eigvecs = torch.diag(D_tilde**(-0.5)) @ eigvecs
+                if a > 0:            
+                    N_R = attn_score.sum(-1)  # row sum
+                    N_C = attn_score.sum(-2)  # col su                
+                    K_tilde = (N_R**(-a)).unsqueeze(-1) * attn_score * (N_C**(-a)).unsqueeze(-2)       
 
-        eigvals = eigvals.detach().numpy()
-        eigvecs = eigvecs.detach().numpy()      
-        # order based on eigvals from large to small
-        ii = np.argsort(eigvals)
-        eigvals = eigvals[ii]
-        eigvecs = eigvecs[:,ii]          
+                    attn_weights = F.normalize(K_tilde,p=1,dim=3)  # can do this as the attn weights are always positive
+                else:
+                    attn_weights = F.normalize(attn_score,p=1,dim=3)  # can do this as the attn weights are always positive     
 
-        attn_output = attn_weights @ value_vectors  
+                # remove dropout for eval
+                # attn_weights = F.dropout(attn_weights, p=model.transformer.encoder.layer[hidx].attention.self.dropout, 
+                #                          training=model.transformer.encoder.layer[hidx].attention.self.training)           
 
-        ###### 5. Plot results ######
+                K_hat = torch.diag(D_tilde**(-0.5)) @ K_tilde @ torch.diag(D_tilde**(-0.5))
+                K_hat_sym = 0.5*(K_hat + K_hat.T)
+                eigvals, eigvecs = torch.linalg.eigh(K_hat_sym)    
+                eigvecs = torch.diag(D_tilde**(-0.5)) @ eigvecs
 
-        """
-        # Projection matrix properties
-        axs[model_idx,0].scatter(WQ_eigvals.real, WQ_eigvals.imag, s=0.75)        
-        # Geodesic distance error
-        dist_mses = np.array(dist_mses)
-        density = gaussian_kde(dist_mses)
-        xs = np.linspace(0,1,100)
-        axs[model_idx,1].plot(xs,density(xs))    
-        """        
+                eigvals = eigvals.detach().numpy()
+                eigvecs = eigvecs.detach().numpy()      
+                # order based on eigvals from large to small
+                ii = np.argsort(eigvals)
+                eigvals = eigvals[ii]
+                eigvecs = eigvecs[:,ii]          
 
-        c_hyp = HYP_CMAP(HYP_CNORM(alpha))  # hyperparameter color
+                attn_output = attn_weights @ value_vectors  
 
-        # Eigenvalues
-        seq_len = len(eigvals)
-        idxs = np.arange(1,seq_len + 1)
-        idx_mid = len(idxs) // 2        
+                alpidx = alphas.index(alpha)
+                row = alpidx + 1
+                EDs[hidx, alpidx, mr_ii] += (eigvals.sum())**2/(eigvals**2).sum() / N_batch
 
-        lstyles = ['-', '--', '--']
-        axs[mr_ii].plot(idxs, eigvals, c=c_hyp, linestyle=lstyles[alphas.index(alpha)], label=r'$q$ removed')  # Non-uniform
+                ###### 5. Plot results ######
 
-        # eye guide
-        # power = alpha if alpha <= 2 else 2
-        # eigvals_theory = idxs**power  
-        # eigvals_theory = eigvals_theory / eigvals_theory[idx_mid]
-        # eigvals_theory = eigvals_theory * eigvals[idx_mid] * 10
-        # ax.plot(idxs, eigvals_theory, c=c_alpha, alpha=0.5, linewidth=1, linestyle='--')
+                """
+                # Projection matrix properties
+                axss[hidx][model_idx,0].scatter(WQ_eigvals.real, WQ_eigvals.imag, s=0.75)        
+                # Geodesic distance error
+                dist_mses = np.array(dist_mses)
+                density = gaussian_kde(dist_mses)
+                xs = np.linspace(0,1,100)
+                axss[hidx][model_idx,1].plot(xs,density(xs))    
+                """        
 
-        # Non-uniform
-        # axs[mr_ii + ncols].plot(idxs, eigvals, c=c_hyp, linestyle='-', label=r'$q$ kept')
+                c_hyp = HYP_CMAP(HYP_CNORM(alpha))  # hyperparameter color
+                colors = ['k', c_hyp]
 
-        # Eigenvectors
-        # Query/key projection onto lower-dim
-        eidx1, eidx2 = seq_len - 1, seq_len - 2
-        row = alphas.index(alpha) + 1
-        axs[mr_ii + ncols * row].scatter(eigvecs[:,eidx1], eigvecs[:,eidx2], c=c_hyp, s=1)
+                # Eigenvalues
+                seq_len = len(eigvals)
+                idxs = np.arange(1,seq_len + 1)
+                idx_mid = len(idxs) // 2        
 
-        # ---------- Message ----------
-        print(f'Non-uniform eigval min: {eigvals.min()}, max: {eigvals.max()}')
-        print('\n')
+                lstyles = ['-', '--', '--']
+                axss[hidx][mr_ii].plot(idxs, eigvals, c=c_hyp, linestyle=lstyles[alphas.index(alpha)], label=r'$q$ kept')  # Non-uniform
 
-    for mr_ii in range(len(axs)):
-        if mr_ii < ncols:
-            axs[mr_ii].set_xscale('log'); axs[mr_ii].set_yscale('log')        
+                # eye guide
+                # power = alpha if alpha <= 2 else 2
+                # eigvals_theory = idxs**power  
+                # eigvals_theory = eigvals_theory / eigvals_theory[idx_mid]
+                # eigvals_theory = eigvals_theory * eigvals[idx_mid] * 10
+                # ax.plot(idxs, eigvals_theory, c=c_alpha, alpha=0.5, linewidth=1, linestyle='--')
 
-        # ----- plot labels -----
+                # Non-uniform
+                # axss[hidx][mr_ii + ncols].plot(idxs, eigvals, c=c_hyp, linestyle='-', label=r'$q$ kept')
 
-        # subplot labels
-        axs[mr_ii].text(
-            0.0, 1.0, f'({ascii_lowercase[mr_ii]})', transform=(
-                axs[mr_ii].transAxes + ScaledTranslation(-20/72, +7/72, fig.dpi_scale_trans)),
-            va='bottom', fontfamily='sans-serif')  # fontsize='medium',   
+                # Eigenvectors
+                # Query/key projection onto lower-dim
+                eidx1, eidx2 = seq_len - 1, seq_len - 2                
+                axss[hidx][mr_ii + ncols * row].scatter(eigvals[eidx1] * eigvecs[:,eidx1], eigvals[eidx2] * eigvecs[:,eidx2], 
+                                                        alpha=c_clears[Y.item()], marker=markers[Y.item()],
+                                                        c=colors[Y.item()], s=1.5)
 
-        # row labels 
-        # if mr_ii % ncols == ncols - 1:
-        #     axs[mr_ii].text(1.2, 0.5, row_labels[mr_ii//ncols], transform=(
-        #                     axs[mr_ii].transAxes + ScaledTranslation(-20/72, +7/72, fig.dpi_scale_trans)),
-        #                     va='center', rotation='vertical')  # fontsize='medium',          
-
-    # col labels
-    for col in range(ncols):
-        bandwidth = epss[col]
-        axs[col].set_title(rf'$\varepsilon = {{{bandwidth}}}$')     
+                # ---------- Message ----------
+                # print(f'Non-uniform eigval min: {eigvals.min()}, max: {eigvals.max()}')
+                # print('\n')  
 
     # --------------------
+    for hidx in range(num_hidden_layers):
 
-    FIGS_DIR = njoin(FIGS_DIR, 'nlp-task')
-    if not isdir(FIGS_DIR): makedirs(FIGS_DIR)
-    layers, heads, hidden = config['num_hidden_layers'], config['num_attention_heads'], int(config['hidden_size'])
-    fig_file = 'fdm-'
-    fig_file += f'{model_name}-layers={layers}-heads={heads}-hidden={hidden}'
-    # if isfile(njoin(FIGS_DIR, fig_file)):
-    #     version = len([fname for fname in os.listdir(FIGS_DIR) if fname==fig_file])
-    #     fig_file += f'-v{version}'    
-    fig_file += '.pdf'
-    plt.savefig(njoin(FIGS_DIR, fig_file))            
-    print(f'Figure saved in {njoin(FIGS_DIR, fig_file)}')
+        for mr_ii in range(len(axss[hidx])):
+            if mr_ii < ncols:
+                axss[hidx][mr_ii].set_xscale('log'); axss[hidx][mr_ii].set_yscale('log')        
+
+            # ----- plot labels -----
+
+            # subplot labels
+            axss[hidx][mr_ii].text(
+                0.0, 1.0, f'({ascii_lowercase[mr_ii]})', transform=(
+                    axss[hidx][mr_ii].transAxes + ScaledTranslation(-20/72, +7/72, fig.dpi_scale_trans)),
+                va='bottom', fontfamily='sans-serif')  # fontsize='medium',   
+
+            # row labels 
+            # if mr_ii % ncols == ncols - 1:
+            #     axss[hidx][mr_ii].text(1.2, 0.5, row_labels[mr_ii//ncols], transform=(
+            #                     axss[hidx][mr_ii].transAxes + ScaledTranslation(-20/72, +7/72, fig.dpi_scale_trans)),
+            #                     va='center', rotation='vertical')  # fontsize='medium',          
+
+        # col labels
+        for col in range(ncols):
+            bandwidth = epss[col]
+            axss[hidx][col].set_title(rf'$\varepsilon = {{{bandwidth}}}$')   
+
+        SAVE_DIR = njoin(FIGS_DIR, 'nlp-task')
+        if not isdir(SAVE_DIR): makedirs(SAVE_DIR)
+        layers, heads, hidden = config['num_hidden_layers'], config['num_attention_heads'], int(config['hidden_size'])
+        fig_file = 'fdm-'
+        fig_file += f'{model_name}-layers={layers}-heads={heads}-hidden={hidden}-l={hidx}'
+        # if isfile(njoin(SAVE_DIR, fig_file)):
+        #     version = len([fname for fname in os.listdir(SAVE_DIR) if fname==fig_file])
+        #     fig_file += f'-v{version}'    
+        fig_file += '.pdf'
+        figs[hidx].savefig(njoin(SAVE_DIR, fig_file))            
+        print(f'Figure saved in {njoin(SAVE_DIR, fig_file)}')

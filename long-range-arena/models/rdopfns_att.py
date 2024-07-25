@@ -326,14 +326,19 @@ class FasterRDOPFNSMultiHeadAttention(nn.Module):
         else:
             g_dist = torch.cdist(query, query)
 
-        if attention_mask is not None:
-            g_dist = g_dist.masked_fill_(attention_mask == 0, mask_val)
+        # if attention_mask is not None:
+        #     g_dist = g_dist.masked_fill_(attention_mask == 0, mask_val)
 
         # Calculate the attention scores
         if alpha < 2:
-            attn_score = (1 + g_dist / bandwidth**0.5) ** (-d_intrinsic - alpha)
+            #attn_score = (1 + g_dist / bandwidth**0.5) ** (-d_intrinsic - alpha)
+            attn_score = (1 + g_dist / math.sqrt(attention_head_size) / bandwidth**0.5) ** (-d_intrinsic - alpha)
         else:
-            attn_score = torch.exp((-g_dist / bandwidth**0.5) ** (alpha / (alpha - 1)))
+            #attn_score = torch.exp((-g_dist / bandwidth**0.5) ** (alpha / (alpha - 1)))
+            attn_score = torch.exp((-g_dist / math.sqrt(attention_head_size) / bandwidth**0.5) ** (alpha / (alpha - 1)))
+
+        if attention_mask is not None:
+            attn_score = attn_score.masked_fill_(attention_mask == 0, mask_val)
 
         if a == 0:
             # attn_score = attn_score.masked_fill_(attention_mask.expand(-1,self.num_attention_heads,-1,-1)==0, -1e9) # Mask

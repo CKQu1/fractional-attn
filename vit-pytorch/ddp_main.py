@@ -398,7 +398,7 @@ if __name__ == '__main__':
             from vit_pytorch.rdfns_vit import RDFNSViTForClassfication
             model = RDFNSViTForClassfication(config)    
         elif model_name == 'rdopfnsvit':
-            from vit_pytorch.rdopdmfns_vit import RPOPFNSViTForClassfication
+            from vit_pytorch.rdopdmfns_vit import RPOPDMFNSViTForClassfication
             model = RPOPDMFNSViTForClassfication(config)               
         elif model_name == 'sinkvit':
             from vit_pytorch.sink_vit import SINKViTForClassfication

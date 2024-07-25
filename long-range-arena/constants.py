@@ -24,8 +24,9 @@ SPATH = njoin('/project/frac_attn/built_containers/FaContainer_v5.sif')  # singu
 
 # ----- TRAINING -----
 
-MODEL_NAMES = ['fnsformer', 'opfnsformer', 'sinkformer', 'dpformer']  # model str names
-NAMES_DICT = {'fnsformer': 'FNS', 'opfnsformer': 'OPFNS', 
+MODEL_NAMES = ['spfnsformer', 'spopfnsformer', 'sinkformer', 'dpformer']  # model str names
+NAMES_DICT = {'spfnsformer': 'SPFNS', 'spopfnsformer': 'SPOPFNS', 
+              'rdfnsformer': 'RDFNS', 'rdopfnsformer': 'RDOPFNS',
               'sinkformer': 'SINK',
               'dpformer': 'DP',
               'iwslt14': 'IWSLT14',

@@ -95,10 +95,10 @@ if __name__ == '__main__':
                             for manifold in ['rd', 'sphere']:
                                 kwargss.append({'model_name':model_name,'manifold':manifold,'alpha': alpha,'a': 0,'bandwidth':bandwidth})            
 
-                kwargss.append([{'model_name':'dpvit'}])
+                kwargss.append({'model_name':'dpvit'})
 
                 for n_it in [1]:
-                    kwargss.append([{'model_name':'sinkvit','n_it':n_it}])
+                    kwargss.append({'model_name':'sinkvit','n_it':n_it})
 
                 epochs = 50                                              
                 common_kwargs = {'instance':          instance,

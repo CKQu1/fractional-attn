@@ -25,10 +25,10 @@ class NewGELUActivation(nn.Module):
             )
         )
 
-class FNSAttentionHead(nn.Module):
+class RDFNSAttentionHead(nn.Module):
     """
     A single attention head.
-    This module is used in the FNSMultiHeadAttention module.
+    This module is used in the RDFNSMultiHeadAttention module.
 
     """
 
@@ -141,7 +141,7 @@ class FNSAttentionHead(nn.Module):
         return (attention_output, attention_probs)
 
 
-class FNSMultiHeadAttention(nn.Module):
+class RDFNSMultiHeadAttention(nn.Module):
     """
     Multi-head attention module.
     This module is used in the TransformerEncoder module.
@@ -167,7 +167,7 @@ class FNSMultiHeadAttention(nn.Module):
         self.mask_val = config["mask_val"]      
 
         for _ in range(self.num_attention_heads):
-            head = FNSAttentionHead(
+            head = RDFNSAttentionHead(
                 self.alpha,
                 self.a,
                 self.bandwidth,
@@ -214,7 +214,7 @@ class FNSMultiHeadAttention(nn.Module):
             return (attention_output, attention_probs)
 
 
-class FasterFNSMultiHeadAttention(nn.Module):
+class FasterRDFNSMultiHeadAttention(nn.Module):
     """
     Multi-head attention module with some optimizations.
     All the heads are processed simultaneously with merged query, key, and value projections.
@@ -406,7 +406,7 @@ class MLP(nn.Module):
         x = self.dropout(x)
         return x
 
-class FNSEncoderBlock(nn.Module):
+class RDFNSEncoderBlock(nn.Module):
     """
     A single transformer block.
     """
@@ -415,9 +415,9 @@ class FNSEncoderBlock(nn.Module):
         super().__init__()
         self.use_faster_attention = config.get("use_faster_attention", False)
         if self.use_faster_attention:
-            self.attention = FasterFNSMultiHeadAttention(config)
+            self.attention = FasterRDFNSMultiHeadAttention(config)
         else:
-            self.attention = FNSMultiHeadAttention(config)
+            self.attention = RDFNSMultiHeadAttention(config)
         self.layernorm_1 = nn.LayerNorm(config["hidden_size"])
         self.mlp = MLP(config)
         self.layernorm_2 = nn.LayerNorm(config["hidden_size"])
@@ -439,7 +439,7 @@ class FNSEncoderBlock(nn.Module):
         else:
             return (x, attention_probs)
 
-class FNSEncoder(nn.Module):
+class RDFNSEncoder(nn.Module):
     """
     The transformer encoder module.
     """
@@ -466,7 +466,7 @@ class FNSEncoder(nn.Module):
         # Create a list of transformer blocks
         self.blocks = nn.ModuleList([])
         for _ in range(config["num_encoder_layers"]):
-            block = FNSEncoderBlock(config)
+            block = RDFNSEncoderBlock(config)
             self.blocks.append(block)
 
     def forward(self, x, attention_mask=None, output_attentions=False):

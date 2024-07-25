@@ -405,7 +405,7 @@ class OPDMFNSEncoder(nn.Module):
             return (x, all_attentions)
 
 
-class OPDMFNSViTForClassfication(nn.Module):
+class SPOPFNSViTForClassfication(nn.Module):
     """
     The ViT model for classification.
     """

@@ -3,8 +3,10 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-from models.fns_att import FNSEncoder
-from models.opfns_att import OPFNSEncoder
+from models.spfns_att import SPFNSEncoder
+from models.spopfns_att import SPOPFNSEncoder
+from models.rdfns_att import RDFNSEncoder
+from models.rdopfns_att import RDOPFNSEncoder
 from models.dp_att import DPEncoder
 from models.sink_att import SINKEncoder
 
@@ -47,10 +49,14 @@ class ClassificationModel(nn.Module):
         self.pooling_mode = config["pooling_mode"]
         self.padding_idx = config["padding_idx"]
         # ----- add models here -----
-        if config['model_name'] == 'fnsformer':
-            self.encoder = FNSEncoder(config)
-        if config['model_name'] == 'opfnsformer':
-            self.encoder = OPFNSEncoder(config)            
+        if config['model_name'] == 'spfnsformer':
+            self.encoder = SPFNSEncoder(config)
+        elif config['model_name'] == 'spopfnsformer':
+            self.encoder = SPOPFNSEncoder(config)   
+        elif config['model_name'] == 'rdfnsformer':
+            self.encoder = RDFNSEncoder(config)
+        elif config['model_name'] == 'rdopfnsformer':
+            self.encoder = RDOPFNSEncoder(config)                
         elif config['model_name'] == 'dpformer':
             self.encoder = DPEncoder(config)    
         elif config['model_name'] == 'sinkformer':

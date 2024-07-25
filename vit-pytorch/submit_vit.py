@@ -4,6 +4,8 @@ from time import sleep
 from constants import *
 from mutils import njoin, get_instance, structural_model_root
 from qsub_parser import command_setup_ddp, qsub, job_divider
+from qsub_parser import add_common_kwargs, get_pbs_array_data
+from qsub_parser import job_setup
 
 def add_common_kwargs(kwargss, common_kwargs):
     for i in range(len(kwargss)):
@@ -169,14 +171,33 @@ if __name__ == '__main__':
             kwargss_all += kwargss
 
     print(f'Total jobs: {len(kwargss_all)} \n')
-    for xx in kwargss_all:
-        print(xx)  
-        print('\n')
+    # for xx in kwargss_all:
+    #     print(xx)  
+    #     print('\n')
     #quit()  # delete      
-    train_submit(script_name, kwargss_all,
-                 ncpus=ncpus,
-                 ngpus=ngpus,
-                 select=select, 
-                 walltime=walltime,
-                 mem=mem,
-                 job_path=model_root)
+
+    # ----- verion 1 -----
+
+    # train_submit(script_name, kwargss_all,
+    #              ncpus=ncpus,
+    #              ngpus=ngpus,
+    #              select=select, 
+    #              walltime=walltime,
+    #              mem=mem,
+    #              job_path=model_root)
+
+    # ----- verion 2 -----
+
+    commands, script_names, pbs_array_trues, kwargs_qsubs =\
+            job_setup(script_name, kwargss_all,
+                     ncpus=ncpus,
+                     ngpus=ngpus,
+                     select=select, 
+                     walltime=walltime,
+                     mem=mem,
+                     job_path=job_path,
+                     nstack=nstack,
+                     system=system)
+    
+    for i in range(len(commands)):
+        qsub(f'{commands[i]} {script_names[i]}', pbs_array_trues[i], path=job_path, **kwargs_qsubs[i])         

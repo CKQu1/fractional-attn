@@ -203,7 +203,7 @@ if __name__ == '__main__':
         assert args.manifold in ['sphere', 'rd'], 'FNS manifold: sphere or rd'   
         assert 1 <= args.alpha <= 2, 'FNS alpha must be between [1,2]'
         assert args.a in [0,0.5,1], 'Normalization index must be 0 or 0.5 or 1'             
-    
+
     eval_interval = args.eval_interval
     log_interval = args.log_interval
 
@@ -226,7 +226,7 @@ if __name__ == '__main__':
     bias = False # do we use bias inside LayerNorm and Linear layers?
     
     config = {
-        "model_name": model_name,        
+        #"model_name": model_name,        
         "hidden_size": args.hidden_size,
         "num_encoder_layers": args.num_encoder_layers,
         "num_heads": args.num_heads,
@@ -274,6 +274,7 @@ if __name__ == '__main__':
         elif args.manifold == 'rd':
             if args.alpha < 2:
                 config['d_intrinsic'] = attn_setup['d_intrinsic'] = args.hidden_size//args.num_heads  # head_dim                
+            config['mask_val'] = 1e9
 
             model_name = 'rd' + model_name
 
@@ -283,7 +284,7 @@ if __name__ == '__main__':
         config['n_it'] = attn_setup['n_it'] = args.n_it
         config['bandwidth'] = attn_setup['bandwidth'] = args.bandwidth           
 
-    attn_setup['model_name'] = model_name
+    config['model_name'] = attn_setup['model_name'] = model_name
 
     # adamw optimizer
     learning_rate = args.max_lr  # max learning rate

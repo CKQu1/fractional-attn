@@ -70,11 +70,13 @@ torchrun --nnodes=1 --nproc_per_node=2 ddp_main.py --max_iters=5 --eval_interval
 if __name__ == '__main__':
     
     script_name = "ddp_main.py"       # script for running
-    dataset_names = ['cifar10']   # add or change datasets here
+    dataset_names = ['cifar10']   # add or change datasets here    
     
     debug_mode = False
     print(f'---------- debug_mode = {debug_mode} ---------- \n')
     
+    ROOT = njoin(DROOT, 'smallest-model')
+
     #instances = list(range(5))    
     instances = [0]
     #instances = [1,2,3,4]
@@ -83,40 +85,25 @@ if __name__ == '__main__':
         for didx, dataset_name in enumerate(dataset_names):
             if not debug_mode:
                 select = 1; ngpus, ncpus = 0, 1                            
-                walltime, mem = '24:59:59', '8GB'                             
+                walltime, mem = '24:59:59', '8GB'                                             
+                num_proc = ngpus if ngpus > 1 else ncpus
 
-                if ngpus > 1:
-                    num_proc = ngpus
-                else:
-                    num_proc = ncpus
+                kwargss = []
+                for model_name in ['opfnsvit']:
+                    for alpha in [1.2, 2]:
+                        for bandwidth in [1]:
+                            for manifold in ['rd', 'sphere']:
+                                kwargss.append({'model_name':model_name,'manifold':manifold,'alpha': alpha,'a': 0,'bandwidth':bandwidth})            
 
-                # kwargss = [{'model_name':'dmfnsvit', 'alpha': 1.2, 'a': 0}, 
-                #            {'model_name':'dmfnsvit', 'alpha': 1.2, 'a': 0.5},
-                #            {'model_name':'dmfnsvit', 'alpha': 1.2, 'a': 1},
-                #            {'model_name':'dmfnsvit', 'alpha': 2, 'a': 0},                             
-                #            {'model_name':'dmfnsvit', 'alpha': 2, 'a': 0.5},
-                #            {'model_name':'dmfnsvit', 'alpha': 2, 'a': 1},
-                #            {'model_name':'opdmfnsvit', 'alpha': 1.2, 'a': 0}, 
-                #            {'model_name':'opdmfnsvit', 'alpha': 1.2, 'a': 0.5},
-                #            {'model_name':'opdmfnsvit', 'alpha': 1.2, 'a': 1},
-                #            {'model_name':'opdmfnsvit', 'alpha': 2, 'a': 0},                             
-                #            {'model_name':'opdmfnsvit', 'alpha': 2, 'a': 0.5},
-                #            {'model_name':'opdmfnsvit', 'alpha': 2, 'a': 1}
-                #            ]    
+                kwargss.append([{'model_name':'dpvit'}])
 
-                kwargss = [{'model_name':'fnsvit', 'alpha': 1.2, 'a': 0,'bandwidth':0.5,'manifold':'sphere'}, 
-                           {'model_name':'fnsvit', 'alpha': 2, 'a': 0,'bandwidth':0.5,'manifold':'sphere'},                             
-                           {'model_name':'fnsvit', 'alpha': 1.2, 'a': 0,'bandwidth':0.5,'manifold':'rd'}, 
-                           {'model_name':'fnsvit', 'alpha': 2, 'a': 0,'bandwidth':0.5,'manifold':'rd'},
-                           {'model_name':'sinkvit', 'n_it': 1},                             
-                           {'model_name':'sinkvit', 'n_it': 3},
-                           {'model_name':'dpvit'}
-                           ] 
+                for n_it in [1]:
+                    kwargss.append([{'model_name':'sinkvit','n_it':n_it}])
 
                 epochs = 50                                              
                 common_kwargs = {'instance':          instance,
-                                 'n_layers':          2,
-                                 'n_attn_heads':      4,   
+                                 'n_layers':          1,
+                                 'n_attn_heads':      1,   
                                  'hidden_size':       48,
                                  'max_iters':         15000,
                                  'eval_interval':     50,
@@ -145,27 +132,19 @@ if __name__ == '__main__':
                 model_root_dirname = structural_model_root(qk_share=qk_share, n_layers=common_kwargs['n_layers'],
                                                            n_attn_heads=common_kwargs['n_attn_heads'], hidden_size=common_kwargs['hidden_size']
                                                            )       
-                model_root = njoin(DROOT, 'fine-tune-v3', model_root_dirname)
-                #model_root = njoin(DROOT, f'ncpus={ncpus}-formers_trained', model_root_dirname)
-
+                model_root = njoin(ROOT, model_root_dirname)
+                
             else:                         
                 ngpus, ncpus = 0, 16
                 select = 1  
                 walltime, mem = '23:59:59', '6GB'                
         
-                # kwargss = [{'model_name':'dmfnsvit', 'alpha': 1.2, 'a': 0}, 
-                #            {'model_name':'dmfnsvit', 'alpha': 1.2, 'a': 0.5},
-                #            {'model_name':'dmfnsvit', 'alpha': 1.2, 'a': 1},
-                #            {'model_name':'dmfnsvit', 'alpha': 2, 'a': 0},                             
-                #            {'model_name':'dmfnsvit', 'alpha': 2, 'a': 0.5},
-                #            {'model_name':'dmfnsvit', 'alpha': 2, 'a': 1},
-                #            {'model_name':'opdmfnsvit', 'alpha': 1.2, 'a': 0}, 
-                #            {'model_name':'opdmfnsvit', 'alpha': 1.2, 'a': 0.5},
-                #            {'model_name':'opdmfnsvit', 'alpha': 1.2, 'a': 1},
-                #            {'model_name':'opdmfnsvit', 'alpha': 2, 'a': 0},                             
-                #            {'model_name':'opdmfnsvit', 'alpha': 2, 'a': 0.5},
-                #            {'model_name':'opdmfnsvit', 'alpha': 2, 'a': 1}
-                #            ] 
+                kwargss = []
+                for model_name in ['opfnsvit']:
+                    for alpha in [1.2, 2]:
+                        for bandwidth in [1]:
+                            for manifold in ['rd', 'sphere']:
+                                kwargss.append({'model_name':model_name,'manifold':manifold,'alpha': alpha,'a': 0,'bandwidth':bandwidth}) 
                  
                 kwargss = [{'model_name':'dmfnsvit', 'alpha': 1.2, 'a': 0}]                         
 

@@ -53,7 +53,7 @@ python -i ddp_main.py --model_name=opfnsvit --manifold=rd --alpha=1.5 --max_iter
 
 # multi-core
 """
-torchrun --nnodes=1 --nproc_per_node=4 ddp_main.py --model_name=dmfnsvit --alpha=1.5 --a=0 --max_iters=100 --eval_interval=5\
+torchrun --nnodes=1 --nproc_per_node=4 ddp_main.py --model_name=fnsvit --alpha=1.5 --a=0 --max_iters=100 --eval_interval=5\
  --eval_iters=50 --weight_decay=0 --n_layers=1 --n_attn_heads=2 --model_root=.droot/multi-core
 """
 
@@ -398,8 +398,8 @@ if __name__ == '__main__':
             from vit_pytorch.rdfns_vit import RDFNSViTForClassfication
             model = RDFNSViTForClassfication(config)    
         elif model_name == 'rdopfnsvit':
-            from vit_pytorch.rdopdmfns_vit import RPOPDMFNSViTForClassfication
-            model = RPOPDMFNSViTForClassfication(config)               
+            from vit_pytorch.rdopfns_vit import RDOPFNSViTForClassfication
+            model = RDOPFNSViTForClassfication(config)               
         elif model_name == 'sinkvit':
             from vit_pytorch.sink_vit import SINKViTForClassfication
             model = SINKViTForClassfication(config)               

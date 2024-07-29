@@ -97,51 +97,52 @@ if __name__ == '__main__':
                 walltime, mem = '24:59:59', '8GB'                                             
                 num_proc = ngpus if ngpus > 1 else ncpus
 
-                kwargss = []
-                for model_name in ['opfnsvit']:
-                    for alpha in [1.2, 2]:
-                        for bandwidth in [1]:
-                            for manifold in ['rd', 'sphere']:
-                                kwargss.append({'model_name':model_name,'manifold':manifold,'alpha': alpha,'a': 0,'bandwidth':bandwidth})            
+                for qk_share in [True]:
+                    kwargss = []
+                    for model_name in ['opfnsvit']:
+                        for alpha in [1.2, 2]:
+                            for bandwidth in [1]:
+                                for manifold in ['rd', 'sphere']:
+                                    kwargss.append({'model_name':model_name,'manifold':manifold,'alpha': alpha,'a': 0,'bandwidth':bandwidth})            
 
-                kwargss.append({'model_name':'dpvit'})
+                    kwargss.append({'model_name':'dpvit'})
 
-                for n_it in [1]:
-                    kwargss.append({'model_name':'sinkvit','n_it':n_it})
+                    for n_it in [1, 3]:
+                        kwargss.append({'model_name':'sinkvit','n_it':n_it})
 
-                epochs = 50                                              
-                common_kwargs = {'instance':          instance,
-                                 'n_layers':          1,
-                                 'n_attn_heads':      1,   
-                                 'hidden_size':       48,
-                                 'max_iters':         15000,
-                                 'eval_interval':     50,
-                                 'eval_iters':        50,                     
-                                 'train_bs':          16,                                                                          
-                                 'weight_decay':      0,
-                                 'lr_scheduler_type': 'constant',
-                                 'max_lr':            5e-5,
-                                 'min_lr':            5e-6,
-                                 }  
+                    epochs = 50                                              
+                    common_kwargs = {'instance':          instance,
+                                    'qk_share':          qk_share,
+                                    'n_layers':          1,
+                                    'n_attn_heads':      1,   
+                                    'hidden_size':       48,
+                                    'max_iters':         15000,
+                                    'eval_interval':     50,
+                                    'eval_iters':        50,                     
+                                    'train_bs':          16,                                                                          
+                                    'weight_decay':      0,
+                                    'lr_scheduler_type': 'constant',
+                                    'max_lr':            5e-5,
+                                    'min_lr':            5e-6,
+                                    }  
 
-                if epochs is not None:                    
-                    train_data_size = 25000
-                    #steps_per_epoch = train_data_size // (num_proc * common_kwargs['train_bs']) + 1                      
-                    steps_per_epoch = train_data_size // common_kwargs['train_bs'] + 1
-                    common_kwargs['max_iters'] = steps_per_epoch * epochs
-                    common_kwargs['eval_interval'] = steps_per_epoch
-                    common_kwargs['log_interval'] = steps_per_epoch  # for mfu
-                    
-                if num_proc > 1:
-                    common_kwargs['grad_accum_step'] = num_proc * 2
+                    if epochs is not None:                    
+                        train_data_size = 25000
+                        #steps_per_epoch = train_data_size // (num_proc * common_kwargs['train_bs']) + 1                      
+                        steps_per_epoch = train_data_size // common_kwargs['train_bs'] + 1
+                        common_kwargs['max_iters'] = steps_per_epoch * epochs
+                        common_kwargs['eval_interval'] = steps_per_epoch
+                        common_kwargs['log_interval'] = steps_per_epoch  # for mfu
+                        
+                    if num_proc > 1:
+                        common_kwargs['grad_accum_step'] = num_proc * 2
 
-                qk_share = False if 'qk_share' not in common_kwargs.keys() else common_kwargs['qk_share']
-                use_custom_optim = False if 'use_custom_optim' not in common_kwargs.keys() else common_kwargs['use_custom_optim']                                 
+                    use_custom_optim = False if 'use_custom_optim' not in common_kwargs.keys() else common_kwargs['use_custom_optim']                                 
 
-                model_root_dirname = structural_model_root(qk_share=qk_share, n_layers=common_kwargs['n_layers'],
-                                                           n_attn_heads=common_kwargs['n_attn_heads'], hidden_size=common_kwargs['hidden_size']
-                                                           )       
-                model_root = njoin(ROOT, model_root_dirname)
+                    model_root_dirname = structural_model_root(qk_share=qk_share, n_layers=common_kwargs['n_layers'],
+                                                            n_attn_heads=common_kwargs['n_attn_heads'], hidden_size=common_kwargs['hidden_size']
+                                                            )       
+                    model_root = njoin(ROOT, 'config_qqv' if qk_share else 'config_qkv', dataset_name, model_root_dirname)
                 
             else:                         
                 ngpus, ncpus = 0, 16

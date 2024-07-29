@@ -23,7 +23,10 @@ def str2ls(s):
     if isinstance(s, list):
         return s
     elif isinstance(s, str):
-        return s.split(',')
+        if ',' in s:
+            return s.split(',')
+        else: 
+            return [s]
 
 def get_instance(dir, *args):  # for enumerating each instance of training
     #global start, end, instances, s_part

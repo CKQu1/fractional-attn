@@ -62,11 +62,17 @@ class ModelEmbeddings(nn.Module):
 
         if token_type_ids is None:
             token_type_ids = torch.zeros(input_shape, dtype=torch.long, device=position_ids.device)
-
+    
         if inputs_embeds is None:
             inputs_embeds = self.word_embeddings(input_ids)
         position_embeddings = self.position_embeddings(position_ids)
         token_type_embeddings = self.token_type_embeddings(token_type_ids)
+
+        ##### \begin{debug} #####
+        # print(f'inputs_embeds: {inputs_embeds.shape}')
+        # print(f'position_embeddings: {position_embeddings.shape}')
+        # print(f'token_type_embeddings: {token_type_embeddings.shape}')
+        ##### \end{debug} #####
 
         embeddings = inputs_embeds + position_embeddings + token_type_embeddings
         embeddings = self.LayerNorm(embeddings)

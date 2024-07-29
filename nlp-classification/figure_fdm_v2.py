@@ -101,7 +101,7 @@ for mu_idx in range(mus.shape[0]):
     ax.scatter(mus[mu_idx][0], mus[mu_idx][1], mus[mu_idx][2], c='r', s=30, alpha=0.5)
 ax.set_aspect('equal')
 ax.view_init(azim=-130, elev=0)
-#ax.axis('off')
+ax.axis('off')
 #ax.set_title(rf"$\kappa={kappa}$")
 
 # ----- (c -- d) -----
@@ -162,6 +162,7 @@ for bidx, alpha in enumerate(alphas1):
     ax.set_xticklabels([]);ax.set_yticklabels([])
     ax.set_title(rf'$\alpha = {alpha}$')
 
+    ax.axis('off')
 
 # ---------------------------------------- Row 2 ----------------------------------------
 

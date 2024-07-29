@@ -43,7 +43,7 @@ def plot_vmf_density(fig, axs, axidxs, x, y, z, vertices, mus, kappa):
                     linewidth=0)
     ax.set_aspect('equal')
     ax.view_init(azim=-130, elev=0)
-    #ax.axis('off')
+    ax.axis('off')
     #ax.set_title(rf"$\kappa={kappa}$")    
 
 def get_vmf_samples(sample_size, mus, kappa):

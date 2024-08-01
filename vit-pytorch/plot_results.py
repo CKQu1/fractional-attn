@@ -1,3 +1,4 @@
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcl
 import numpy as np
@@ -5,12 +6,18 @@ import pandas as pd
 import json
 
 from ast import literal_eval
+from matplotlib.transforms import ScaledTranslation
 from os import makedirs
 from os.path import isdir, isfile
+from string import ascii_lowercase
 from time import time
 from tqdm import tqdm
 from constants import *
-from mutils import njoin, str_to_bool, str_to_ls, create_model_dir, convert_train_history
+from mutils import njoin, str2bool, str2ls, create_model_dir, convert_train_history
+from mutils import collect_model_dirs
+
+import warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning) 
 
 # ---------- Global plot settings ----------
 font_type = {'family' : 'sans-serif'}
@@ -20,14 +27,253 @@ plt.rc('legend',fontsize=7)
 #linestyles = ['-', '--', '-.', ':']
 linestyles = ['-', '--', ':']
 colors = list(mcl.TABLEAU_COLORS.keys())
+OTHER_COLORS = ['k', 'lightgreen']
 # ------------------------------------------
 
 
+# Ablation study on alphas
+def plot_fns_ensembles(models_roots, fns_type='spopfnsvit', metrics='val_acc',
+                       cbar_separate=True, display=False):
+    global df, df_setting, df_filtered, fig_file, axs
+    global model_dirs, subpath, dirnames, model_root_dirs
+    global model_combo, model_combos
+    global alphas, epss, DCT_ALL, model_info, model_df, run_perf, dataset, df_model
+    global model_types, model_info, epochs, ensembles
+
+    models_roots = str2ls(models_roots)
+    model_root_dirs = models_roots
+    print(model_root_dirs)
+
+    metrics = str2ls(metrics)    
+    display = str2bool(display)    
+    assert len(metrics) == 1
+
+    suffix = fns_type.split('fns')[-1]
+    DCT_ALL = collect_model_dirs(model_root_dirs[0], suffix=suffix)
+    model_types = list(DCT_ALL.keys())
+    for model_type in model_types:
+        if 'fns' in model_type:
+            df_model = DCT_ALL[model_type]
+            break
+
+    # ----- general settings -----
+    num_attention_heads, num_hidden_layers, hidden_size = df_model.loc[0,['num_attention_heads', 'num_hidden_layers', 'hidden_size']]
+    dataset = df_model.loc[0,'dataset_name']
+
+    # ----- fns setting -----
+    alphas = sorted(df_model.loc[:,'alpha'].unique())[::-1]  # large to small
+    epss = sorted(df_model.loc[:,'bandwidth'].unique())    
+
+    nrows = len(model_root_dirs)    
+    ncols = len(epss)
+
+    figsize = (3*ncols,3*nrows)
+    fig, axs = plt.subplots(nrows,ncols,figsize=figsize,sharex=True,sharey=True)
+    
+    if nrows == 1:
+        axs = np.expand_dims(axs, axis=0)
+    elif nrows > 1 and ncols == 1:
+        axs = np.expand_dims(axs, axis=1)     
+    
+
+    total_figs = 0
+    model_types_plotted = []
+    for row_idx, models_root in enumerate(models_roots):
+        DCT_ALL = collect_model_dirs(models_root)
+        if DCT_ALL == {}:
+            continue
+        for col_idx, eps in tqdm(enumerate(epss)):
+            ax = axs[row_idx, col_idx]
+
+            model_type = fns_type
+            if model_type not in model_types_plotted:
+                model_types_plotted.append(model_type)
+
+            model_df = DCT_ALL[model_type]
+            lstyle_model = LINESTYLE_DICT[model_type]
+
+            # -------------------- FNS --------------------
+            for alpha in alphas:
+                c_hyp = HYP_CMAP(HYP_CNORM(alpha))  # hyperparameter color  
+
+                model_info = model_df[(model_df['alpha']==alpha) & (model_df['bandwidth']==eps) & (model_df['ensembles']>0)]
+                if len(model_info.index) == 0:
+                    continue
+
+                instances = model_info['instances'].item()
+                qk_share = model_info['qk_share'].item()
+                
+                model_instance_path = njoin(model_info['model_dir'].item(), f'model={instances[0]}')
+                if isfile(njoin(model_instance_path, 'run_performance.csv')): 
+                    run_perf = pd.read_csv(njoin(model_instance_path, 'run_performance.csv'))
+                if isfile(njoin(model_instance_path, '_run_performance.csv')): 
+                    run_perf = pd.read_csv(njoin(model_instance_path, '_run_performance.csv'))
+
+                epochs = run_perf.loc[:,'iter'].astype(int) // int(model_info['steps_per_epoch'].item())
+                #epochs = run_perf.loc[:,'epoch']
+
+                #trans = 1 if qk_share else 0.5
+                trans = HYP_TRANS(alpha)
+                if (row_idx,col_idx) == (0,0):
+                    im = ax.plot(epochs, run_perf.loc[:,metrics[0]], linestyle=lstyle_model, c=c_hyp, alpha=trans)
+                                        #,marker=model_markers[model_name], markersize=markersize,
+                                        #,label=model_legend)    
+                else:
+                    ax.plot(epochs, run_perf.loc[:,metrics[0]], linestyle=lstyle_model, c=c_hyp, alpha=trans)
+                                        #,marker=model_markers[model_name], markersize=markersize,
+                                        #,label=model_legend)                                    
+
+                if row_idx == nrows - 1:
+                    if len(epochs) > 50:
+                        ax.set_xticks(epochs[49::50])
+                        ax.set_xticklabels(epochs[49::50])
+                    else:
+                        ax.set_xticks(epochs)
+                        ax.set_xticklabels(epochs)
+
+                # col labels (bandwidth)
+                if row_idx == 0:
+                    ax.set_title(rf'$\varepsilon = {{{eps}}}$')
+                # row labels (Q = K)
+                if col_idx == ncols - 1:
+                    title = r'$W_Q \neq W_K$' if not qk_share else r'$W_Q = W_K$'               
+                    ax.text(1.2, 0.5, title, transform=(
+                                    ax.transAxes + ScaledTranslation(-20/72, +7/72, fig.dpi_scale_trans)),
+                                    va='center', rotation='vertical')  # fontsize='medium',                 
+
+                # subplot labels
+                ax.text(
+                    0.0, 1.0, f'({ascii_lowercase[total_figs]})', transform=(
+                        ax.transAxes + ScaledTranslation(-20/72, +7/72, fig.dpi_scale_trans)),
+                    va='bottom', fontfamily='sans-serif')  # fontsize='medium',              
+
+            if eps == 1:
+
+            # -------------------- SINK --------------------                
+                model_type = 'sink' + suffix
+                if model_type in model_types:
+                    model_df = DCT_ALL[model_type]
+                    lstyle_model = LINESTYLE_DICT[model_type]
+
+                    model_info = model_df.iloc[0,:]
+                    ensembles = model_info['ensembles']
+                    instances = model_info['instances']
+                    qk_share = model_info['qk_share']
+                    if ensembles > 0:
+                        model_instance_path = njoin(model_info['model_dir'], f'model={instances[0]}')
+                        if isfile(njoin(model_instance_path, 'run_performance.csv')): 
+                            run_perf = pd.read_csv(njoin(model_instance_path, 'run_performance.csv'))
+                        if isfile(njoin(model_instance_path, '_run_performance.csv')): 
+                            run_perf = pd.read_csv(njoin(model_instance_path, '_run_performance.csv'))
+
+                        epochs = run_perf.loc[:,'iter'].astype(int) // int(model_info['steps_per_epoch'])
+
+                        trans = 1
+                        ax.plot(epochs, run_perf.loc[:,metrics[0]], linestyle=lstyle_model, c=OTHER_COLORS[0], alpha=trans)    
+
+                    if model_type not in model_types_plotted:
+                        model_types_plotted.append(model_type)
+
+            # -------------------- DP --------------------
+
+                model_type = 'dp' + suffix
+                if model_type in model_types:       
+                    model_df = DCT_ALL[model_type]
+                    lstyle_model = LINESTYLE_DICT[model_type]
+
+                    model_info = model_df.iloc[0,:]
+                    ensembles = model_info['ensembles']
+                    instances = model_info['instances']
+                    qk_share = model_info['qk_share']
+                    if ensembles > 0:
+                        model_instance_path = njoin(model_info['model_dir'], f'model={instances[0]}')
+                        if isfile(njoin(model_instance_path, 'run_performance.csv')): 
+                            run_perf = pd.read_csv(njoin(model_instance_path, 'run_performance.csv'))
+                        if isfile(njoin(model_instance_path, '_run_performance.csv')): 
+                            run_perf = pd.read_csv(njoin(model_instance_path, '_run_performance.csv'))                        
+
+                        epochs = run_perf.loc[:,'iter'].astype(int) // int(model_info['steps_per_epoch'])
+
+                        trans = 1
+                        ax.plot(epochs, run_perf.loc[:,metrics[0]], linestyle=lstyle_model, c=OTHER_COLORS[1], alpha=trans)                                            
+                
+                    if model_type not in model_types_plotted:
+                        model_types_plotted.append(model_type)
+
+            ax.grid()
+            total_figs += 1
+
+    # legend
+    # for alpha in alphas:
+    #     axs[0,0].plot([], [], c=HYP_CMAP(HYP_CNORM(alpha)), linestyle='solid', 
+    #                 label=rf'$\alpha$ = {alpha}')    
+    for model_type in model_types_plotted:   
+        if 'fns' in model_type:
+            color = 'k'
+        elif 'sink' in model_type:
+            color = OTHER_COLORS[0]
+        elif 'dp' in model_type:
+            color = OTHER_COLORS[1]
+        axs[0,0].plot([], [], c=color, linestyle=LINESTYLE_DICT[model_type], 
+                    label=NAMES_DICT[model_type])
+    #axs[0,0].legend(loc='best', ncol=2, frameon=False)           
+    axs[0,0].legend(bbox_to_anchor=(0.85, 1.35),
+                  loc='best', ncol=2, frameon=False)                    
+
+    # Add shared x and y labels
+    fig.text(0.5, 0.01, 'Epochs', fontsize='medium', ha='center')
+    fig.text(0.05, 0.5, 'Eval accuracy', fontsize='medium', va='center', rotation='vertical')    
+
+    # Adjust layout
+    #plt.tight_layout(rect=[0, 0, 0.93, 1])  # Leave space for the right label                 
+
+    dataset_name_short = ''
+    if isinstance(dataset,str):
+        if '_' in dataset:
+            for s in dataset.split('_'):
+                dataset_name_short += s[0]
+        else:
+            dataset_name_short += dataset
+
+    from constants import FIGS_DIR
+    SAVE_DIR = njoin(FIGS_DIR, 'vit-task')
+    if display:
+        plt.show()
+    else:
+        if not isdir(SAVE_DIR): makedirs(SAVE_DIR)
+        fig_file = f'layers={num_hidden_layers}-heads={num_attention_heads}-hidden={hidden_size}-'            
+        fig_file += '-'.join(model_types_plotted)+'_' + f'ds={dataset_name_short}'
+        # if isfile(njoin(SAVE_DIR, fig_file)):
+        #     version = len([fname for fname in os.listdir(SAVE_DIR) if fname==fig_file])
+        #     fig_file += f'-v{version}'
+        fig_file += '.pdf'
+        plt.savefig(njoin(SAVE_DIR, fig_file))            
+        print(f'Figure saved in {njoin(SAVE_DIR, fig_file)}')
+
+    # separate colorbar
+    if cbar_separate:    
+        """
+        #fig.subplots_adjust(right=0.8)
+        fig = plt.figure()
+        cbar_ax = fig.add_axes([0.85, 0.20, 0.03, 0.75])
+        cbar_ticks = list(np.arange(1,2.01,0.2))
+        cbar = fig.colorbar(im, cax=cbar_ax, ticks=cbar_ticks)
+        cbar.ax.set_yticklabels(cbar_ticks)
+        cbar.ax.tick_params(axis='y', labelsize=tick_size)
+        """
+        
+        fig = plt.figure()
+        cbar_ax = fig.add_axes([0.85, 0.20, 0.03, 0.75])
+        cbar_ticks = list(np.linspace(1,2,11))
+        
+        cbar = mpl.colorbar.ColorbarBase(cbar_ax, norm=HYP_CNORM, cmap=HYP_CM)
+        cbar.ax.set_yticklabels(cbar_ticks)
+        cbar.ax.tick_params(axis='y', labelsize=16.5)
+
+        plt.savefig(njoin(SAVE_DIR,"alpha_colorbar.pdf"), bbox_inches='tight')  
+
+
 # Plots average of metrics over ensembles
-"""
-
-"""
-
 def plot_ensembles(model_root_dir, datasets=['cifar10'],  
                    metrics=['train_loss','val_loss','train_acc','val_acc'], 
                    mod_rows=1,display=False):

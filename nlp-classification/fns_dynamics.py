@@ -38,6 +38,11 @@ from matplotlib.transforms import ScaledTranslation
 from string import ascii_lowercase
 from torch.nn import functional as F  
 
+# ----- global plot settings -----
+c_clears = [0.5, 1]
+markers = ['o', 'x']
+# --------------------------------
+
 # True attn score
 def get_markov_matrix(C, alpha, bandwidth, d, a):
 
@@ -65,7 +70,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='main_seq_classification.py training arguments')    
     # parser.add_argument('--train_with_ddp', default=False, type=bool, help='to use DDP or not')
     parser.add_argument('--models_root', default='', help='Pretrained models root')
-
+    parser.add_argument('--N_batch', default=25, type=int)
     parser.add_argument('--wandb_log', default=False, type=bool)
 
     args = parser.parse_args()    
@@ -139,7 +144,8 @@ if __name__ == '__main__':
     EDs = np.zeros([num_hidden_layers, len(alphas), len(epss)])
 
     # Set up plots for later    
-    nrows, ncols = 1 + len(alphas), len(epss)
+    #nrows, ncols = 1 + len(alphas), len(epss)
+    nrows, ncols = 3, len(epss)
     figsize = (3*ncols,3*nrows)
 
     figs, axss = [], []
@@ -182,14 +188,18 @@ if __name__ == '__main__':
 
         # conditions for diffusion maps
         assert config['qk_share'], 'QK weight-tying is required!'
-        assert 'op' in attn_setup['model_name'], 'Orthogonal projection matrix is required!'
+        assert 'opfns' in attn_setup['model_name'], 'Orthogonal projection matrix is required!'
         assert config['num_attention_heads'] == 1, 'Number of attention heads must be 1!'
 
         # ---------------------------------------- 1. Dataset setup ----------------------------------------
         if model_idx == 0:
             print('---------- Dataset setup ----------')
-        
-            max_length = config['attention_window']
+                    
+            if 'fix_embed' in config.keys():
+                fix_embed = config['fix_embed']
+            else:
+                fix_embed = False
+
             dataset_name = attn_setup['dataset_name']
 
             def preprocess_function(examples):
@@ -200,15 +210,40 @@ if __name__ == '__main__':
                 preds = logits.argmax(dim=-1)
                 return preds    
             
-            tokenizer = RobertaTokenizer(tokenizer_file = f"{repo_dir}/roberta-tokenizer/tokenizer.json",
-                                        vocab_file     = f"{repo_dir}/roberta-tokenizer/vocab.json",
-                                        merges_file    = f"{repo_dir}/roberta-tokenizer/merges.txt",
-                                        max_length     = max_length)    
+            ###################
+            if not fix_embed:
+                max_length = config['max_position_embeddings']
+                tokenizer = RobertaTokenizer(tokenizer_file = f"{repo_dir}/roberta-tokenizer/tokenizer.json",
+                                            vocab_file     = f"{repo_dir}/roberta-tokenizer/vocab.json",
+                                            merges_file    = f"{repo_dir}/roberta-tokenizer/merges.txt",
+                                            max_length     = max_length)
+            else:
+                # Load pretrained BERT model and tokenizer
+                from transformers import BertModel, BertTokenizer
+                
+                pretrained_model_name = 'bert-base-uncased'
+                tokenizer = BertTokenizer.from_pretrained(pretrained_model_name)
+                #pretrained_model = BertModel.from_pretrained(pretrained_model_name)  
+
+                max_length = tokenizer.model_max_length - 1
+
+            if dataset_name in ['imdb', 'emotion', 'rotten_tomatoes']:
+                def preprocess_function(examples):
+                    return tokenizer(examples['text'], padding='max_length', truncation=True, max_length=max_length)
+            else:
+                def preprocess_function(examples):
+                    return tokenizer(examples['sentence'], padding='max_length', truncation=True, max_length=max_length)  
+
+            ###################
 
             special_tokens = [word for word in tokenizer.get_vocab().keys() if '<' in word and '>' in word]
 
             # save tokenized dataset
-            tokenized_dataset_dir = njoin(DROOT, "DATASETS", f"tokenized_{dataset_name}")
+            if not fix_embed:
+                tokenized_dataset_dir = njoin(DROOT, "DATASETS", f"tokenized_{dataset_name}-tk=roberta-len={max_length}")
+            else:
+                tokenized_dataset_dir = njoin(DROOT, "DATASETS", f"tokenized_{dataset_name}-tk={pretrained_model_name}-len={max_length}")
+
             if not isdir(tokenized_dataset_dir):         
                 print("Downloading data!") if master_process else None
                 # create cache for dataset
@@ -239,9 +274,15 @@ if __name__ == '__main__':
 
             # data            
             dataset = attn_setup['dataset_name']
-            #train_bs = int(train_setting.loc[0,'batch_size'])
-            train_bs = 1
-            eval_bs = 1    
+            #batch_size = int(train_setting.loc[0,'batch_size'])
+            batch_size = 1                
+
+            N_batch = args.N_batch
+            seq_lens = train_dataset['attention_mask'].sum(-1)
+            max_seq_len = seq_lens.max()
+
+            idxs_max = torch.argsort(seq_lens, descending=True)
+            bidxs = list(idxs_max[:N_batch].numpy())
 
         # ---------------------------------------- 2. Load pretrained model ----------------------------------------
         print(f'---------- Load pretrained model: (alpha, eps) = ({alpha}, {bandwidth}) ----------')
@@ -268,25 +309,21 @@ if __name__ == '__main__':
         checkpoint = torch.load(njoin(model_dir, f'checkpoint-{checkpoint_steps[-1]}', 'pytorch_model.bin'), map_location=dev)
         model.load_state_dict(checkpoint)
         model.eval() 
-
-
-        N_batch = 4
-        c_clears = [0.5, 1]
-        markers = ['o', 'x']
+     
         ###### 1. Compute geodesic distances and attention-score ######
 
-        dist_mses = []
-        seq_lens = train_dataset['attention_mask'].sum(-1)
-        idxs_max = torch.argsort(seq_lens, descending=True)
-        bidxs = list(idxs_max[:N_batch].numpy())
-        #bidxs = [idxs_max[1].item()]        
-        for bidx in tqdm(bidxs):         
+        dist_mses = []   
+
+
+        pairwise_overlaps = np.empty([2, num_hidden_layers, N_batch, max_seq_len])  # for attn score and weights     
+        pairwise_overlaps[:] = np.nan        
+        for b_ii, bidx in tqdm(enumerate(bidxs)):         
 
             ###### 2. Extract single data-point only ######
-            X = train_dataset['input_ids'][bidx * train_bs : (bidx+1) * train_bs]  # batch_size must be one if mask is set to None
-            Y = train_dataset['label'][bidx * train_bs : (bidx+1) * train_bs]
-            bool_mask = train_dataset['attention_mask'][bidx * train_bs : (bidx+1) * train_bs]        
-            if train_bs == 1:  # remove padding, only keep the seq from sos to eos        
+            X = train_dataset['input_ids'][bidx * batch_size : (bidx+1) * batch_size]  # batch_size must be one if mask is set to None
+            Y = train_dataset['label'][bidx * batch_size : (bidx+1) * batch_size]
+            bool_mask = train_dataset['attention_mask'][bidx * batch_size : (bidx+1) * batch_size]        
+            if batch_size == 1:  # remove padding, only keep the seq from sos to eos        
                 X_len = bool_mask.sum().item()
                 X = X[:,:X_len]  
                 attention_mask = None
@@ -369,9 +406,14 @@ if __name__ == '__main__':
                     elif manifold == 'sphere':
                         g_dist = Dist                
                     attn_score = torch.exp(-(g_dist/bandwidth**0.5)**(alpha/(alpha-1)))
-                #attn_score = attn_score.masked_fill(attention_mask_expanded==0, -1e9)
 
+                #attn_score = attn_score.masked_fill(attention_mask_expanded==0, -1e9)
                 #assert (attn_score==attn_score.transpose(2,3)).sum() == attn_score.numel()
+
+                for token_step in range(1, attn_score[0,0].shape[0] - 1):
+                    selected_entries = torch.diagonal_scatter(torch.zeros(attn_score[0,0].shape), torch.ones(attn_score[0,0].shape[0] - token_step), token_step)
+                    selected_entries += torch.diagonal_scatter(torch.zeros(attn_score[0,0].shape), torch.ones(attn_score[0,0].shape[0] - token_step), -token_step)
+                    pairwise_overlaps[0, hidx, b_ii, token_step] = (attn_score[0,0] * selected_entries).mean()
 
                 ###### 3. Extended analysis on removing non-uniform sampling (MC equiv to attn-score) ######
 
@@ -457,9 +499,13 @@ if __name__ == '__main__':
                 else:
                     attn_weights = F.normalize(attn_score,p=1,dim=3)  # can do this as the attn weights are always positive     
 
-                # remove dropout for eval
                 # attn_weights = F.dropout(attn_weights, p=model.transformer.encoder.layer[hidx].attention.self.dropout, 
                 #                          training=model.transformer.encoder.layer[hidx].attention.self.training)           
+
+                for token_step in range(1, attn_weights[0,0].shape[0] - 1):
+                    selected_entries = torch.diagonal_scatter(torch.zeros(attn_weights[0,0].shape), torch.ones(attn_weights[0,0].shape[0] - token_step), token_step)
+                    selected_entries += torch.diagonal_scatter(torch.zeros(attn_weights[0,0].shape), torch.ones(attn_weights[0,0].shape[0] - token_step), -token_step)
+                    pairwise_overlaps[1, hidx, b_ii, token_step] = (attn_weights[0,0] * selected_entries).mean()
 
                 K_hat = torch.diag(D_tilde**(-0.5)) @ K_tilde @ torch.diag(D_tilde**(-0.5))
                 K_hat_sym = 0.5*(K_hat + K_hat.T)
@@ -514,21 +560,32 @@ if __name__ == '__main__':
 
                 # Eigenvectors
                 # Query/key projection onto lower-dim
-                eidx1, eidx2 = seq_len - 1, seq_len - 2                
-                axss[hidx][mr_ii + ncols * row].scatter(eigvals[eidx1] * eigvecs[:,eidx1], eigvals[eidx2] * eigvecs[:,eidx2], 
-                                                        alpha=c_clears[Y.item()], marker=markers[Y.item()],
-                                                        c=colors[Y.item()], s=1.5)
+                # eidx1, eidx2 = seq_len - 1, seq_len - 2                
+                # axss[hidx][mr_ii + ncols * row].scatter(eigvals[eidx1] * eigvecs[:,eidx1], eigvals[eidx2] * eigvecs[:,eidx2], 
+                #                                         alpha=c_clears[Y.item()], marker=markers[Y.item()],
+                #                                         c=colors[Y.item()], s=1.5)
 
                 # ---------- Message ----------
                 # print(f'Non-uniform eigval min: {eigvals.min()}, max: {eigvals.max()}')
                 # print('\n')  
 
+        # attn-score and weights
+        for hidx in range(num_hidden_layers):
+            for ii in range(pairwise_overlaps.shape[0]):
+                axss[hidx][mr_ii + ncols*(ii + 1)].plot(np.arange(max_seq_len), pairwise_overlaps[ii,hidx].mean(0),
+                                                     c=colors[1])                
+
     # --------------------
     for hidx in range(num_hidden_layers):
 
+        # share x, y axis for eigvecs (from second row of subfigures)
+        share_xy_list = list(axss[hidx][nrows:])
+        share_xy_list[0].get_shared_x_axes().join(share_xy_list[0], *share_xy_list)        
+
         for mr_ii in range(len(axss[hidx])):
             if mr_ii < ncols:
-                axss[hidx][mr_ii].set_xscale('log'); axss[hidx][mr_ii].set_yscale('log')        
+                axss[hidx][mr_ii].set_xscale('log') 
+                #axss[hidx][mr_ii].set_yscale('log')        
 
             # ----- plot labels -----
 
@@ -548,6 +605,14 @@ if __name__ == '__main__':
         for col in range(ncols):
             bandwidth = epss[col]
             axss[hidx][col].set_title(rf'$\varepsilon = {{{bandwidth}}}$')   
+
+        # axis labels
+        axss[hidx][0].set_ylabel('Eigenspectrum')
+        axss[hidx][ncols].set_ylabel('Attn scores')
+        axss[hidx][ncols*2].set_ylabel('Attn weights')
+
+        for col in range(ncols):
+            axss[hidx][col + ncols*(nrows-1)].set_xlabel('Token steps')
 
         SAVE_DIR = njoin(FIGS_DIR, 'nlp-task')
         if not isdir(SAVE_DIR): makedirs(SAVE_DIR)

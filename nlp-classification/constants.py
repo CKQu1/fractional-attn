@@ -3,13 +3,26 @@ import os
 from mutils import njoin
 from matplotlib.cm import get_cmap
 
-PROJECTS = ['phys_DL','PDLAI','dnn_maths','dyson','vortex_dl','frac_attn']
-#DROOT = njoin(os.path.abspath(os.getcwd()), 'droot')
-DROOT = njoin('/project/frac_attn/fractional-attn/nlp-classification', '.droot')
+# ----- ARTEMIS -----
+PROJECTS = ['phys_DL','PDLAI','dnn_maths','dyson','vortex_dl','frac_attn', 'ddl']
+# -------------------
+
+# ----- PHYSICS -----
+PHYSICS_SOURCE = '/usr/physics/python/Anaconda3-2022.10/etc/profile.d/conda.sh'
+PHYSICS_CONDA = 'frac_attn'
+# -------------------
+
+# ----- PATHS -----
+RT = os.path.abspath(os.getcwd())
+if 'project' in RT:
+    DROOT = njoin('/project/frac_attn/fractional-attn/nlp-classification', '.droot')
+else:
+    DROOT = njoin(RT, '.droot')
+
 FIGS_DIR = njoin(DROOT, 'figs_dir')
 
 BPATH = njoin('/project')  # path for binding to singularity container
-SPATH = njoin('/project/frac_attn/built_containers/FaContainer_v4.sif')  # singularity container path
+SPATH = njoin('/project/frac_attn/built_containers/FaContainer_v5.sif')  # singularity container path
 
 MODEL_NAMES = ['fnsformer', 
                'spfnsformer','spopfnsformer',
@@ -31,6 +44,13 @@ NAMES_DICT = {'fnsformer': 'FNS',
 HYP_CM = 'turbo'
 HYP_CMAP = get_cmap(HYP_CM)
 HYP_CNORM = mpl.colors.Normalize(vmin=1, vmax=2)
+
+def HYP_TRANS(alpha):
+    min_trans, max_trans = 0.5, 1
+    min_alpha, max_alpha = 1, 2
+    m = (min_trans - max_trans) / (max_alpha - min_alpha)
+    b = max_trans - m * min_alpha
+    return m*alpha + b
 
 LINESTYLE_DICT = {'spfnsformer': 'solid', 'spopfnsformer': (0,(5,1)),               
                   'rdfnsformer': 'solid', 'rdopfnsformer': (0,(5,1)),

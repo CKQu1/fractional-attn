@@ -579,7 +579,7 @@ class SPFNSSelfAttention(nn.Module):
 
         self.qk_share = config.qk_share
         self.sphere_radius = config.sphere_radius
-        self.mask_val = config.mask_val
+        self.mask_val = config.mask_val  # mask for g_dist
         self.bias = config.qkv_bias
 
         self.query = nn.Linear(config.hidden_size, self.embed_dim, bias=self.bias)
@@ -731,6 +731,8 @@ class RDFNSSelfAttention(nn.Module):
         self.bandwidth = bandwidth
         self.a = a
 
+        self.mask_val = config.mask_val  # mask for attn_score
+
         self.qk_share = config.qk_share
         self.bias = config.qkv_bias
 
@@ -768,6 +770,8 @@ class RDFNSSelfAttention(nn.Module):
         alpha = self.alpha
         bandwidth = self.bandwidth
         a = self.a
+
+        mask_val = self.mask_val  # mask for attn_score
 
         if alpha < 2:
             d_intrinsic = self.d_intrinsic
@@ -834,7 +838,7 @@ class RDFNSSelfAttention(nn.Module):
             # bool_mask = (attention_mask>=0).long()
             # attention_mask_expanded = (bool_mask.unsqueeze(-1)@bool_mask.unsqueeze(1)).view(batch_size, 1, seq_len, seq_len).expand(-1, num_heads, -1, -1) 
 
-            attn_score = attn_score.masked_fill(attention_mask_expanded==0, -1e9)
+            attn_score = attn_score.masked_fill(attention_mask_expanded==0, mask_val)
 
         attn_score_shape = attn_score.shape
         #bound = 1e9 * seq_len
@@ -917,7 +921,7 @@ class SPOPFNSSelfAttention(nn.Module):
 
         self.qk_share = config.qk_share
         self.sphere_radius = config.sphere_radius
-        self.mask_val = config.mask_val
+        self.mask_val = config.mask_val  # mask for g_dist
         self.bias = config.qkv_bias
 
         self.query = orthogonal(nn.Linear(config.hidden_size, self.embed_dim, bias=self.bias))
@@ -1080,6 +1084,8 @@ class RDOPFNSSelfAttention(nn.Module):
         self.bandwidth = bandwidth
         self.a = a
 
+        self.mask_val = config.mask_val  # mask for attn_score
+
         self.qk_share = config.qk_share
         self.bias = config.qkv_bias
 
@@ -1119,6 +1125,8 @@ class RDOPFNSSelfAttention(nn.Module):
         bandwidth = self.bandwidth
         a = self.a
 
+        mask_val = self.mask_val
+
         if alpha < 2:
             d_intrinsic = self.d_intrinsic
 
@@ -1141,7 +1149,6 @@ class RDOPFNSSelfAttention(nn.Module):
         value_vectors = value_vectors.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2)                            # (B,H,N,D)                 
 
         # pairwise Euclidean distance (H,BN,D) @ (H,D,BN)
-        eps = 1e-7  # for limiting the divergence from acos
         if not self.qk_share:
             key_vectors = self.key(hidden_states) 
             key_vectors = key_vectors.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2)      # (B,H,N,D)              
@@ -1156,11 +1163,11 @@ class RDOPFNSSelfAttention(nn.Module):
 
         if alpha < 2:            
             #attn_score = (1 + (d_intrinsic**(1/d_intrinsic) - 1) / math.sqrt(d_intrinsic) * g_dist / bandwidth**0.5)**(-d_intrinsic-alpha)
-            attn_score = (1 + 1 / math.sqrt(d_intrinsic) * g_dist / bandwidth**0.5)**(-d_intrinsic-alpha)
-            # attn_score = (1 + g_dist / bandwidth**0.5)**(-d_intrinsic-alpha)
+            #attn_score = (1 + 1 / math.sqrt(d_intrinsic) * g_dist / bandwidth**0.5)**(-d_intrinsic-alpha)
+            attn_score = (1 + g_dist / bandwidth**0.5)**(-d_intrinsic-alpha)
         else:             
-            attn_score = torch.exp(-(g_dist / head_dim**0.5 / bandwidth**0.5)**(alpha/(alpha-1)))
-            # attn_score = torch.exp(-(g_dist / bandwidth**0.5)**(alpha/(alpha-1)))            
+            #attn_score = torch.exp(-(g_dist / head_dim**0.5 / bandwidth**0.5)**(alpha/(alpha-1)))
+            attn_score = torch.exp(-(g_dist / bandwidth**0.5)**(alpha/(alpha-1)))            
 
         if attention_mask is not None:
             # type 1: key_pad_mask
@@ -1171,7 +1178,7 @@ class RDOPFNSSelfAttention(nn.Module):
             # bool_mask = (attention_mask>=0).long()
             # attention_mask_expanded = (bool_mask.unsqueeze(-1)@bool_mask.unsqueeze(1)).view(batch_size, 1, seq_len, seq_len).expand(-1, num_heads, -1, -1)   
 
-            attn_score = attn_score.masked_fill(attention_mask_expanded==0, -1e9)
+            attn_score = attn_score.masked_fill(attention_mask_expanded==0, mask_val)
 
         attn_score_shape = attn_score.shape
         #attn_score = attn_score.view(-1, attn_score_shape[2], attn_score_shape[3])
@@ -1246,7 +1253,7 @@ class SINKSelfAttention(nn.Module):
         self.n_it = n_it
         self.bandwidth = bandwidth
         self.qk_share = config.qk_share
-        self.mask_val = config.mask_val
+        self.mask_val = config.mask_val  # mask for attn_score
         self.bias = config.qkv_bias
 
         self.query = nn.Linear(config.hidden_size, self.embed_dim, bias=self.bias)

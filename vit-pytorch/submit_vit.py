@@ -75,67 +75,74 @@ if __name__ == '__main__':
     # ----- System -----
     system = 'ARTEMIS' if 'project' in DROOT else 'PHYSICS'    
     date_str = datetime.today().strftime('%Y-%m-%d')    
-    script_name = "ddp_main.py"  
+    #script_name = "ddp_main.py"  
+    script_name = "main.py"
     nstack = 1  
 
-    dataset_names = ['cifar10']   # add or change datasets here    
+    # add or change datasets here
+    DATASET_NAMES = ['cifar10']  #  'pathfinder-classification'            
     
-    debug_mode = False
-    print(f'---------- debug_mode = {debug_mode} ---------- \n')
-    
-    ROOT = njoin(DROOT, 'smallest-model')
+    ROOT = njoin(DROOT, 'proper-train')    
     job_path = njoin(ROOT, 'jobs_all', date_str)
 
     #instances = list(range(5))    
     instances = [0]
-    #instances = [1,2,3,4]
-    kwargss_all = []    
-    for instance in instances:
-        for didx, dataset_name in enumerate(dataset_names):
-            if not debug_mode:
+    model_sizes = ['small', 'large']
+
+    for model_size in model_sizes:
+        kwargss_all = []    
+        for instance in instances:
+            for didx, dataset_name in enumerate(DATASET_NAMES):            
                 select = 1; ngpus, ncpus = 0, 1                            
-                walltime, mem = '24:59:59', '8GB'                                             
+                walltime = '23:59:59'
+                mem = '18GB'                                              
                 num_proc = ngpus if ngpus > 1 else ncpus
 
-                for qk_share in [True]:
+                for qk_share in [True, False]:
                     kwargss = []
-                    for model_name in ['opfnsvit']:
-                        for alpha in [1.2, 2]:
-                            for bandwidth in [1]:
-                                for manifold in ['rd', 'sphere']:
-                                    kwargss.append({'model_name':model_name,'manifold':manifold,'alpha': alpha,'a': 0,'bandwidth':bandwidth})            
+
+                    if model_size == 'small':
+                        for model_name in ['opfnsvit']:                        
+                            for alpha in [1.2, 1.6, 2]:                            
+                                for bandwidth in [0.01, 0.1, 0.5, 1]:
+                                    for manifold in ['rd', 'sphere']:                                
+                                        kwargss.append({'model_name':model_name,'manifold':manifold,'alpha': alpha,'a': 0,'bandwidth':bandwidth})       
+                    else:
+                        for model_name in ['opfnsvit']:                        
+                            for alpha in [1.2, 1.6, 2]:                            
+                                for bandwidth in [1]:
+                                    for manifold in ['rd', 'sphere']:                                
+                                        kwargss.append({'model_name':model_name,'manifold':manifold,'alpha': alpha,'a': 0,'bandwidth':bandwidth})                          
+
+                    #kwargss.append({'model_name':'opfnsvit','manifold':'sphere','alpha': 1.2,'a': 0,'bandwidth':1})
 
                     kwargss.append({'model_name':'dpvit'})
-
-                    for n_it in [1, 3]:
+                    for n_it in [1]:
                         kwargss.append({'model_name':'sinkvit','n_it':n_it})
-
-                    epochs = 50                                              
+                        
                     common_kwargs = {'instance':          instance,
-                                    'qk_share':          qk_share,
-                                    'n_layers':          1,
-                                    'n_attn_heads':      1,   
-                                    'hidden_size':       48,
-                                    'max_iters':         15000,
-                                    'eval_interval':     50,
-                                    'eval_iters':        50,                     
-                                    'train_bs':          16,                                                                          
+                                    'qk_share':          qk_share, 
+                                    'hidden_size':       48,                                                                                                                                 
                                     'weight_decay':      0,
-                                    'lr_scheduler_type': 'constant',
-                                    'max_lr':            5e-5,
-                                    'min_lr':            5e-6,
+                                    #'lr_scheduler_type': 'constant',
+                                    'lr_scheduler_type': 'cosine',
+                                    'max_lr':            1e-4,
+                                    'min_lr':            1e-5
                                     }  
 
-                    if epochs is not None:                    
-                        train_data_size = 25000
-                        #steps_per_epoch = train_data_size // (num_proc * common_kwargs['train_bs']) + 1                      
-                        steps_per_epoch = train_data_size // common_kwargs['train_bs'] + 1
-                        common_kwargs['max_iters'] = steps_per_epoch * epochs
-                        common_kwargs['eval_interval'] = steps_per_epoch
-                        common_kwargs['log_interval'] = steps_per_epoch  # for mfu
+                    if model_size == 'small':
+                        common_kwargs['epochs'] = 200
+                        common_kwargs['n_layers'] = 1
+                        common_kwargs['n_attn_heads'] = 1   
+                        common_kwargs['train_bs'] = 32                         
+                    else:
+                        common_kwargs['epochs'] = 100
+                        common_kwargs['n_layers'] = 2
+                        common_kwargs['n_attn_heads'] = 4    
+                        common_kwargs['train_bs'] = 16                         
                         
-                    if num_proc > 1:
-                        common_kwargs['grad_accum_step'] = num_proc * 2
+                    # if num_proc > 1:
+                    #     common_kwargs['grad_accum_step'] = num_proc * 2
 
                     use_custom_optim = False if 'use_custom_optim' not in common_kwargs.keys() else common_kwargs['use_custom_optim']                                 
 
@@ -144,68 +151,27 @@ if __name__ == '__main__':
                                                             )       
                     model_root = njoin(ROOT, 'config_qqv' if qk_share else 'config_qkv', dataset_name, model_root_dirname)
                 
-            else:                         
-                ngpus, ncpus = 0, 16
-                select = 1  
-                walltime, mem = '23:59:59', '6GB'                
+            
+                    for idx in range(len(kwargss)):
+                        # function automatically creates dir
+                        kwargss[idx]["dataset"] = dataset_name    
+                        kwargss[idx]['model_root'] = model_root
+                    
+                    kwargss = add_common_kwargs(kwargss, common_kwargs)
+                    kwargss_all += kwargss
+
+        print(f'Total jobs: {len(kwargss_all)} \n')              
+
+        commands, script_names, pbs_array_trues, kwargs_qsubs =\
+                job_setup(script_name, kwargss_all,
+                        ncpus=ncpus,
+                        ngpus=ngpus,
+                        select=select, 
+                        walltime=walltime,
+                        mem=mem,
+                        job_path=job_path,
+                        nstack=nstack,
+                        system=system)
         
-                kwargss = []
-                for model_name in ['opfnsvit']:
-                    for alpha in [1.2, 2]:
-                        for bandwidth in [1]:
-                            for manifold in ['rd', 'sphere']:
-                                kwargss.append({'model_name':model_name,'manifold':manifold,'alpha': alpha,'a': 0,'bandwidth':bandwidth}) 
-                 
-                kwargss = [{'model_name':'dmfnsvit', 'alpha': 1.2, 'a': 0}]                         
-
-                common_kwargs = {'n_layers':          2,
-                                 'n_attn_heads':      2,    
-                                 'max_iters':         1000,
-                                 'eval_interval':     200,
-                                 'eval_iters':        200,                     
-                                 'train_bs':          8,                                                                          
-                                 'weight_decay':      0
-                                 }      
-
-                #model_root = njoin(DROOT, 'ddp_test_stage')                                                                                
-                model_root = njoin(DROOT, 'ddp_test_stage', f'select={select}-ncpus={ncpus}-ngpus={ngpus}')
-            
-            for idx in range(len(kwargss)):
-                # function automatically creates dir
-                kwargss[idx]["dataset"] = dataset_name    
-                kwargss[idx]['model_root'] = model_root
-            
-            kwargss = add_common_kwargs(kwargss, common_kwargs)
-            kwargss_all += kwargss
-
-    print(f'Total jobs: {len(kwargss_all)} \n')
-    # for xx in kwargss_all:
-    #     print(xx)  
-    #     print('\n')
-    #quit()  # delete      
-
-    # ----- verion 1 -----
-
-    # train_submit(script_name, kwargss_all,
-    #              ncpus=ncpus,
-    #              ngpus=ngpus,
-    #              select=select, 
-    #              walltime=walltime,
-    #              mem=mem,
-    #              job_path=model_root)
-
-    # ----- verion 2 -----
-
-    commands, script_names, pbs_array_trues, kwargs_qsubs =\
-            job_setup(script_name, kwargss_all,
-                     ncpus=ncpus,
-                     ngpus=ngpus,
-                     select=select, 
-                     walltime=walltime,
-                     mem=mem,
-                     job_path=job_path,
-                     nstack=nstack,
-                     system=system)
-    
-    for i in range(len(commands)):
-        qsub(f'{commands[i]} {script_names[i]}', pbs_array_trues[i], path=job_path, **kwargs_qsubs[i])         
+        for i in range(len(commands)):
+            qsub(f'{commands[i]} {script_names[i]}', pbs_array_trues[i], path=job_path, **kwargs_qsubs[i])         

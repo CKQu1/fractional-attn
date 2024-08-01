@@ -63,59 +63,84 @@ if __name__ == '__main__':
     script_name = "main.py" 
     # settings
     config_files = ['config_qqv.json', 'config_qkv.json']  # 'config_qkv.json'
+    #config_files = ['config_qqv.json']
     # add or change datasets here
-    dataset_names = ['rotten_tomatoes','imdb','emotion']
-    max_lens = [128, 1024, 128]        
+    DATASET_NAMES = ['rotten_tomatoes','imdb','emotion']
+    #MAX_LENS = [128, 1024, 128]        
+    MAX_LENS = [128, 512, 128]
     
+    ROOT = njoin(DROOT, 'fix_embed-smallest-v2')
+
     kwargss_all = []        
     #for didx in [0,1]:
     #for didx in [0]:
     for didx in [1]:
 
-        dataset_name = dataset_names[didx]
+        dataset_name = DATASET_NAMES[didx]
 
         # CPUs
         select = 1; ngpus, ncpus = 0, 20
         #select = 2; ngpus, ncpus = 0, 12 
-        mem = '20GB'       
+        #mem = '20GB'       
+        mem = '12GB'  # 1L1H
          
         # GPUs
         # select = 1; ngpus, ncpus = 1, 0 
         # mem = '16GB'
             
         walltime = '23:59:59'            
+        #walltime = '35:59:59'
 
-        seeds = [0]                                             
-        for config_file in config_files:
-            # kwargss = [{'model_name':'opfnsformer','alpha':1.6,'a': 0,'bandwidth':1,'manifold':'sphere'},   
-            #            {'model_name':'opfnsformer','alpha':1.8,'a': 0,'bandwidth':1,'manifold':'sphere'},                   
-            #            {'model_name':'opfnsformer','alpha':2,'a': 0,'bandwidth':1,'manifold':'sphere'}                                      
-            #            ] 
+        seeds = [0]   
+                                                  
+        for config_file in config_files:        
 
-            kwargss = [{'model_name':'fnsformer','alpha':2,'a': 0,'bandwidth':0.1,'manifold':'sphere'},                  
-                       {'model_name':'opfnsformer','alpha':2,'a': 0,'bandwidth':0.1,'manifold':'sphere'}                                      
-                       ] 
+            # if 'qqk' in config_file:
+            #     kwargss = [{'model_name':'fnsformer','alpha':2,'a': 0,'bandwidth':0.1,'manifold':'sphere'},                  
+            #                {'model_name':'opfnsformer','alpha':2,'a': 0,'bandwidth':0.1,'manifold':'sphere'},
+            #                {'model_name':'fnsformer','alpha':2,'a': 0,'bandwidth':0.01,'manifold':'sphere'}                                                              
+            #                ] 
+            # else:
+            #     kwargss = [{'model_name':'fnsformer','alpha':2,'a': 0,'bandwidth':0.1,'manifold':'sphere'},                  
+            #                {'model_name':'opfnsformer','alpha':2,'a': 0,'bandwidth':0.1,'manifold':'sphere'}                                                              
+            #                ] 
 
-            # {'model_name':'fnsformer','alpha':1.5,'a': 0,'bandwidth':1,'manifold':'rd'},                      
-            # {'model_name':'fnsformer','alpha':2,'a': 0,'bandwidth':1,'manifold':'rd'}                        
+            kwargss = []
+            for alpha in [1.2, 1.6, 2]:
+            #for alpha in [1.2, 2]:
+                for bandwidth in [0.01, 0.1, 0.5, 1]:                                    
+                    kwargss.append({'model_name':'opfnsformer','alpha':alpha,'a': 0,'bandwidth':bandwidth,'manifold':'sphere'})
+                    #kwargss.append({'model_name':'opfnsformer','alpha':alpha,'a': 0,'bandwidth':bandwidth,'manifold':'rd'})
+                    #kwargss.append({'model_name':'fnsformer','alpha':alpha,'a': 0,'bandwidth':bandwidth,'manifold':'sphere'})
+
+            kwargss.append({'model_name': 'dpformer'})
+            for n_it in [1,3]:
+                kwargss.append({'model_name': 'sinkformer', 'n_it': n_it})
 
             f = open(njoin('models', 'all_configs', config_file))
             common_kwargs = json.load(f)
             f.close()        
-            common_kwargs['max_len'] = max_lens[didx]
-            common_kwargs['qk_share'] = str2bool(common_kwargs['qk_share'])
+
+            # add more settings here
+            common_kwargs['max_len'] = MAX_LENS[didx]            
+            common_kwargs['fix_embed'] = True
+            common_kwargs['epochs'] = 10
+
+            # test-run
+            # common_kwargs['max_steps'] = 10
+            # common_kwargs['logging_steps'] = 5
+            # common_kwargs['eval_steps'] = 5
+            # common_kwargs['save_steps'] = 5
 
             for seed in seeds:                                                             
 
                 common_kwargs['seed'] = seed                
                 #use_custom_optim = False if 'use_custom_optim' not in common_kwargs.keys() else common_kwargs['use_custom_optim']                                                        
                 model_root_dirname = structural_model_root(dataset_name=dataset_name, **common_kwargs)      
-
-                #model_root = njoin(DROOT, 'finetune-v5', model_root_dirname)                
-                #model_root = njoin(DROOT, config_file.split('.')[0], model_root_dirname)
-                ROOT = njoin(DROOT, 'trained_models_v2')
-                job_path = njoin(ROOT, date_str)
+                
+                job_path = njoin(ROOT, 'jobs_all', date_str)
                 model_root = njoin(ROOT, config_file.split('.')[0], model_root_dirname)
+
                 if not isdir(model_root): makedirs(model_root)
                 if not isdir(job_path): makedirs(job_path)
 
@@ -130,10 +155,11 @@ if __name__ == '__main__':
     # for xx in kwargss_all:
     #     print(xx)  
     #     print('\n')     
+    #quit()
     train_submit(script_name, kwargss_all,
                  ncpus=ncpus,
                  ngpus=ngpus,
                  select=select, 
                  walltime=walltime,
                  mem=mem,
-                 job_path=ROOT)
+                 job_path=job_path)

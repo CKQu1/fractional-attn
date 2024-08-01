@@ -38,11 +38,11 @@ python -i main.py --n_layers=1 --n_attn_heads=2 --model_name=dpformer\
  --divider=1 --warmup_steps=0 --grad_accum_step=1 --dataset_name=rotten_tomatoes\
  --model_root=.droot/debug-mode
 
-python -i main.py --n_layers=1 --n_attn_heads=2\
- --model_name=fnsformer --manifold=rd --qk_share=False\
+python -i main.py --n_layers=2 --n_attn_heads=1\
+ --model_name=opfnsformer --manifold=rd --qk_share=False\
  --alpha=1.5 --bandwidth=0.5 --a=0\
  --lr_scheduler_type=constant\
- --max_len=256 --max_steps=2 --logging_steps=2 --save_steps=2 --eval_steps=2\
+ --max_len=256 --max_steps=50 --logging_steps=10 --save_steps=10 --eval_steps=10\
  --divider=1 --warmup_steps=0 --grad_accum_step=1 --dataset_name=rotten_tomatoes\
  --model_root=.droot/debug-mode
 
@@ -93,16 +93,17 @@ if __name__ == '__main__':
     # General
     #parser.add_argument('--sparsify_type', default=None, type=str)
     parser.add_argument('--qk_share', type=str2bool, nargs='?', const=True, default=False)
-    parser.add_argument('--qkv_bias', default=False, type=bool)
+    parser.add_argument('--qkv_bias', type=str2bool, nargs='?', const=True, default=False)
     parser.add_argument('--n_layers', default=1, type=int)
     parser.add_argument('--n_attn_heads', default=2, type=int)
     parser.add_argument('--hidden_size', default=768, type=int)    
     parser.add_argument('--model_name', default='fnsformer', type=str, help='v3fnsformer | sinkformer | dpformer') 
-    parser.add_argument('--manifold', default='sphere', type=str, help='sphere | rd') 
+    parser.add_argument('--fix_embed', type=str2bool, nargs='?', const=True, default=False) 
     # FNSformer
     parser.add_argument('--alpha', default=1, type=float)
     parser.add_argument('--bandwidth', default=1, type=float) 
     parser.add_argument('--a', default=0, type=float, help='0 | 0.5 | 1')
+    parser.add_argument('--manifold', default='sphere', type=str, help='sphere | rd')
     # Sinkformer      
     parser.add_argument('--n_it', default=1, type=int)
 
@@ -110,6 +111,8 @@ if __name__ == '__main__':
     parser.add_argument('--max_len', default=1024, type=int)
     parser.add_argument('--dataset_name', default='imdb', type=str)
     parser.add_argument('--divider', default=1, type=int)  # downsizing the test dataset
+    # LRA
+    parser.add_argument('--cache_dir', default=njoin(DROOT, 'cache_dir'), type=str)
     # Path settings
     parser.add_argument('--model_root', default='', type=str, help='root dir of storing the model')
 
@@ -148,18 +151,6 @@ if __name__ == '__main__':
     logger = logging.get_logger()
 
     # ---------------------------------------- 1. Dataset setup ----------------------------------------
-
-    max_length = args.max_len    
-    if args.dataset_name in ['imdb', 'emotion']:
-        def preprocess_function(examples):
-            return tokenizer(examples['text'], padding='max_length', truncation=True, max_length=max_length)
-    else:
-        def preprocess_function(examples):
-            return tokenizer(examples['sentence'], padding='max_length', truncation=True, max_length=max_length)        
-
-    def preprocess_logits_for_metrics(logits, labels):
-        preds = logits.argmax(dim=-1)
-        return preds
         
     # [None, 'micro', 'macro', 'weighted']
     average_type = 'micro'
@@ -186,60 +177,133 @@ if __name__ == '__main__':
     #     predictions = np.argmax(logits, axis=-1)
     #     return metric.compute(predictions=predictions, references=labels)    
     
-    tokenizer = RobertaTokenizer(tokenizer_file = f"{repo_dir}/roberta-tokenizer/tokenizer.json",
-                                 vocab_file     = f"{repo_dir}/roberta-tokenizer/vocab.json",
-                                 merges_file    = f"{repo_dir}/roberta-tokenizer/merges.txt",
-                                 max_length     = max_length)
-    ########## add other options here ##########
+    def preprocess_logits_for_metrics(logits, labels):
+        preds = logits.argmax(dim=-1)
+        return preds
 
-    # save tokenized dataset
-    tokenized_dataset_dir = njoin(DROOT, "DATASETS", f"tokenized_{args.dataset_name}")
-    if not isdir(tokenized_dataset_dir):         
-        print("Downloading data!") if master_process else None
-        # create cache for dataset
-        dataset = get_dataset(args.dataset_name, njoin(DROOT, "DATASETS"))        
-        tokenized_dataset = dataset.map(preprocess_function, batched=True)
-        column_names = get_dataset_cols(tokenized_dataset)
-        if 'text' in column_names:
-            tokenized_dataset = tokenized_dataset.map(remove_columns=['text'])
-        if not isdir(tokenized_dataset_dir): os.makedirs(tokenized_dataset_dir)
-        tokenized_dataset.save_to_disk(tokenized_dataset_dir)
-        del dataset  # alleviate memory
-    else:        
-        print("Data downloaded, loading from local now! \n") if master_process else None
-        tokenized_dataset = load_from_disk(tokenized_dataset_dir)
-    if args.dataset_name != 'imdb':
-        tokenized_dataset = process_dataset_cols(tokenized_dataset)
+    if args.dataset_name in ['rotten_tomatoes','imdb','emotion']:        
 
-    keys = list(tokenized_dataset.keys())
-    if len(keys) == 1:
-        tokenized_dataset = tokenized_dataset[keys[0]].train_test_split(0.5)
-    split_strs = list(tokenized_dataset.keys())
-    #assert len(split_strs) == 2, 'There are more than 2 splits in this dataset {args.dataset_name}'
-    eval_dataset = None
-    for split_str in split_strs:
-        if 'train' in split_str:
-            train_dataset = tokenized_dataset[split_str]
+        if not args.fix_embed:
+            max_length = args.max_len
+            tokenizer = RobertaTokenizer(tokenizer_file = f"{repo_dir}/roberta-tokenizer/tokenizer.json",
+                                        vocab_file     = f"{repo_dir}/roberta-tokenizer/vocab.json",
+                                        merges_file    = f"{repo_dir}/roberta-tokenizer/merges.txt",
+                                        max_length     = max_length)
         else:
-            if eval_dataset is not None:
-                if 'test' in split_str or 'val' in split_str:
-                    eval_dataset = datasets.concatenate_datasets([eval_dataset, tokenized_dataset[split_str]])
+            # Load pretrained BERT model and tokenizer
+            from transformers import BertModel, BertTokenizer
+            
+            pretrained_model_name = 'bert-base-uncased'
+            tokenizer = BertTokenizer.from_pretrained(pretrained_model_name)
+            pretrained_model = BertModel.from_pretrained(pretrained_model_name)  
+
+            max_length = tokenizer.model_max_length - 1
+
+        if args.dataset_name in ['imdb', 'emotion', 'rotten_tomatoes']:
+            def preprocess_function(examples):
+                return tokenizer(examples['text'], padding='max_length', truncation=True, max_length=max_length)
+        else:
+            def preprocess_function(examples):
+                return tokenizer(examples['sentence'], padding='max_length', truncation=True, max_length=max_length)        
+
+        ########## add other options here ##########
+
+        # save tokenized dataset
+        #tokenized_dataset_dir = njoin(DROOT, "DATASETS", f"tokenized_{args.dataset_name}")
+        if not args.fix_embed:
+            tokenized_dataset_dir = njoin(DROOT, "DATASETS", f"tokenized_{args.dataset_name}-tk=roberta-len={max_length}")
+        else:
+            tokenized_dataset_dir = njoin(DROOT, "DATASETS", f"tokenized_{args.dataset_name}-tk={pretrained_model_name}-len={max_length}")
+        if not isdir(tokenized_dataset_dir):         
+            print("Downloading data!") if master_process else None
+            # create cache for dataset
+            dataset = get_dataset(args.dataset_name, njoin(DROOT, "DATASETS"))        
+            tokenized_dataset = dataset.map(preprocess_function, batched=True)
+            column_names = get_dataset_cols(tokenized_dataset)
+            if 'text' in column_names:
+                tokenized_dataset = tokenized_dataset.map(remove_columns=['text'])
+            if not isdir(tokenized_dataset_dir): os.makedirs(tokenized_dataset_dir)
+            tokenized_dataset.save_to_disk(tokenized_dataset_dir)
+            del dataset  # alleviate memory
+        else:        
+            print("Data downloaded, loading from local now! \n") if master_process else None
+            tokenized_dataset = load_from_disk(tokenized_dataset_dir)
+        if args.dataset_name != 'imdb':
+            tokenized_dataset = process_dataset_cols(tokenized_dataset)
+
+        keys = list(tokenized_dataset.keys())
+        if len(keys) == 1:
+            tokenized_dataset = tokenized_dataset[keys[0]].train_test_split(0.5)
+        split_strs = list(tokenized_dataset.keys())
+        #assert len(split_strs) == 2, 'There are more than 2 splits in this dataset {args.dataset_name}'
+        eval_dataset = None
+        for split_str in split_strs:
+            if 'train' in split_str:
+                train_dataset = tokenized_dataset[split_str]
             else:
-                if 'test' in split_str or 'val' in split_str:
-                    eval_dataset = tokenized_dataset[split_str]
-    #del tokenized_dataset  # alleviate memory         
+                if eval_dataset is not None:
+                    if 'test' in split_str or 'val' in split_str:
+                        eval_dataset = datasets.concatenate_datasets([eval_dataset, tokenized_dataset[split_str]])
+                else:
+                    if 'test' in split_str or 'val' in split_str:
+                        eval_dataset = tokenized_dataset[split_str]
+        #del tokenized_dataset  # alleviate memory         
 
-    # convert to torch.Tensor from list
-    train_dataset.set_format('torch')
-    eval_dataset.set_format('torch')
+        # convert to torch.Tensor from list
+        train_dataset.set_format('torch')
+        eval_dataset.set_format('torch')
 
-    # ---------- REMOVE LATER ----------  
-    divider = args.divider  # downsize dataset for 
-    if divider > 1:
-        train_dataset = train_dataset.filter(lambda example, idx: idx % divider == 0, with_indices=True)
-        eval_dataset = eval_dataset.filter(lambda example, idx: idx % divider == 0, with_indices=True)
-    data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
-    #config = ModelConfig.from_json_file(f"{repo_dir}/models/config.json")    
+        # ---------- REMOVE LATER ----------  
+        divider = args.divider  # downsize dataset for 
+        if divider > 1:
+            train_dataset = train_dataset.filter(lambda example, idx: idx % divider == 0, with_indices=True)
+            eval_dataset = eval_dataset.filter(lambda example, idx: idx % divider == 0, with_indices=True)
+
+        data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
+        #config = ModelConfig.from_json_file(f"{repo_dir}/models/config.json")    
+
+        train_size = len(train_dataset)
+        eval_size = len(eval_dataset)
+
+    ##### LRA #####
+    elif '-classification' in args.dataset_name:
+        from lra_dataloading import Datasets
+
+        # Get dataset creation function
+        create_dataset_fn = Datasets[args.dataset_name]
+        
+        # Dataset dependent logic
+        if args.dataset_name in ["imdb-classification", "listops-classification", "aan-classification"]:
+            padded = True
+            if args.dataset_name in ["aan-classification"]:
+                # Use retreival model for document matching
+                retrieval = True
+                print("Using retrieval model for document matching")
+            else:
+                retrieval = False
+        else:
+            padded = False
+            retrieval = False
+            
+        # Create dataset...
+        dataset_obj, trainloader, valloader, testloader, num_classes, seq_len, in_dim, train_size, vocab_size = \
+            create_dataset_fn(cache_dir=args.cache_dir, seed=args.seed, train_bs=args.train_bs, eval_bs=args.eval_bs)
+        eval_size = len(testloader.dataset)          
+
+        # get tokenizer and vocab
+        tokenized_dataset, tokenizer, vocab = dataset_obj._load_from_cache(dataset_obj.cache_dir / dataset_obj._cache_dir_name)
+        tokenized_dataset = dataset = tokenized_dataset.rename_column("Target", "label")
+
+        train_dataset = tokenized_dataset['train']
+        eval_dataset = tokenized_dataset['val']
+        
+        # convert to torch.Tensor from list
+        train_dataset.set_format('torch')
+        eval_dataset.set_format('torch')
+
+        max_length = seq_len
+
+        data_collator = None
 
     # ---------------------------------------- 2. Model setup ----------------------------------------
 
@@ -263,35 +327,73 @@ if __name__ == '__main__':
     config = {"attention_mode": model_name,
               "attention_probs_dropout_prob": 0.1,
               #"attention_window": [64],
-              "bos_token_id": 0,
-              "eos_token_id": 2,
+            #   "bos_token_id": 0,
+            #   "eos_token_id": 2,
               "gradient_checkpointing": False,
               "hidden_act": "gelu",
               "hidden_dropout_prob": 0.1,
-              "hidden_size": 768,
               "ignore_attention_mask": False,
               "initializer_range": 0.02,
               "intermediate_size": 3072,
               "layer_norm_eps": 1e-05,
-              "max_position_embeddings": 4098,
+            #  "max_position_embeddings": 4098,
               "model_type": "fnsformer",
               "num_attention_heads": 2,
               "num_hidden_layers": 1,
-              "pad_token_id": 1,
-              "sep_token_id": 2,
-              "type_vocab_size": 1,
-              "vocab_size": 50265,
+            #   "pad_token_id": 1,
+            #   "sep_token_id": 2,
+            #   "type_vocab_size": 1,
+            #   "vocab_size": 50265,
               #"num_labels": len(set(train_dataset['label'])),
               "num_labels": len(train_dataset['label'].unique()),
+              "fix_embed": args.fix_embed,
               "qk_share": args.qk_share,
               "qkv_bias": args.qkv_bias,
               "num_hidden_layers": args.n_layers,
               "num_attention_heads": args.n_attn_heads,
               "hidden_size": args.hidden_size,
               "attention_window": args.max_len  # full attn, no sliding windows
-              }         
+              #"attention_window": max_length
+              }     
 
-    attn_setup = {'qk_share': args.qk_share, 'qkv_bias': args.qkv_bias}    
+    # config["bos_token_id"] = 0    
+    # config["eos_token_id"] = 2
+    # config["pad_token_id"] = 1
+    # config["sep_token_id"] = 3  
+
+    if '-classification' not in args.dataset_name:
+        # for ii, ele in enumerate(tokenizer.all_special_tokens):
+        #     if 'pad' in ele.lower():
+        #         config["pad_token_id"] = tokenizer.all_special_ids[ii]
+        # for ii, ele in enumerate(tokenizer.all_special_tokens):
+        #     if 'sep' in ele.lower():
+        #         config["sep_token_id"] = tokenizer.all_special_ids[ii]
+
+        for ii, ele in enumerate(tokenizer.all_special_tokens):
+            special_token = ''
+            for symbol in ele:
+                if symbol.isalpha():
+                    special_token += symbol.lower()
+            config[f"{special_token}_token_id"] = tokenizer.all_special_ids[ii]
+
+        if not args.fix_embed:
+            config["type_vocab_size"] = 1
+            #config["vocab_size"] = torch.concat([train_dataset['input_ids'].unique(), eval_dataset['input_ids'].unique()]).unique().shape[0]
+            config["vocab_size"] = 50265
+            config["max_position_embeddings"] = 4098
+
+        else:
+            config["type_vocab_size"] =  pretrained_model.embeddings.token_type_embeddings.weight.shape[0]
+            config["vocab_size"] = tokenizer.vocab_size        
+            config["max_position_embeddings"] = tokenizer.model_max_length   
+
+    else:
+        config["type_vocab_size"] = 1
+        config["vocab_size"] = len(vocab.vocab)
+        config["max_position_embeddings"] = 4098
+
+    attn_setup = {'fix_embed': args.fix_embed, 
+                  'qk_share': args.qk_share, 'qkv_bias': args.qkv_bias}    
     attn_setup['dataset_name'] = args.dataset_name
     if 'fns' in model_name:
         attn_setup['manifold'] = args.manifold
@@ -301,20 +403,22 @@ if __name__ == '__main__':
 
             if args.alpha < 2:
                 config['d_intrinsic'] = attn_setup['d_intrinsic'] = args.hidden_size//args.n_attn_heads - 1
-                config['sphere_radius'] = ((np.pi**(1/config['d_intrinsic'])-1)/np.pi)   
+                config['sphere_radius'] = attn_setup['sphere_radius'] = ((np.pi**(1/config['d_intrinsic'])-1)/np.pi)   
                 #config.sphere_radius = 1                
             elif args.alpha >= 2:
                 config['sphere_radius'] = attn_setup['d_intrinsic'] = 1                 
         
             # mask for distance
-            config['mask_val'] = attn_setup['mask_val'] = config['sphere_radius'] * np.pi
-            attn_setup['sphere_radius'] = config['sphere_radius']   
+            config['mask_val'] = attn_setup['mask_val'] = config['sphere_radius'] * np.pi            
 
             model_name = 'sp' + model_name
 
         elif args.manifold == 'rd':
             if args.alpha < 2:
                 config['d_intrinsic'] = attn_setup['d_intrinsic'] = args.hidden_size//args.n_attn_heads  # head_dim                
+
+            # mask for attn score
+            config['mask_val'] = attn_setup['mask_val'] = 1e-5
 
             model_name = 'rd' + model_name
 
@@ -323,9 +427,9 @@ if __name__ == '__main__':
 
     elif model_name == 'sinkformer':
         n_it = args.n_it
-        attn_setup['n_it'] = n_it
-        attn_setup['bandwidth'] = args.bandwidth
-        # mask for DP
+        config['n_it'] = attn_setup['n_it'] = n_it
+        config['bandwidth'] = attn_setup['bandwidth'] = args.bandwidth
+        # mask for dot-product
         config['mask_val'] = attn_setup['mask_val'] = -1e-9     
 
     assert model_name in MODEL_NAMES, f'{model_name} does not exist in {MODEL_NAMES}'
@@ -344,7 +448,13 @@ if __name__ == '__main__':
         json.dump(attn_setup, ofile)        
 
     model_config = ModelConfig.from_json_file(njoin(model_dir, 'config.json'))
-    model = FNSFormerForSequenceClassification(model_config, **attn_setup).to(dev)        
+    model = FNSFormerForSequenceClassification(model_config, **attn_setup).to(dev)  
+
+    if args.fix_embed:
+        model.transformer.embeddings.load_state_dict(pretrained_model.embeddings.state_dict())
+        model.transformer.embeddings.requires_grad_(False)
+        #del pretrained_model
+    
     ########## add other model options here ##########            
             
     if args.lr_scheduler_type in ['linear', 'cosine']:
@@ -441,8 +551,8 @@ if __name__ == '__main__':
         training_args.eval_steps    = int(steps_per_train_epoch)        
         #training_args.logging_steps = int(steps_per_train_epoch/3)  # int(steps_per_train_epoch/5)
         training_args.logging_steps = int(steps_per_train_epoch)        
-        #training_args.save_steps    = int(steps_per_train_epoch)
-        training_args.save_steps    = int(steps_per_train_epoch * args.epochs)
+        training_args.save_steps    = int(steps_per_train_epoch)
+        #training_args.save_steps    = int(steps_per_train_epoch * args.epochs)
         
     trainer_kwargs = {'model': model,                      
                       'args': training_args,
@@ -514,7 +624,8 @@ if __name__ == '__main__':
     #     trainer = Trainer(**trainer_kwargs)    
 
     t0_train = time()  # record train time    
-    trainer.train(ignore_keys_for_eval=["hidden_states", "attentions", "global_attentions"])  # "loss"
+    #trainer.train(ignore_keys_for_eval=["hidden_states", "attentions", "global_attentions"])  # "loss"
+    trainer.train(ignore_keys_for_eval=["loss", "hidden_states", "attentions", "global_attentions"]) 
     #trainer.train()
     train_secs = time() - t0_train
 
@@ -544,7 +655,7 @@ if __name__ == '__main__':
                                                "milestones", "gamma"], index=range(1))
         train_settings.iloc[0] = [device_total,
                                   args.lr, args.lr_scheduler_type, 
-                                  len(train_dataset), len(eval_dataset), args.train_bs, args.eval_bs,
+                                  train_size, eval_size, args.train_bs, args.eval_bs,
                                   args.epochs, args.weight_decay, args.eval_strat, args.eval_steps,
                                   args.log_strat, args.logging_steps, args.save_steps, 
                                   steps_per_train_epoch,

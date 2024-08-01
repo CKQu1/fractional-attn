@@ -4,7 +4,7 @@ from torch import nn
 from transformers.modeling_utils import PreTrainedModel,apply_chunking_to_forward
 from transformers.models.roberta.configuration_roberta import RobertaConfig
 from typing import Optional, Tuple, Union, List
-from models.model_att import DPAttention, FNSAttention, SPFNSAttention, SPOPFNSAttention, SINKAttention
+from models.model_att import DPAttention, FNSAttention, SPFNSAttention, SPOPFNSAttention, RDFNSAttention, RDOPFNSAttention, SINKAttention
 from models.model_utils import *
 #from models.model_utils import BaseModelOutput
 

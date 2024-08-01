@@ -1,8 +1,9 @@
 import argparse
+import json
 import os
 import pandas as pd
 from ast import literal_eval
-from os.path import join, normpath, isdir
+from os.path import join, normpath, isdir, isfile
 
 # -------------------- Path utils --------------------
 
@@ -117,6 +118,91 @@ def structural_model_root(**kwargs):
         model_root = njoin(f'ds={ds}-layers={n_layers}-heads={n_attn_heads}-hidden={hidden_size}-epochs={epochs}-prj={affix}')             
 
     return model_root    
+
+# collects pretrained model_dir
+def collect_model_dirs(models_root, **kwargs):
+
+    suffix = kwargs.get('suffix', 'former')  # i.e. 'former', 'vit'
+    contained_strs = kwargs.get('contained_strs')
+
+    model_dirs = []  # full path
+    model_names = []  # i.e. spopfnsformer, dpformer, etc
+    for dirname in os.listdir(models_root):
+        if suffix in dirname:
+            model_dirs.append(njoin(models_root, dirname))
+            model_names.append(dirname.split('-')[0])
+
+    model_names = list(set(model_names))  # make names unique
+
+    DCT_ALL = {}
+    for model_name in model_names:
+        cur_model_dirs = [model_dir for model_dir in model_dirs if model_name in model_dir]
+        if 'fns' in model_name.lower():
+            cols = ['alpha', 'bandwidth', 'a']
+        elif 'sink' in model_name.lower():
+            cols = ['n_it', 'bandwidth']
+        elif 'dp' in model_name.lower():
+            cols = []    
+        metrics = ['eval_loss', 'eval_accuracy']   
+        metrics_dict = {}     
+        for metric in metrics:
+            metrics_dict[metric] = []        
+        #cols_attn = ['fix_embed', 'qk_share', 'qkv_bias', 'dataset_name']
+        cols_attn = ['qk_share', 'qkv_bias', 'dataset_name']
+        cols_config = ['num_attention_heads', 'num_hidden_layers', 'hidden_size']
+        #cols_train = ['steps_per_train_epoch']
+        cols_train = []
+        cols_other = ['ensembles', 'instances', 'model_dir']
+        cols +=  cols_attn + metrics + cols_config + cols_train + cols_other
+
+        df = pd.DataFrame(columns=cols)
+        model_dir_dct = {}
+        for model_dir in cur_model_dirs:
+            ensembles = 0
+            instances = []            
+            for instance_dir in os.listdir(model_dir):
+                if 'model=' in instance_dir:
+                    fpath = njoin(model_dir, instance_dir)
+                    instance = int(instance_dir.split('=')[-1])
+                    if isfile(njoin(fpath, 'run_performance.csv')):
+                        ensembles += 1
+                        instances.append(instance)  
+                        run_perf = pd.read_csv(njoin(fpath, 'run_performance.csv'), index_col=False)                         
+                        for metric in metrics:
+                            metrics_dict[metric].append(run_perf.loc[run_perf.index[-1],metric])
+                        if ensembles == 1:
+                            # get configs
+                            f = open(njoin(fpath,'config.json'))
+                            config = json.load(f)
+                            f.close()
+                            f = open(njoin(fpath,'attn_setup.json'))
+                            attn_setup = json.load(f)
+                            f.close()  
+                            train_setting = pd.read_csv(njoin(fpath, 'train_setting.csv'))
+
+                            # attn-hyperparameters + attn-setup
+                            for col in cols[:-len(metrics + cols_config + cols_train + cols_other)]:
+                                model_dir_dct[col] = attn_setup[col]
+                            # config
+                            for col in cols_config:
+                                model_dir_dct[col] = config[col]
+                            # train setting
+                            for col in cols_train:
+                                model_dir_dct[col] = train_setting[col]
+
+            # metrics
+            for metric in metrics:
+                model_dir_dct[metric] = metrics_dict[metric]
+            # others
+            for col in cols_other:
+                model_dir_dct[col] = locals()[col]
+
+            df = df.append(model_dir_dct, ignore_index=True)
+
+        DCT_ALL[model_name] = df
+
+    return DCT_ALL
+
 
 # -------------------- Main utils --------------------        
 

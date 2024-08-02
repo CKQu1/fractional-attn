@@ -2,6 +2,7 @@ import numpy as np
 import sys
 import os
 import random
+from datetime import datetime
 from os.path import isdir, isfile
 from constants import *
 from mutils import njoin
@@ -28,11 +29,11 @@ def qsub(command, pbs_array_data, **kwargs):
     # Create output folder.
     if not isdir(njoin(path,"job")): os.makedirs(njoin(path,"job"))
     # source virtualenv
-    if 'source' in kwargs:
-        assert os.path.isfile(kwargs.get('source')), "source for virtualenv incorrect"
-        source_exists = 'true'
-    else:
-        source_exists = 'false'
+    # if 'source' in kwargs:
+    #     assert os.path.isfile(kwargs.get('source')), "source for virtualenv incorrect"
+    #     source_exists = 'true'
+    # else:
+    #     source_exists = 'false'
     # conda activate
     if 'conda' in kwargs:
         conda_exists = 'true'
@@ -64,75 +65,144 @@ END""")
         for i, pbs_array_data_chunk in enumerate(pbs_array_data_chunks):
 
             PBS_SCRIPT = f"""<<'END'
-                #!/bin/bash
-                #PBS -N {kwargs.get('N', sys.argv[0] or 'job')}
-                #PBS -P {kwargs.get('P',"''")}
-                #PBS -q {kwargs.get('q','defaultQ')}
-                #PBS -V
-                #PBS -m n
-                #PBS -o {path}job -e {path}job
-                #PBS -l select={kwargs.get('select',1)}:ncpus={kwargs.get('ncpus',1)}:mem={kwargs.get('mem','1GB')}{':ngpus='+str(kwargs['ngpus']) if 'ngpus' in kwargs else ''}
-                #PBS -l walltime={kwargs.get('walltime','23:59:00')}
-                #PBS -J {MAX_SUBJOBS*i}-{MAX_SUBJOBS*i + len(pbs_array_data_chunk)-1}
-                args=($(python -c "import sys;print(' '.join(map(str, {pbs_array_data_chunk}[int(sys.argv[1])-{MAX_SUBJOBS*i}])))" $PBS_ARRAY_INDEX))
-                cd {kwargs.get('cd', '$PBS_O_WORKDIR')}
-                echo "pbs_array_args = ${{args[*]}}"
-                #if [ {source_exists} ]; then
-                #    source {kwargs.get('source')}
-                #fi
-                #if [ {conda_exists} ]; then
-                #    conda activate {kwargs.get('conda')}
-                #fi
-                {command} ${{args[*]}} {additional_command} {post_command}
-    END"""        
+#!/bin/bash
+#PBS -N {kwargs.get('N', sys.argv[0] or 'job')}
+#PBS -P {kwargs.get('P',"''")}
+#PBS -q {kwargs.get('q','defaultQ')}
+#PBS -V
+#PBS -m n
+#PBS -o {path}job -e {path}job
+#PBS -l select={kwargs.get('select',1)}:ncpus={kwargs.get('ncpus',1)}:mem={kwargs.get('mem','1GB')}{':ngpus='+str(kwargs['ngpus']) if 'ngpus' in kwargs else ''}
+#PBS -l walltime={kwargs.get('walltime','23:59:00')}
+#PBS -J {MAX_SUBJOBS*i}-{MAX_SUBJOBS*i + len(pbs_array_data_chunk)-1}
+args=($(python -c "import sys;print(' '.join(map(str, {pbs_array_data_chunk}[int(sys.argv[1])-{MAX_SUBJOBS*i}])))" $PBS_ARRAY_INDEX))
+cd {kwargs.get('cd', '$PBS_O_WORKDIR')}
+echo "pbs_array_args = ${{args[*]}}"
+#if [ {source_exists} ]; then
+#    source {kwargs.get('source')}
+#fi
+#if [ {conda_exists} ]; then
+#    conda activate {kwargs.get('conda')}
+#fi
+{command} ${{args[*]}} {additional_command} {post_command}
+END"""        
 
             os.system(f'qsub {PBS_SCRIPT}')
             #print(PBS_SCRIPT)
 
-    # ---------- end{ARTEMIS} ----------s
+    # ---------- end{ARTEMIS} ----------
 
-    # ---------- begin{PHYSICS1} ----------
+
+    # ---------- begin{PHYSICSX} ---------- for bash shell
     elif system == 'PHYSICS':
         MAX_SUBJOBS = 1000
-        
-        for i, pbs_array_data_point in enumerate(pbs_array_data):
-
-            # old args
-            # args=($(python -c "import sys;print(' '.join(map(str, {pbs_array_data_point})))"))
-            # echo "pbs_array_args = ${{args[*]}}"
-            # {command} ${{args}} {additional_command} {post_command}
-
-            args = ' '.join(map(str, pbs_array_data_point))
-            full_command = f'{command} {args} {additional_command} {post_command}'
+        # PBS array jobs are limited to 1000 subjobs by default
+        pbs_array_data_chunks = [pbs_array_data[x:x+MAX_SUBJOBS]
+                                for x in range(0, len(pbs_array_data), MAX_SUBJOBS)]
+        if len(pbs_array_data_chunks[-1]) == 1:  # array jobs must have length >1
+            pbs_array_data_chunks[-1].insert(0, pbs_array_data_chunks[-2].pop())
+        for i, pbs_array_data_chunk in enumerate(pbs_array_data_chunks):
 
             # https://stackoverflow.com/questions/2500436/how-does-cat-eof-work-in-bash
-            PBS_SCRIPT = f"""<<eof
-                #!/bin/bash
-                #PBS -N {kwargs.get('N', sys.argv[0] or 'job')}
-                #PBS -q {kwargs.get('q','defaultQ')}
-                #PBS -V
-                #PBS -m n
-                #PBS -o {path} -e {path}
-                #PBS -l select={kwargs.get('select',1)}:ncpus={kwargs.get('ncpus',1)}:mem={kwargs.get('mem','1GB')}{':ngpus='+str(kwargs['ngpus']) if 'ngpus' in kwargs else ''}
-                #PBS -l walltime={kwargs.get('walltime','23:59:00')}                       
-                
-                #cd {kwargs.get('cd', '$PBS_O_WORKDIR')}
-                echo "pbs_array_args = ${args}"
-                # if [ {source_exists} ]; then
-                #     source {kwargs.get('source')}
-                # fi
-                # if [ {conda_exists} ]; then
-                #     conda activate {kwargs.get('conda')}
-                # fi         
+            PBS_SCRIPT = f"""<<'END'
+#!/bin/bash
+#PBS -N {kwargs.get('N', sys.argv[0] or 'job')}
+#PBS -q {kwargs.get('q','defaultQ')}
+#PBS -V
+#PBS -m n
+#PBS -o {path} -e {path}
+#PBS -l select={kwargs.get('select',1)}:ncpus={kwargs.get('ncpus',1)}:mem={kwargs.get('mem','1GB')}{':ngpus='+str(kwargs['ngpus']) if 'ngpus' in kwargs else ''}
+#PBS -l walltime={kwargs.get('walltime','23:59:00')}                       
+#PBS -J {MAX_SUBJOBS*i}-{MAX_SUBJOBS*i + len(pbs_array_data_chunk)-1}
+args=($(python -c "import sys;print(' '.join(map(str, {pbs_array_data_chunk}[int(sys.argv[1])-{MAX_SUBJOBS*i}])))" $PBS_ARRAY_INDEX))
 
-                cd fractional-attn/vit-pytorch
-                source /usr/physics/python/Anaconda3-2022.10/etc/profile.d/conda.sh
-                conda activate frac_attn                                                        
-                {full_command}
-                exit
-            eof"""
+cd {kwargs.get('cd', '$PBS_O_WORKDIR')}
+echo "pbs_array_args = ${{args[*]}}"
+
+# if [ {source_exists} ]; then
+#     source {kwargs.get('source')}
+# fi
+# if [ {conda_exists} ]; then
+#     conda activate {kwargs.get('conda')}
+# fi         
+
+source /usr/physics/python/Anaconda3-2022.10/etc/profile.d/conda.sh
+conda activate frac_attn                                                        
+{command} ${{args[*]}} {additional_command} {post_command}
+exit
+END"""  
 
             os.system(f'qsub {PBS_SCRIPT}')
+            #print(PBS_SCRIPT)
+
+    # ---------- end{PHYSICSX} ----------
+
+
+    # ---------- begin{PHYSICS0} ---------- perhaps can use for SBATCH
+    # elif system == 'PHYSICS':
+    #     MAX_SUBJOBS = 1000
+
+    #     if not isdir(SCRIPT_DIR): makedirs(SCRIPT_DIR)                
+    #     sh_path = kwargs.get('sh_path', njoin(SCRIPT_DIR, kwargs.get('sh_name', f'script_'+datetime.today().strftime('%Y%m%d'))+'.sh'))
+    #     for i, pbs_array_data_point in enumerate(pbs_array_data):
+
+    #         # old args
+    #         # args=($(python -c "import sys;print(' '.join(map(str, {pbs_array_data_point})))"))
+    #         # echo "pbs_array_args = ${{args[*]}}"
+    #         # {command} ${{args}} {additional_command} {post_command}
+
+    #         args = ' '.join(map(str, pbs_array_data_point))
+    #         full_command = f'{command} {args} {additional_command} {post_command}'
+
+    #     write_script_kwargs = {'sh_path': kwargs.get('sh_path',sh_path), 'scheduler': 'PBS'}        
+    #     write_script(full_command, **write_script_kwargs)
+    #     #os.system('sbatch %s.sh' % expe_name)
+    #     #time.sleep(.1)
+
+    # ---------- end{PHYSICS0} ----------
+
+    # ---------- begin{PHYSICS1} ----------
+    # elif system == 'PHYSICS':
+    #     MAX_SUBJOBS = 1000
+        
+    #     for i, pbs_array_data_point in enumerate(pbs_array_data):
+
+    #         # old args
+    #         # args=($(python -c "import sys;print(' '.join(map(str, {pbs_array_data_point})))"))
+    #         # echo "pbs_array_args = ${{args[*]}}"
+    #         # {command} ${{args}} {additional_command} {post_command}
+
+    #         args = ' '.join(map(str, pbs_array_data_point))
+    #         full_command = f'{command} {args} {additional_command} {post_command}'
+
+    #         # https://stackoverflow.com/questions/2500436/how-does-cat-eof-work-in-bash
+    #         PBS_SCRIPT = f"""<<eof
+    #             #!/bin/bash
+    #             #PBS -N {kwargs.get('N', sys.argv[0] or 'job')}
+    #             #PBS -q {kwargs.get('q','defaultQ')}
+    #             #PBS -V
+    #             #PBS -m n
+    #             #PBS -o {path} -e {path}
+    #             #PBS -l select={kwargs.get('select',1)}:ncpus={kwargs.get('ncpus',1)}:mem={kwargs.get('mem','1GB')}{':ngpus='+str(kwargs['ngpus']) if 'ngpus' in kwargs else ''}
+    #             #PBS -l walltime={kwargs.get('walltime','23:59:00')}                       
+                
+    #             #cd {kwargs.get('cd', '$PBS_O_WORKDIR')}
+    #             echo "pbs_array_args = ${args}"
+    #             # if [ {source_exists} ]; then
+    #             #     source {kwargs.get('source')}
+    #             # fi
+    #             # if [ {conda_exists} ]; then
+    #             #     conda activate {kwargs.get('conda')}
+    #             # fi         
+
+    #             cd fractional-attn/vit-pytorch
+    #             source /usr/physics/python/Anaconda3-2022.10/etc/profile.d/conda.sh
+    #             conda activate frac_attn                                                        
+    #             {full_command}
+    #             exit
+    #         eof"""
+
+    #         os.system(f'qsub {PBS_SCRIPT}')
             #print(PBS_SCRIPT)
 
     # ---------- end{PHYSICS1} ----------
@@ -233,6 +303,71 @@ END""")
     #     #print(PBS_SCRIPT)
 
     # ---------- end{PHYSICS3} ----------
+
+
+def write_script(full_command, **kwargs):
+    '''
+    Writes the bash script to launch expe
+    '''
+
+    scheduler = kwargs.get('scheduler', 'PBS')
+    assert scheduler in ['PBS', 'SBATCH']
+
+    path = kwargs.get('path', njoin(DROOT, 'jobs_all'))
+
+    # -------------------- 1. SBATCH --------------------
+#     if scheduler == 'SBATCH':
+#         with open('%s.sh' % sh_name, 'w') as rsh:
+#             rsh.write(f'''\
+# #!/bin/bash
+# #SBATCH -A ynt@gpu
+# #SBATCH --job-name=%s%%j     # job name
+# #SBATCH --ntasks=1                   # number of MP tasks
+# #SBATCH --ntasks-per-node=1          # number of MPI tasks per node
+# #SBATCH --ntasks-per-node=1          # number of MPI tasks per node
+# #SBATCH --gres=gpu:1               # number of GPUs per node
+# #SBATCH --cpus-per-task=10           # number of cores per tasks
+# #SBATCH --hint=nomultithread         # we get physical cores not logical
+# #SBATCH --distribution=block:block   # we pin the tasks on contiguous cores
+# #SBATCH --time=16:00:00              # maximum execution time (HH:MM:SS)
+# #SBATCH --output=job_outputs/%s%%j.out # output file name
+# #SBATCH --partition=gpu_p13
+# #SBATCH --qos=qos_gpu-t3
+# #SBATCH --error=job_outputs/%s%%j.err  # error file name
+
+# set -x
+# cd ${SLURM_SUBMIT_DIR}    
+
+# module purge
+# module load pytorch-gpu/py3/1.8.1
+# module load cmake
+# module load cuda
+
+# python ./one_expe.py %s
+# ''' % (name, name, name, args_string))
+    # ---------------------------------------------------
+
+    # -------------------- 2. PBS --------------------
+    if scheduler == 'PBS':                   
+        with open(kwargs.get('sh_path'), 'w') as rsh:
+            rsh.write(f'''\
+#PBS -N {kwargs.get('N', sys.argv[0] or 'job')}
+#PBS -q {kwargs.get('q','defaultQ')}
+#PBS -V
+#PBS -m n
+#PBS -o {path} -e {path}
+#PBS -l select={kwargs.get('select',1)}:ncpus={kwargs.get('ncpus',1)}:mem={kwargs.get('mem','1GB')}{':ngpus='+str(kwargs['ngpus']) if 'ngpus' in kwargs else ''}
+#PBS -l walltime={kwargs.get('walltime','23:59:59')}     
+
+cd {kwargs.get('cd', '$PBS_O_WORKDIR')}
+#cd fractional-attn/vit-pytorch
+
+source /usr/physics/python/Anaconda3-2022.10/etc/profile.d/conda.sh
+conda activate frac_attn                                                        
+{full_command}
+
+''')        
+    # ---------------------------------------------------
 
 
 

@@ -556,9 +556,9 @@ if __name__ == '__main__':
                 data, label = batch
             else:
                 data, label, _ = batch
-
             if data.ndim == 3:
-                data = data[:,None].to(device)
+                data = data[:,None]
+            data = data.to(device)
             label = label.to(device)
 
             val_logits, _ = model(data)
@@ -619,9 +619,9 @@ if __name__ == '__main__':
                 data, label = batch
             else:
                 data, label, _ = batch
-
             if data.ndim == 3:
-                data = data[:,None].to(device)
+                data = data[:,None]                
+            data = data.to(device)
             label = label.to(device)
 
             #output = model(data)

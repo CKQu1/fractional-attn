@@ -23,51 +23,123 @@ def get_pbs_array_data(kwargss):
         pbs_array_data.append(tuple(args_ls))
     return pbs_array_data
 
+# def train_submit(script_name, kwargss, **kwargs):
+
+#     assert isfile(script_name), f"{script_name} does not exist!"
+
+#     # computing resource settings
+#     ncpus = kwargs.get('ncpus', 1) 
+#     ngpus = kwargs.get('ngpus', 0)
+#     walltime = kwargs.get('walltime', '23:59:59')
+#     mem = kwargs.get('mem', '8GB')    
+#     select = kwargs.get('select', 1)  # number of nodes    
+#     command, additional_command = command_setup(SPATH,ncpus=ncpus,ngpus=ngpus,select=select)    
+    
+#     pbs_array_data = get_pbs_array_data(kwargss)    
+    
+#     perm, pbss = job_divider(pbs_array_data, len(PROJECTS))
+#     for idx, pidx in enumerate(perm):
+#         pbs_array_true = pbss[idx]
+#         print(PROJECTS[pidx])
+#         kwargs_qsub = {"path":     kwargs.get("job_path"),  # acts as PBSout
+#                        "P":        PROJECTS[pidx],
+#                        "ngpus":    ngpus, 
+#                        "ncpus":    ncpus, 
+#                        "select":   select,
+#                        "walltime": walltime,
+#                        "mem":      mem
+#                        } 
+#         if len(additional_command) > 0:
+#             kwargs_qsub["additional_command"] = additional_command
+
+#         qsub(f'{command} {script_name}', pbs_array_true, **kwargs_qsub)   
+#         print("\n")
+
 def train_submit(script_name, kwargss, **kwargs):
 
     assert isfile(script_name), f"{script_name} does not exist!"
 
+    # system
+    system = kwargs.get('system')
+    nstack = kwargs.get('nstack', 1)
+
     # computing resource settings
     ncpus = kwargs.get('ncpus', 1) 
     ngpus = kwargs.get('ngpus', 0)
-    walltime = kwargs.get('walltime', '23:59:59')
-    mem = kwargs.get('mem', '8GB')    
     select = kwargs.get('select', 1)  # number of nodes    
-    command, additional_command = command_setup(SPATH,ncpus=ncpus,ngpus=ngpus,select=select)    
+    walltime = kwargs.get('walltime', '23:59:59')
+    mem = kwargs.get('mem', '8GB')            
     
-    pbs_array_data = get_pbs_array_data(kwargss)    
-    
-    perm, pbss = job_divider(pbs_array_data, len(PROJECTS))
+    pbs_array_data = get_pbs_array_data(kwargss)     
+    if system == 'ARTEMIS':   
+        perm, pbss = job_divider(pbs_array_data, len(PROJECTS))
+    elif system == 'PHYSICS':
+        perm, pbss = job_divider(pbs_array_data, 1)  # not needed for projects
+
+    #master_port = 0
+    HOST_NODE_ADDR = 0
     for idx, pidx in enumerate(perm):
-        pbs_array_true = pbss[idx]
-        print(PROJECTS[pidx])
-        kwargs_qsub = {"path":     kwargs.get("job_path"),  # acts as PBSout
-                       "P":        PROJECTS[pidx],
-                       "ngpus":    ngpus, 
-                       "ncpus":    ncpus, 
-                       "select":   select,
-                       "walltime": walltime,
-                       "mem":      mem
-                       } 
+        pbs_array_true = pbss[idx]        
+        kwargs_qsub = {"path":        kwargs.get("job_path"),  # acts as PBSout                       
+                       "ngpus":       ngpus, 
+                       "ncpus":       ncpus, 
+                       "select":      select,
+                       "walltime":    walltime,
+                       "mem":         mem,
+                       "nstack":      nstack                       
+                       }        
+
+        kwargs_command = kwargs_qsub; del kwargs_command["path"]
+        kwargs_command["system"] = system
+
+        # ----- ARTEMIS -----
+        if system == 'ARTEMIS':            
+            # project names
+            kwargs_qsub["P"] = PROJECTS[pidx]
+            print(PROJECTS[pidx])
+
+            if select * max(ncpus, ngpus) > 1:
+                # master_port += 1            
+                HOST_NODE_ADDR += 1
+
+            kwargs_command["HOST_NODE_ADDR"] = HOST_NODE_ADDR
+            kwargs_command["singularity_path"] = SPATH
+
+        # ----- PHYSICS -----
+        elif system == 'PHYSICS':
+            if ngpus >= 1:
+                kwargs_qsub["q"] = 'l40s'
+            else:
+                #kwargs_qsub["q"] = 'yossarian'
+                pass
+
+            kwargs_qsub["source"] = PHYSICS_SOURCE 
+            kwargs_qsub["conda"] = PHYSICS_CONDA
+
+        command, additional_command = command_setup_ddp(**kwargs_command)                
+
         if len(additional_command) > 0:
             kwargs_qsub["additional_command"] = additional_command
 
         qsub(f'{command} {script_name}', pbs_array_true, **kwargs_qsub)   
-        print("\n")
+        print("\n")        
 
 if __name__ == '__main__':
 
-    # datetime
-    date_str = datetime.today().strftime('%Y-%m-%d')
-    # script for running
-    script_name = "main.py" 
+    # ----- System -----
+    system = 'ARTEMIS' if 'project' in DROOT else 'PHYSICS'        
+    date_str = datetime.today().strftime('%Y-%m-%d')    
+    #script_name = "ddp_main.py"  
+    script_name = "main.py"
+    nstack = 1  
+
     # settings
     config_files = ['config_qqv.json', 'config_qkv.json']  # 'config_qkv.json'
     #config_files = ['config_qqv.json']
     # add or change datasets here
     DATASET_NAMES = ['rotten_tomatoes','imdb','emotion']
-    #MAX_LENS = [128, 1024, 128]        
-    MAX_LENS = [128, 512, 128]
+    MAX_LENS = [128, 1024, 128]        
+    #MAX_LENS = [128, 512, 128]
     
     ROOT = njoin(DROOT, 'fix_embed-smallest-v2')
 
@@ -123,7 +195,7 @@ if __name__ == '__main__':
 
             # add more settings here
             common_kwargs['max_len'] = MAX_LENS[didx]            
-            common_kwargs['fix_embed'] = True
+            common_kwargs['fix_embed'] = False
             common_kwargs['epochs'] = 10
 
             # test-run
@@ -162,4 +234,6 @@ if __name__ == '__main__':
                  select=select, 
                  walltime=walltime,
                  mem=mem,
-                 job_path=job_path)
+                 job_path=job_path,
+                 nstack=nstack,
+                 system=system)

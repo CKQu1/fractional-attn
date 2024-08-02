@@ -24,6 +24,10 @@ FIGS_DIR = njoin(DROOT, 'figs_dir')
 BPATH = njoin('/project')  # path for binding to singularity container
 SPATH = njoin('/project/frac_attn/built_containers/FaContainer_v5.sif')  # singularity container path
 
+SCRIPT_DIR = njoin(DROOT, 'submitted_scripts')
+
+# -------------------
+
 MODEL_NAMES = ['fnsvit', 'opfnsvit', 'sinkvit', 'dpvit',
                'spfnsvit', 'spopfnsvit',
                'rdfnsvit', 'rdopfnsvit']  # model str names

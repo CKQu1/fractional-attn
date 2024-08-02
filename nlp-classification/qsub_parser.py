@@ -7,6 +7,10 @@ from constants import BPATH
 from mutils import njoin
 
 def qsub(command, pbs_array_data, **kwargs):
+    global pbs_array_data_chunks
+
+    system = kwargs.get('system')
+    nstack = kwargs.get('nstack', 1)
 
     if 'path' in kwargs:
         path = kwargs['path']
@@ -24,11 +28,11 @@ def qsub(command, pbs_array_data, **kwargs):
     # Create output folder.
     if not isdir(njoin(path,"job")): os.makedirs(njoin(path,"job"))
     # source virtualenv
-    if 'source' in kwargs:
-        assert os.path.isfile(kwargs.get('source')), "source for virtualenv incorrect"
-        source_exists = 'true'
-    else:
-        source_exists = 'false'
+    # if 'source' in kwargs:
+    #     assert os.path.isfile(kwargs.get('source')), "source for virtualenv incorrect"
+    #     source_exists = 'true'
+    # else:
+    #     source_exists = 'false'
     # conda activate
     if 'conda' in kwargs:
         conda_exists = 'true'
@@ -42,41 +46,94 @@ def qsub(command, pbs_array_data, **kwargs):
                 echo "pbs_array_args = {str_pbs_array_args}"
                 {command} {str_pbs_array_args} {post_command}
 END""")
-        return
+        return    
+
     # Distribute subjobs evenly across array chunks.
     pbs_array_data = random.sample(pbs_array_data, len(pbs_array_data))
     # Submit array job.
     print(f"Submitting {len(pbs_array_data)} subjobs")
-    # PBS array jobs are limited to 1000 subjobs by default
-    pbs_array_data_chunks = [pbs_array_data[x:x+1000]
-                             for x in range(0, len(pbs_array_data), 1000)]
-    if len(pbs_array_data_chunks[-1]) == 1:  # array jobs must have length >1
-        pbs_array_data_chunks[-1].insert(0, pbs_array_data_chunks[-2].pop())
-    for i, pbs_array_data_chunk in enumerate(pbs_array_data_chunks):
-        PBS_SCRIPT = f"""<<'END'
-            #!/bin/bash
-            #PBS -N {kwargs.get('N', sys.argv[0] or 'job')}
-            #PBS -P {kwargs.get('P',"''")}
-            #PBS -q {kwargs.get('q','defaultQ')}
-            #PBS -V
-            #PBS -m n
-            #PBS -o {path}job -e {path}job
-            #PBS -l select={kwargs.get('select',1)}:ncpus={kwargs.get('ncpus',1)}:mem={kwargs.get('mem','1GB')}{':ngpus='+str(kwargs['ngpus']) if 'ngpus' in kwargs else ''}
-            #PBS -l walltime={kwargs.get('walltime','23:59:00')}
-            #PBS -J {1000*i}-{1000*i + len(pbs_array_data_chunk)-1}
-            args=($(python -c "import sys;print(' '.join(map(str, {pbs_array_data_chunk}[int(sys.argv[1])-{1000*i}])))" $PBS_ARRAY_INDEX))
-            cd {kwargs.get('cd', '$PBS_O_WORKDIR')}
-            echo "pbs_array_args = ${{args[*]}}"
-            #if [ {source_exists} ]; then
-            #    source {kwargs.get('source')}
-            #fi
-            #if [ {conda_exists} ]; then
-            #    conda activate {kwargs.get('conda')}
-            #fi
-            {command} ${{args[*]}} {additional_command} {post_command}
-END"""
-        os.system(f'qsub {PBS_SCRIPT}')
-        #print(PBS_SCRIPT)
+    
+    # ---------- begin{ARTEMIS} ----------
+    if system == 'ARTEMIS':
+        MAX_SUBJOBS = 1000
+        # PBS array jobs are limited to 1000 subjobs by default
+        pbs_array_data_chunks = [pbs_array_data[x:x+MAX_SUBJOBS]
+                                for x in range(0, len(pbs_array_data), MAX_SUBJOBS)]
+        if len(pbs_array_data_chunks[-1]) == 1:  # array jobs must have length >1
+            pbs_array_data_chunks[-1].insert(0, pbs_array_data_chunks[-2].pop())
+        for i, pbs_array_data_chunk in enumerate(pbs_array_data_chunks):
+
+            PBS_SCRIPT = f"""<<'END'
+#!/bin/bash
+#PBS -N {kwargs.get('N', sys.argv[0] or 'job')}
+#PBS -P {kwargs.get('P',"''")}
+#PBS -q {kwargs.get('q','defaultQ')}
+#PBS -V
+#PBS -m n
+#PBS -o {path}job -e {path}job
+#PBS -l select={kwargs.get('select',1)}:ncpus={kwargs.get('ncpus',1)}:mem={kwargs.get('mem','1GB')}{':ngpus='+str(kwargs['ngpus']) if 'ngpus' in kwargs else ''}
+#PBS -l walltime={kwargs.get('walltime','23:59:00')}
+#PBS -J {MAX_SUBJOBS*i}-{MAX_SUBJOBS*i + len(pbs_array_data_chunk)-1}
+args=($(python -c "import sys;print(' '.join(map(str, {pbs_array_data_chunk}[int(sys.argv[1])-{MAX_SUBJOBS*i}])))" $PBS_ARRAY_INDEX))
+cd {kwargs.get('cd', '$PBS_O_WORKDIR')}
+echo "pbs_array_args = ${{args[*]}}"
+#if [ {source_exists} ]; then
+#    source {kwargs.get('source')}
+#fi
+#if [ {conda_exists} ]; then
+#    conda activate {kwargs.get('conda')}
+#fi
+{command} ${{args[*]}} {additional_command} {post_command}
+END"""        
+
+            os.system(f'qsub {PBS_SCRIPT}')
+            #print(PBS_SCRIPT)
+
+    # ---------- end{ARTEMIS} ----------
+
+
+    # ---------- begin{PHYSICSX} ---------- for bash shell
+    elif system == 'PHYSICS':
+        MAX_SUBJOBS = 1000
+        # PBS array jobs are limited to 1000 subjobs by default
+        pbs_array_data_chunks = [pbs_array_data[x:x+MAX_SUBJOBS]
+                                for x in range(0, len(pbs_array_data), MAX_SUBJOBS)]
+        if len(pbs_array_data_chunks[-1]) == 1:  # array jobs must have length >1
+            pbs_array_data_chunks[-1].insert(0, pbs_array_data_chunks[-2].pop())
+        for i, pbs_array_data_chunk in enumerate(pbs_array_data_chunks):
+
+            # https://stackoverflow.com/questions/2500436/how-does-cat-eof-work-in-bash
+            PBS_SCRIPT = f"""<<'END'
+#!/bin/bash
+#PBS -N {kwargs.get('N', sys.argv[0] or 'job')}
+#PBS -q {kwargs.get('q','defaultQ')}
+#PBS -V
+#PBS -m n
+#PBS -o {path} -e {path}
+#PBS -l select={kwargs.get('select',1)}:ncpus={kwargs.get('ncpus',1)}:mem={kwargs.get('mem','1GB')}{':ngpus='+str(kwargs['ngpus']) if 'ngpus' in kwargs else ''}
+#PBS -l walltime={kwargs.get('walltime','23:59:00')}                       
+#PBS -J {MAX_SUBJOBS*i}-{MAX_SUBJOBS*i + len(pbs_array_data_chunk)-1}
+args=($(python -c "import sys;print(' '.join(map(str, {pbs_array_data_chunk}[int(sys.argv[1])-{MAX_SUBJOBS*i}])))" $PBS_ARRAY_INDEX))
+
+cd {kwargs.get('cd', '$PBS_O_WORKDIR')}
+echo "pbs_array_args = ${{args[*]}}"
+
+# if [ {source_exists} ]; then
+#     source {kwargs.get('source')}
+# fi
+# if [ {conda_exists} ]; then
+#     conda activate {kwargs.get('conda')}
+# fi         
+
+source /usr/physics/python/Anaconda3-2022.10/etc/profile.d/conda.sh
+conda activate frac_attn                                                        
+{command} ${{args[*]}} {additional_command} {post_command}
+exit
+END"""  
+
+            #os.system(f'qsub {PBS_SCRIPT}')
+            print(PBS_SCRIPT)
+
 
 # N is the total number of projects
 def job_divider(pbs_array: list, N: int):

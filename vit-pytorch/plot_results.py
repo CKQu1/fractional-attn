@@ -33,7 +33,7 @@ OTHER_COLORS = ['k', 'lightgreen']
 
 # Ablation study on alphas
 def plot_fns_ensembles(models_roots, fns_type='spopfnsvit', metrics='val_acc',
-                       cbar_separate=True, display=False):
+                       is_single=True, cbar_separate=True, display=False):
     global df, df_setting, df_filtered, fig_file, axs
     global model_dirs, subpath, dirnames, model_root_dirs
     global model_combo, model_combos
@@ -45,6 +45,7 @@ def plot_fns_ensembles(models_roots, fns_type='spopfnsvit', metrics='val_acc',
     print(model_root_dirs)
 
     metrics = str2ls(metrics)    
+    is_single = str2bool(is_single)
     display = str2bool(display)    
     assert len(metrics) == 1
 
@@ -64,18 +65,23 @@ def plot_fns_ensembles(models_roots, fns_type='spopfnsvit', metrics='val_acc',
     alphas = sorted(df_model.loc[:,'alpha'].unique())[::-1]  # large to small
     epss = sorted(df_model.loc[:,'bandwidth'].unique())    
 
-    nrows = len(model_root_dirs)    
-    ncols = len(epss)
+    if is_single:
+        nrows = 1
+        ncols = len(model_root_dirs)
+    else:
+        nrows = len(model_root_dirs)    
+        ncols = len(epss)
 
     figsize = (3*ncols,3*nrows)
     fig, axs = plt.subplots(nrows,ncols,figsize=figsize,sharex=True,sharey=True)
     
     if nrows == 1:
         axs = np.expand_dims(axs, axis=0)
+        if ncols == 1:
+            axs = np.expand_dims(axs, axis=1)
     elif nrows > 1 and ncols == 1:
         axs = np.expand_dims(axs, axis=1)     
     
-
     total_figs = 0
     model_types_plotted = []
     for row_idx, models_root in enumerate(models_roots):

@@ -653,8 +653,8 @@ if __name__ == '__main__':
             epoch_accuracy += acc / len(trainloader)
             epoch_loss += loss / len(trainloader)
 
-            if iter_num == 0 and eval_only:
-                break
+            # if iter_num == 0 and eval_only:
+            #     break
 
             iter_num += 1
 

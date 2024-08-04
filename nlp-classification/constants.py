@@ -7,11 +7,6 @@ from matplotlib.cm import get_cmap
 PROJECTS = ['phys_DL','PDLAI','dnn_maths','dyson','vortex_dl','frac_attn', 'ddl']
 # -------------------
 
-# ----- PHYSICS -----
-PHYSICS_SOURCE = '/usr/physics/python/Anaconda3-2022.10/etc/profile.d/conda.sh'
-PHYSICS_CONDA = 'frac_attn'
-# -------------------
-
 # ----- PATHS -----
 RT = os.path.abspath(os.getcwd())
 if 'project' in RT:
@@ -24,6 +19,16 @@ FIGS_DIR = njoin(DROOT, 'figs_dir')
 BPATH = njoin('/project')  # path for binding to singularity container
 SPATH = njoin('/project/frac_attn/built_containers/FaContainer_v5.sif')  # singularity container path
 
+SCRIPT_PATH = njoin(DROOT, 'submitted_scripts')
+
+# -------------------
+
+# ----- PHYSICS -----
+PHYSICS_SOURCE = '/usr/physics/python/Anaconda3-2022.10/etc/profile.d/conda.sh'
+PHYSICS_CONDA = 'frac_attn' if 'chqu7424' in RT else '~/conda'
+# -------------------
+
+# ----- FIGURES -----
 MODEL_NAMES = ['fnsformer', 
                'spfnsformer','spopfnsformer',
                'rdfnsformer', 'rdopfnsformer',
@@ -38,6 +43,8 @@ NAMES_DICT = {'fnsformer': 'FNS',
               'dpformer': 'DP',
               'imdb': 'IMDb', 'rotten_tomatoes': 'Rotten Tomatoes',
               'eval_loss': 'Loss', 'eval_accuracy': 'Accuracy', 'eval_f1_score': r'$F_1$ score'}
+
+
 
 # color for model hyperparameters
 #HYP_CM = 'gist_ncar'

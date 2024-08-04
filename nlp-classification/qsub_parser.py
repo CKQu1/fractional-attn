@@ -77,12 +77,12 @@ END""")
 args=($(python -c "import sys;print(' '.join(map(str, {pbs_array_data_chunk}[int(sys.argv[1])-{MAX_SUBJOBS*i}])))" $PBS_ARRAY_INDEX))
 cd {kwargs.get('cd', '$PBS_O_WORKDIR')}
 echo "pbs_array_args = ${{args[*]}}"
-#if [ {source_exists} ]; then
-#    source {kwargs.get('source')}
-#fi
-#if [ {conda_exists} ]; then
-#    conda activate {kwargs.get('conda')}
-#fi
+if [ {source_exists} ]; then
+   source {kwargs.get('source')}
+fi
+if [ {conda_exists} ]; then
+   conda activate {kwargs.get('conda')}
+fi
 {command} ${{args[*]}} {additional_command} {post_command}
 END"""        
 
@@ -118,15 +118,15 @@ args=($(python -c "import sys;print(' '.join(map(str, {pbs_array_data_chunk}[int
 cd {kwargs.get('cd', '$PBS_O_WORKDIR')}
 echo "pbs_array_args = ${{args[*]}}"
 
-# if [ {source_exists} ]; then
-#     source {kwargs.get('source')}
-# fi
-# if [ {conda_exists} ]; then
-#     conda activate {kwargs.get('conda')}
-# fi         
+if [ {source_exists} ]; then
+    source {kwargs.get('source')}
+fi
+if [ {conda_exists} ]; then
+    conda activate {kwargs.get('conda')}
+fi         
 
-source /usr/physics/python/Anaconda3-2022.10/etc/profile.d/conda.sh
-conda activate frac_attn                                                        
+# source /usr/physics/python/Anaconda3-2022.10/etc/profile.d/conda.sh
+# conda activate frac_attn                                                        
 {command} ${{args[*]}} {additional_command} {post_command}
 exit
 END"""  

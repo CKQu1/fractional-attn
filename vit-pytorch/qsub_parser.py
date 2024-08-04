@@ -29,11 +29,11 @@ def qsub(command, pbs_array_data, **kwargs):
     # Create output folder.
     if not isdir(njoin(path,"job")): os.makedirs(njoin(path,"job"))
     # source virtualenv
-    # if 'source' in kwargs:
-    #     assert os.path.isfile(kwargs.get('source')), "source for virtualenv incorrect"
-    #     source_exists = 'true'
-    # else:
-    #     source_exists = 'false'
+    if 'source' in kwargs:
+        #assert os.path.isfile(kwargs.get('source')), "source for virtualenv incorrect"
+        source_exists = 'true'
+    else:
+        source_exists = 'false'
     # conda activate
     if 'conda' in kwargs:
         conda_exists = 'true'

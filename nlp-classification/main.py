@@ -130,7 +130,7 @@ if __name__ == '__main__':
         os.environ["WANDB_DISABLED"] = "true"
 
     repo_dir = os.getcwd()  # main dir 
-    dev = torch.device(f"cuda:{torch.cuda.device_count()}"
+    dev = torch.device(f"cuda:{torch.cuda.device_count()-1}"
                        if torch.cuda.is_available() else "cpu")   
     print(f'device = {dev}')
     device_name = "GPU" if dev.type != "cpu" else "CPU"

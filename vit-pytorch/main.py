@@ -28,8 +28,7 @@ from torch.optim import AdamW
 
 # single-core
 """
-python -i main.py --dataset_name=pathfinder-classification --model_name=opfnsvit --manifold=sphere --alpha=1.5 --a=0 --max_iters=10 --eval_interval=5 --log_interval=5\
- --eval_iters=5 --weight_decay=0 --n_layers=2 --n_attn_heads=1 --model_root=.droot/debug-mode 
+python -i main.py --dataset_name=pathfinder-classification --model_name=opfnsvit --manifold=sphere --alpha=1.5 --a=0 --epochs=1 --weight_decay=0 --n_layers=2 --n_attn_heads=1 --model_root=.droot/debug-mode 
 
 python -i main.py --model_name=opfnsvit --manifold=rd --alpha=1.5 --max_iters=100 --eval_interval=5\
  --lr_scheduler_type=binary --max_lr=5e-5 --max_lr=5e-6\
@@ -166,6 +165,7 @@ if __name__ == '__main__':
         # "num_classes": args.n_classes, # num_classes of CIFAR10
         # "num_channels": args.n_channels,
         "qkv_bias": args.qkv_bias,
+        "qk_share": args.qk_share,
         "use_faster_attention": args.use_faster_attn,
     }
 

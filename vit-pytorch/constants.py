@@ -56,4 +56,4 @@ def HYP_TRANS(alpha):
 LINESTYLE_DICT = {'spfnsvit': 'solid', 'spopfnsvit': (0,(5,1)),               
                   'rdfnsvit': 'solid', 'rdopfnsvit': (0,(5,1)),
                   'sinkvit': (0,(1,1)),
-                  'dpvit': (0,(5,5))}              
+                  'dpvit': (0,(1,1))}              

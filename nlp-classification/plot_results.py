@@ -72,10 +72,12 @@ def plot_fns_ensembles(models_roots, fns_type='spopfnsformer', metrics='eval_acc
     ncols = len(epss)
 
     figsize = (3*ncols,3*nrows)
-    fig, axs = plt.subplots(nrows,ncols,figsize=figsize,sharex=True,sharey=True)
+    fig, axs = plt.subplots(nrows,ncols,figsize=figsize,sharex=True,sharey=True)  # layout='constrained'
     
     if nrows == 1:
         axs = np.expand_dims(axs, axis=0)
+        if ncols == 1:
+            axs = np.expand_dims(axs, axis=1)
     elif nrows > 1 and ncols == 1:
         axs = np.expand_dims(axs, axis=1)     
     
@@ -126,13 +128,15 @@ def plot_fns_ensembles(models_roots, fns_type='spopfnsformer', metrics='eval_acc
                                         #,marker=model_markers[model_name], markersize=markersize,
                                         #,label=model_legend)                                    
 
-                if row_idx == nrows - 1:
-                    if len(epochs) > 50:
-                        ax.set_xticks(epochs[49::50])
-                        ax.set_xticklabels(epochs[49::50])
-                    else:
-                        ax.set_xticks(epochs)
-                        ax.set_xticklabels(epochs)
+                # if row_idx == nrows - 1:
+                #     if len(epochs) > 50:
+                #         ax.set_xticks(epochs[49::50])
+                #         ax.set_xticklabels(epochs[49::50])
+                #     else:
+                #         ax.set_xticks(epochs)
+                #         ax.set_xticklabels(epochs)
+                if row_idx != nrows - 1:
+                    ax.set_xticklabels([])
 
                 # col labels (bandwidth)
                 if row_idx == 0:
@@ -152,56 +156,56 @@ def plot_fns_ensembles(models_roots, fns_type='spopfnsformer', metrics='eval_acc
 
             if eps == 1:
                 pass
-            # # -------------------- SINK --------------------                
-            #     model_type = 'sink' + suffix
-            #     if model_type in model_types:
-            #         model_df = DCT_ALL[model_type]
-            #         lstyle_model = LINESTYLE_DICT[model_type]
+            # -------------------- SINK --------------------                
+                model_type = 'sink' + suffix
+                if model_type in model_types:
+                    model_df = DCT_ALL[model_type]
+                    lstyle_model = LINESTYLE_DICT[model_type]
 
-            #         model_info = model_df.iloc[0,:]
-            #         ensembles = model_info['ensembles']
-            #         instances = model_info['instances']
-            #         qk_share = model_info['qk_share']
-            #         if ensembles > 0:
-            #             model_instance_path = njoin(model_info['model_dir'], f'model={instances[0]}')
-            #             if isfile(njoin(model_instance_path, 'run_performance.csv')): 
-            #                 run_perf = pd.read_csv(njoin(model_instance_path, 'run_performance.csv'))
-            #             if isfile(njoin(model_instance_path, '_run_performance.csv')): 
-            #                 run_perf = pd.read_csv(njoin(model_instance_path, '_run_performance.csv'))
+                    model_info = model_df.iloc[0,:]
+                    ensembles = model_info['ensembles']
+                    instances = model_info['instances']
+                    qk_share = model_info['qk_share']
+                    if ensembles > 0:
+                        model_instance_path = njoin(model_info['model_dir'], f'model={instances[0]}')
+                        if isfile(njoin(model_instance_path, 'run_performance.csv')): 
+                            run_perf = pd.read_csv(njoin(model_instance_path, 'run_performance.csv'))
+                        if isfile(njoin(model_instance_path, '_run_performance.csv')): 
+                            run_perf = pd.read_csv(njoin(model_instance_path, '_run_performance.csv'))
 
-            #             epochs = run_perf.loc[:,'step'].astype(int) // int(run_perf.loc[0,'step'].astype(int)) 
+                        epochs = run_perf.loc[:,'step'].astype(int) // int(run_perf.loc[0,'step'].astype(int)) 
 
-            #             trans = 1
-            #             ax.plot(epochs, run_perf.loc[:,metrics[0]], linestyle=lstyle_model, c=OTHER_COLORS[0], alpha=trans)    
+                        trans = 1
+                        ax.plot(epochs, run_perf.loc[:,metrics[0]], linestyle=lstyle_model, c=OTHER_COLORS[0], alpha=trans)    
 
-            #         if model_type not in model_types_plotted:
-            #             model_types_plotted.append(model_type)
+                    if model_type not in model_types_plotted:
+                        model_types_plotted.append(model_type)
 
-            # # -------------------- DP --------------------
+            # -------------------- DP --------------------
 
-            #     model_type = 'dp' + suffix
-            #     if model_type in model_types:       
-            #         model_df = DCT_ALL[model_type]
-            #         lstyle_model = LINESTYLE_DICT[model_type]
+                model_type = 'dp' + suffix
+                if model_type in model_types:       
+                    model_df = DCT_ALL[model_type]
+                    lstyle_model = LINESTYLE_DICT[model_type]
 
-            #         model_info = model_df.iloc[0,:]
-            #         ensembles = model_info['ensembles']
-            #         instances = model_info['instances']
-            #         qk_share = model_info['qk_share']
-            #         if ensembles > 0:
-            #             model_instance_path = njoin(model_info['model_dir'], f'model={instances[0]}')
-            #             if isfile(njoin(model_instance_path, 'run_performance.csv')): 
-            #                 run_perf = pd.read_csv(njoin(model_instance_path, 'run_performance.csv'))
-            #             if isfile(njoin(model_instance_path, '_run_performance.csv')): 
-            #                 run_perf = pd.read_csv(njoin(model_instance_path, '_run_performance.csv'))                        
+                    model_info = model_df.iloc[0,:]
+                    ensembles = model_info['ensembles']
+                    instances = model_info['instances']
+                    qk_share = model_info['qk_share']
+                    if ensembles > 0:
+                        model_instance_path = njoin(model_info['model_dir'], f'model={instances[0]}')
+                        if isfile(njoin(model_instance_path, 'run_performance.csv')): 
+                            run_perf = pd.read_csv(njoin(model_instance_path, 'run_performance.csv'))
+                        if isfile(njoin(model_instance_path, '_run_performance.csv')): 
+                            run_perf = pd.read_csv(njoin(model_instance_path, '_run_performance.csv'))                        
 
-            #             epochs = run_perf.loc[:,'step'].astype(int) // int(run_perf.loc[0,'step'].astype(int)) 
+                        epochs = run_perf.loc[:,'step'].astype(int) // int(run_perf.loc[0,'step'].astype(int)) 
 
-            #             trans = 1
-            #             ax.plot(epochs, run_perf.loc[:,metrics[0]], linestyle=lstyle_model, c=OTHER_COLORS[1], alpha=trans)                                            
+                        trans = 1
+                        ax.plot(epochs, run_perf.loc[:,metrics[0]], linestyle=lstyle_model, c=OTHER_COLORS[1], alpha=trans)                                            
                 
-            #         if model_type not in model_types_plotted:
-            #             model_types_plotted.append(model_type)
+                    if model_type not in model_types_plotted:
+                        model_types_plotted.append(model_type)
 
             #ax.grid()
             ax.yaxis.grid(True)
@@ -225,11 +229,13 @@ def plot_fns_ensembles(models_roots, fns_type='spopfnsformer', metrics='eval_acc
                   loc='best', ncol=2, frameon=False)                    
 
     # Add shared x and y labels
-    fig.text(0.5, 0.01, 'Epochs', fontsize='medium', ha='center')
-    fig.text(0.05, 0.5, 'Eval accuracy', fontsize='medium', va='center', rotation='vertical')    
+    # fig.text(0.5, 0.01, 'Epochs', fontsize='medium', ha='center')
+    # fig.text(0, 0.5, NAMES_DICT[metrics[0]], fontsize='medium', va='center', rotation='vertical')       
+    fig.supxlabel('Epochs', fontsize='medium')
+    fig.supylabel(NAMES_DICT[metrics[0]], fontsize='medium')
 
     # Adjust layout
-    #plt.tight_layout(rect=[0, 0, 0.93, 1])  # Leave space for the right label                 
+    plt.tight_layout(rect=[0, 0, 0.93, 1])  # Leave space for the right label                 
 
     dataset_name_short = ''
     if isinstance(dataset,str):
@@ -485,8 +491,8 @@ def plot_ensembles(model_root_dirs, metrics=['eval_accuracy'],
 
 
     # Add shared x and y labels
-    fig.text(0.5, 0.01, 'Epochs', ha='center')
-    fig.text(0, 0.5, 'Eval accuracy', va='center', rotation='vertical')    
+    fig.text(0.5, 0.01, 'Epochs', fontsize='medium', ha='center')
+    fig.text(0, 0.5, NAMES_DICT[metrics[0]], fontsize='medium',va='center', rotation='vertical')    
 
     # Adjust layout
     #plt.tight_layout(rect=[0, 0, 0.93, 1])  # Leave space for the right label                 
@@ -589,8 +595,8 @@ def plot_model(model_root_dir, dirnames, instances,
 
                 if idx == 0:
                     axs[idx,kdx].set_title(NAMES_DICT[metric])
-                elif idx == nrows - 1:
-                    axs[idx,kdx].set_xlabel('Epoch')
+                # elif idx == nrows - 1:
+                #     axs[idx,kdx].set_xlabel('Epoch')
 
                 print_metrics[metric] = [best_metric, metric_plot.iloc[-1]]  # best + final
 

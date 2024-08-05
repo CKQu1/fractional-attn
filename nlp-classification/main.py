@@ -39,7 +39,7 @@ python -i main.py --n_layers=1 --n_attn_heads=2 --model_name=dpformer\
  --model_root=.droot/debug-mode
 
 python -i main.py --n_layers=2 --n_attn_heads=1\
- --model_name=opfnsformer --manifold=rd --qk_share=False\
+ --model_name=opfnsformer --manifold=sphere --qk_share=False\
  --alpha=1.5 --bandwidth=0.5 --a=0\
  --lr_scheduler_type=constant\
  --max_len=256 --max_steps=50 --logging_steps=10 --save_steps=10 --eval_steps=10\
@@ -623,6 +623,25 @@ if __name__ == '__main__':
     #     from transformers import Trainer
     #     trainer = Trainer(**trainer_kwargs)    
 
+    if master_process:
+        train_settings = pd.DataFrame(columns=["device_total",
+                                               "lr", "lr_scheduler_type", 
+                                               "train_size", "eval_size", "train_bs", "eval_bs",
+                                               "epochs", "weight_decay", "eval_strat", "eval_steps",
+                                               "log_strat", "logging_steps", "save_steps",  
+                                               "steps_per_train_epoch",                        
+                                               "seed", "warmup_steps",  "grad_accum_step", 
+                                               "milestones", "gamma"], index=range(1))
+        train_settings.iloc[0] = [device_total,
+                                  args.lr, args.lr_scheduler_type, 
+                                  train_size, eval_size, args.train_bs, args.eval_bs,
+                                  args.epochs, args.weight_decay, args.eval_strat, args.eval_steps,
+                                  args.log_strat, args.logging_steps, args.save_steps, 
+                                  steps_per_train_epoch,
+                                  args.seed, args.warmup_steps, args.grad_accum_step, args.milestones,
+                                  args.gamma]
+        train_settings.to_csv(njoin(model_dir, "train_setting.csv"))        
+
     t0_train = time()  # record train time    
     #trainer.train(ignore_keys_for_eval=["hidden_states", "attentions", "global_attentions"])  # "loss"
     trainer.train(ignore_keys_for_eval=["loss", "hidden_states", "attentions", "global_attentions"]) 
@@ -645,23 +664,6 @@ if __name__ == '__main__':
         final_perf = pd.DataFrame()
         final_perf = final_perf.append(model_settings, ignore_index=True)    
         final_perf.to_csv(njoin(model_dir, "final_performance.csv"))
-        train_settings = pd.DataFrame(columns=["device_total",
-                                               "lr", "lr_scheduler_type", 
-                                               "train_size", "eval_size", "train_bs", "eval_bs",
-                                               "epochs", "weight_decay", "eval_strat", "eval_steps",
-                                               "log_strat", "logging_steps", "save_steps",  
-                                               "steps_per_train_epoch",                        
-                                               "seed", "warmup_steps",  "grad_accum_step", 
-                                               "milestones", "gamma"], index=range(1))
-        train_settings.iloc[0] = [device_total,
-                                  args.lr, args.lr_scheduler_type, 
-                                  train_size, eval_size, args.train_bs, args.eval_bs,
-                                  args.epochs, args.weight_decay, args.eval_strat, args.eval_steps,
-                                  args.log_strat, args.logging_steps, args.save_steps, 
-                                  steps_per_train_epoch,
-                                  args.seed, args.warmup_steps, args.grad_accum_step, args.milestones,
-                                  args.gamma]
-        train_settings.to_csv(njoin(model_dir, "train_setting.csv"))
 
         print('\n')
         print('---------- Model trained and saved! ----------')

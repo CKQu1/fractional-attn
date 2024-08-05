@@ -900,9 +900,9 @@ class RDFNSSelfAttention(nn.Module):
         return outputs + (global_attn_probs,) if (is_global_attn and output_attentions) else outputs      
 
 
-# -------------------- OPFNS Self-Attention  --------------------
+# -------------------- OPFNS Self-Attention (old version)  --------------------
 # Orthogonal Projection: same as V3FNSSelfAttention but with orthogonal projections for QK, not for V
-
+"""
 class SPOPFNSSelfAttention(nn.Module):
     def __init__(self, config, layer_id, alpha, bandwidth, a):
         super().__init__()
@@ -973,9 +973,9 @@ class SPOPFNSSelfAttention(nn.Module):
             embed_dim == self.embed_dim
         ), f"hidden_states should have embed_dim = {self.embed_dim}, but has {embed_dim}"
 
-        """
-        Embed the queries into a D-sphere via normalization, set the bandwidth as the diamter of an D-sphere
-        """   
+        
+        # Embed the queries into a D-sphere via normalization, set the bandwidth as the diamter of an D-sphere
+           
         # (B, N, H, D) = (batch_size, seq_len, num_heads, head_dim)        
         query_vectors = F.normalize(query_vectors.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2), p=2, dim=-1)  # (B,N,H,D)
         #query_vectors = query_vectors.view(batch_size, seq_len, num_heads, head_dim)                                            # (B,N,H,D)        
@@ -992,7 +992,6 @@ class SPOPFNSSelfAttention(nn.Module):
         else:
             #g_dist = torch.cdist(query_vectors, query_vectors, p=2)  # (H,B,N,N)      
             # directly get geodesic distance
-            pass
             g_dist = torch.acos(torch.clamp(query_vectors @ query_vectors.transpose(-2, -1), -1+eps, 1-eps)) * self.sphere_radius                        
         #print(f'Min and max distance: {g_dist.min()}, {g_dist.max()}')  
         #q = torch.tensor([0, 0.2, 0.4, 0.6, 0.8, 1])
@@ -1063,6 +1062,147 @@ class SPOPFNSSelfAttention(nn.Module):
         outputs = (attn_output.transpose(0, 1),) # Seq,B,D
 
         return outputs + (global_attn_probs,) if (is_global_attn and output_attentions) else outputs      
+        """
+
+# -------------------- OPFNS Self-Attention (new version)  --------------------
+# Orthogonal Projection: same as V3FNSSelfAttention but with orthogonal projections for QK, not for V
+
+class SPOPFNSSelfAttention(nn.Module):
+    def __init__(self, config, layer_id, alpha, bandwidth, a):
+        super().__init__()
+        if config.hidden_size % config.num_attention_heads != 0:
+            raise ValueError(
+                f"The hidden size ({config.hidden_size}) is not a multiple of the number of attention "
+                f"heads ({config.num_attention_heads})"
+            )
+        self.num_heads = config.num_attention_heads
+        self.head_dim = int(config.hidden_size / config.num_attention_heads)
+        self.embed_dim = config.hidden_size
+
+        self.alpha = alpha
+        self.bandwidth = bandwidth
+        self.a = a
+
+        self.qk_share = config.qk_share
+        self.sphere_radius = config.sphere_radius
+        self.mask_val = config.mask_val  # mask for g_dist
+        self.bias = config.qkv_bias
+
+        #self.query = orthogonal(nn.Linear(config.hidden_size, self.embed_dim, bias=self.bias))
+        if not self.qk_share:          
+            self.key = orthogonal(nn.Linear(config.hidden_size, self.embed_dim, bias=self.bias))
+        self.value = nn.Linear(config.hidden_size, self.embed_dim, bias=self.bias)
+
+        if self.alpha < 2:
+            self.d_intrinsic = config.d_intrinsic  
+            assert config.hidden_size == (self.d_intrinsic + 1) * self.num_heads, 'Incorrect d_intrinsic in SPOPFNSSelfAttention'
+
+        self.dropout = config.attention_probs_dropout_prob
+
+        self.layer_id = layer_id
+        attention_window = config.attention_window[self.layer_id]
+        assert (
+            attention_window % 2 == 0
+        ), f"`attention_window` for layer {self.layer_id} has to be an even value. Given {attention_window}"
+        assert (
+            attention_window > 0
+        ), f"`attention_window` for layer {self.layer_id} has to be positive. Given {attention_window}"
+
+    def forward(
+        self,
+        hidden_states,
+        attention_mask=None,
+        layer_head_mask=None,
+        is_index_masked=None,
+        is_index_global_attn=None,
+        is_global_attn=None,
+        output_attentions=False,
+    ):
+
+        alpha = self.alpha
+        bandwidth = self.bandwidth
+        a = self.a
+
+        if alpha < 2:
+            d_intrinsic = self.d_intrinsic
+
+        hidden_states = F.normalize(hidden_states, p=2, dim=-1)
+        #query_vectors = self.query(hidden_states)
+        query_vectors = hidden_states
+        value_vectors = self.value(hidden_states)   # (N,B,HD)
+
+        #seq_len, batch_size, embed_dim = hidden_states.size()        
+        batch_size, seq_len, embed_dim = hidden_states.size()
+        num_heads, head_dim = self.num_heads, self.head_dim                
+        assert (
+            embed_dim == self.embed_dim
+        ), f"hidden_states should have embed_dim = {self.embed_dim}, but has {embed_dim}"
+
+        """
+        Embed the queries into a D-sphere via normalization, set the bandwidth as the diamter of an D-sphere
+        """   
+        # (B, N, H, D) = (batch_size, seq_len, num_heads, head_dim)        
+        #query_vectors = F.normalize(query_vectors.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2), p=2, dim=-1)  # (B,N,H,D)
+        query_vectors = query_vectors.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2)                            # (B,N,H,D)        
+        value_vectors = value_vectors.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2)                            # (B,H,N,D)                 
+
+        # pairwise Euclidean distance (H,BN,D) @ (H,D,BN)
+        eps = 1e-7  # for limiting the divergence from acos
+        if not self.qk_share:
+            key_vectors = self.key(hidden_states)    
+            #key_vectors = F.normalize(key_vectors.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2), p=2, dim=-1)      # (B,H,N,D)  
+            key_vectors = key_vectors.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2)      # (B,H,N,D)
+            # directly get geodesic distance
+            g_dist = torch.acos(torch.clamp(query_vectors @ key_vectors.transpose(-2, -1), -1+eps, 1-eps)) * self.sphere_radius
+        else:   
+            # directly get geodesic distance            
+            g_dist = torch.acos(torch.clamp(query_vectors @ query_vectors.transpose(-2, -1), -1+eps, 1-eps)) * self.sphere_radius                        
+
+        if attention_mask is not None:
+            # type 1: key_pad_mask
+            bool_mask = (attention_mask>=0).long()
+            attention_mask_expanded = bool_mask.unsqueeze(1).unsqueeze(2).expand([-1,self.num_heads,1,-1])
+
+            # type 2: symmetrical mask
+            # bool_mask = (attention_mask>=0).long()
+            # attention_mask_expanded = (bool_mask.unsqueeze(-1)@bool_mask.unsqueeze(1)).view(batch_size, 1, seq_len, seq_len).expand(-1, num_heads, -1, -1)      
+
+            g_dist = g_dist.masked_fill(attention_mask_expanded==0, self.mask_val)  # 1e9
+
+        if alpha < 2:
+            attn_score = (1 + g_dist/bandwidth**0.5)**(-d_intrinsic-alpha)
+        else:
+            attn_score = torch.exp(-(g_dist/bandwidth**0.5)**(alpha/(alpha-1)))
+
+        attn_score_shape = attn_score.shape
+        #attn_score = attn_score.view(-1, attn_score_shape[2], attn_score_shape[3])
+        if a > 0:
+            # if self.qk_share:
+            #     D_inv = torch.diag_embed(attn_score.sum(-1)**(-a))  # inverse of degree matrix of attn_score
+            #     K_tilde = D_inv @ attn_score @ D_inv
+            # else:
+            # K_tilde = torch.diag_embed(attn_score.sum(-1)**(-a)) @ attn_score @ torch.diag_embed(attn_score.sum(-2)**(-a))
+            N_R = attn_score.sum(-1)  # row sum
+            N_C = attn_score.sum(-2)  # col su                
+            K_tilde = (N_R**(-a)).unsqueeze(-1) * attn_score * (N_C**(-a)).unsqueeze(-2)   
+
+            attn_weights = F.normalize(K_tilde,p=1,dim=3)  # can do this as the attn weights are always positive         
+        else:
+            attn_weights = F.normalize(attn_score,p=1,dim=3)  # can do this as the attn weights are always positive
+        
+        attn_weights = F.dropout(attn_weights, p=self.dropout, training=self.training)   
+
+        # -----------------------------------------------------
+        attn_output = attn_weights @ value_vectors        
+
+        attn_output = F.dropout(attn_output, p=self.dropout, training=self.training)
+        attn_output = attn_output.reshape(batch_size, seq_len,  num_heads, head_dim) # B,N,H,D        
+        assert attn_output.size() == (batch_size, seq_len, num_heads, head_dim), "Unexpected size"
+        attn_output = attn_output.transpose(0, 1).reshape(seq_len, batch_size, embed_dim).contiguous()
+        outputs = (attn_output.transpose(0, 1),) # Seq,B,D
+
+        return outputs + (global_attn_probs,) if (is_global_attn and output_attentions) else outputs     
+
 
 
 # -------------------- RDOPFNS Self-Attention (stick with R^d)  --------------------
@@ -1308,7 +1448,8 @@ class SINKSelfAttention(nn.Module):
 
         if attention_mask is not None:
             # type 1: key_pad_mask
-            bool_mask = (attention_mask>=0).long()
+            #bool_mask = (attention_mask>=0).long()
+            bool_mask = (attention_mask>=0)
             attention_mask_expanded = bool_mask.unsqueeze(1).unsqueeze(2).expand([-1,self.num_heads,1,-1])
 
             # type 2: symmetrical mask

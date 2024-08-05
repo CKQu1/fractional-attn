@@ -62,7 +62,7 @@ def HYP_TRANS(alpha):
 LINESTYLE_DICT = {'spfnsformer': 'solid', 'spopfnsformer': (0,(5,1)),               
                   'rdfnsformer': 'solid', 'rdopfnsformer': (0,(5,1)),
                   'sinkformer': (0,(5,5)),
-                  'dpformer': (0,(5,10))}
+                  'dpformer': (0,(1,1))}
 
 # NAMES_DICT = {'fnsformer': 'FNS', 
 #               'spfnsformer': rf'FNS ($\mathbb{S}^{{d-1}}$)', 'spopfnsformer': rf'OPFNS ($\mathbb{S}^{{d-1}}$)',               

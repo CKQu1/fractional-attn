@@ -129,13 +129,15 @@ def plot_fns_ensembles(models_roots, fns_type='spopfnsvit', metrics='val_acc',
                                         #,marker=model_markers[model_name], markersize=markersize,
                                         #,label=model_legend)                                    
 
-                if row_idx == nrows - 1:
-                    if len(epochs) > 50:
-                        ax.set_xticks(epochs[49::50])
-                        ax.set_xticklabels(epochs[49::50])
-                    else:
-                        ax.set_xticks(epochs)
-                        ax.set_xticklabels(epochs)
+                # if row_idx == nrows - 1:
+                #     if len(epochs) > 50:
+                #         ax.set_xticks(epochs[49::50])
+                #         ax.set_xticklabels(epochs[49::50])
+                #     else:
+                #         ax.set_xticks(epochs)
+                #         ax.set_xticklabels(epochs)
+                if row_idx != nrows - 1:
+                    ax.set_xticklabels([])                
 
                 # col labels (bandwidth)
                 if row_idx == 0:
@@ -227,8 +229,10 @@ def plot_fns_ensembles(models_roots, fns_type='spopfnsvit', metrics='val_acc',
                   loc='best', ncol=2, frameon=False)                    
 
     # Add shared x and y labels
-    fig.text(0.5, 0.01, 'Epochs', fontsize='medium', ha='center')
-    fig.text(0.05, 0.5, 'Eval accuracy', fontsize='medium', va='center', rotation='vertical')    
+    # fig.text(0.5, 0.01, 'Epochs', fontsize='medium', ha='center')
+    # fig.text(0.05, 0.5, 'Eval accuracy', fontsize='medium', va='center', rotation='vertical')    
+    fig.supxlabel('Epochs', fontsize='medium')
+    fig.supylabel(NAMES_DICT[metrics[0]], fontsize='medium')
 
     # Adjust layout
     #plt.tight_layout(rect=[0, 0, 0.93, 1])  # Leave space for the right label                 

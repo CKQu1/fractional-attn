@@ -274,7 +274,7 @@ def plot_fns_ensembles(models_roots, fns_type='spopfnsvit', metrics='val_acc',
         
         fig = plt.figure()
         cbar_ax = fig.add_axes([0.85, 0.20, 0.03, 0.75])
-        cbar_ticks = list(np.linspace(1,2,11))
+        cbar_ticks = list(np.linspace(1,2,6))
         
         cbar = mpl.colorbar.ColorbarBase(cbar_ax, norm=HYP_CNORM, cmap=HYP_CM)
         cbar.ax.set_yticklabels(cbar_ticks)

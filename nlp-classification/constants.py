@@ -20,7 +20,6 @@ BPATH = njoin('/project')  # path for binding to singularity container
 SPATH = njoin('/project/frac_attn/built_containers/FaContainer_v5.sif')  # singularity container path
 
 SCRIPT_PATH = njoin(DROOT, 'submitted_scripts')
-
 # -------------------
 
 # ----- PHYSICS -----
@@ -43,8 +42,6 @@ NAMES_DICT = {'fnsformer': 'FNS',
               'dpformer': 'DP',
               'imdb': 'IMDb', 'rotten_tomatoes': 'Rotten Tomatoes',
               'eval_loss': 'Loss', 'eval_accuracy': 'Accuracy', 'eval_f1_score': r'$F_1$ score'}
-
-
 
 # color for model hyperparameters
 #HYP_CM = 'gist_ncar'

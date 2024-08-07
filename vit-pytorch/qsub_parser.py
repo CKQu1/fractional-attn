@@ -442,14 +442,14 @@ def command_setup_ddp(**kwargs):
         #python -m torch.distributed.launch --nproc_per_node=4 --use_env train_classification_imdb.py run --backend=gloo
         #additional_command = 'run --backend=gloo'
         if select == 1:
-            # command += f" torchrun --rdzv-backend=c10d --rdzv-endpoint=localhost:0"            
-            # command += f" --nnodes=1 --nproc_per_node={ncpus} --max-restarts=3"
-            command += f" torchrun --standalone --nnodes=1 --nproc_per_node={ncpus}"
+            command += f" torchrun --rdzv-backend=c10d --rdzv-endpoint=localhost:0"            
+            command += f" --nnodes=1 --nproc_per_node={ncpus} --max-restarts=3"
+            #command += f" torchrun --standalone --nnodes=1 --nproc_per_node={ncpus}"
         else:
-            # command += f" torchrun --nnodes={select} --nproc_per_node={ncpus}"
-            # command += f" --max-restarts=3 --rdzv-id=$JOB_ID"
-            # command += f" --rdzv-backend=c10d --rdzv-endpoint=$HOST_NODE_ADDR"    
-            command += f" torchrun --nnodes={select} --nproc_per_node={ncpus}"          
+            command += f" torchrun --nnodes={select} --nproc_per_node={ncpus}"
+            command += f" --max-restarts=3 --rdzv-id=$JOB_ID"
+            command += f" --rdzv-backend=c10d --rdzv-endpoint=$HOST_NODE_ADDR"    
+            #command += f" torchrun --nnodes={select} --nproc_per_node={ncpus}"          
 
     if len(singularity_path) == 0:
         command = command[1:]
@@ -474,7 +474,7 @@ def train_submit(script_name, kwargss, **kwargs):
     walltime = kwargs.get('walltime', '23:59:59')
     mem = kwargs.get('mem', '8GB')            
     
-    pbs_array_data = get_pbs_array_data(kwargss)     
+    pbs_array_data =  (kwargss)     
     if system == 'ARTEMIS':   
         perm, pbss = job_divider(pbs_array_data, len(PROJECTS))
     elif system == 'PHYSICS':
@@ -525,6 +525,6 @@ def train_submit(script_name, kwargss, **kwargs):
         if len(additional_command) > 0:
             kwargs_qsub["additional_command"] = additional_command
 
-        qsub(f'{command} {script_name}', pbs_array_true, path=kwargs.get('job_path'),  **kwargs_qsub)   
+        qsub(f'{command} {script_name}', pbs_array_true, path=kwargs.get('job_path'), **kwargs_qsub)   
         print("\n")
 """  

@@ -292,8 +292,8 @@ def job_setup(script_name, kwargss, **kwargs):
     pbs_array_data = get_pbs_array_data(kwargss)     
     if cluster == 'ARTEMIS':   
         perm, pbss = job_divider(pbs_array_data, len(PROJECTS))
-    elif cluster == 'PHYSICS':
-        perm, pbss = job_divider(pbs_array_data, 1)  # not needed for projects
+    else:
+        perm, pbss = job_divider(pbs_array_data, 1)  # projects not needed
 
     #master_port = 0
     HOST_NODE_ADDR = 0

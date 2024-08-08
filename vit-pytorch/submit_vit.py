@@ -2,18 +2,16 @@ import os
 from datetime import datetime
 from os.path import isfile, isdir
 from time import sleep
-from constants import *
-from mutils import njoin, get_instance, structural_model_root
-from qsub_parser import *
+from constants import DROOT, CLUSTER
+from mutils import njoin, get_instance, structural_model_root, str2bool
+from qsub_parser import job_setup, qsub, add_common_kwargs
 """
 torchrun --nnodes=1 --nproc_per_node=2 ddp_main.py --max_iters=5 --eval_interval=5\
  --eval_iters=200 --weight_decay=0 --n_layers=1 --n_attn_heads=2
 """
 
 if __name__ == '__main__':
-    
-    # ----- System -----
-    system = 'ARTEMIS' if 'project' in DROOT else 'PHYSICS'    
+      
     date_str = datetime.today().strftime('%Y-%m-%d')    
     #script_name = "ddp_main.py"  
     script_name = "main.py"
@@ -115,7 +113,7 @@ if __name__ == '__main__':
                         mem=mem,
                         job_path=job_path,
                         nstack=nstack,
-                        system=system)
+                        cluster=CLUSTER)
         
         for i in range(len(commands)):
             qsub(f'{commands[i]} {script_names[i]}', pbs_array_trues[i], path=job_path, **kwargs_qsubs[i])         

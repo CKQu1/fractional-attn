@@ -53,7 +53,7 @@ python -i main.py --n_layers=1 --n_attn_heads=2 --model_name=sinkformer --n_it=1
 """
 
 """
-torchrun --nnodes=1 --nproc_per_node=4 main.py --n_layers=1 --n_attn_heads=2 --model_name=v3fnsformer --alpha=1.5\
+torchrun --nnodes=1 --nproc_per_node=4 main.py --n_layers=1 --n_attn_heads=2 --model_name=opfnsformer --alpha=1.5\
  --max_len=256 --max_steps=2 --logging_steps=2 --save_steps=2 --eval_steps=2\
  --divider=1 --warmup_steps=0 --grad_accum_step=1 --dataset_name=rotten_tomatoes\
  --model_root=.droot/debug-mode
@@ -64,7 +64,7 @@ if __name__ == '__main__':
 
     # Training options
     parser = argparse.ArgumentParser(description='main_seq_classification.py training arguments')    
-    parser.add_argument('--train_with_ddp', default=False, type=bool, help='to use DDP or not')
+    parser.add_argument('--train_with_ddp', type=str2bool, nargs='?', const=True, default=False, help='to use DDP or not')
     parser.add_argument('--use_custom_optim', default=False, type=bool, help='to use custom optimizer')
     parser.add_argument('--lr', default=3e-5, type=float, help='learning rate')
     parser.add_argument('--train_bs', default=2, type=int)
@@ -99,6 +99,7 @@ if __name__ == '__main__':
     parser.add_argument('--hidden_size', default=768, type=int)    
     parser.add_argument('--model_name', default='fnsformer', type=str, help='v3fnsformer | sinkformer | dpformer') 
     parser.add_argument('--fix_embed', type=str2bool, nargs='?', const=True, default=False) 
+    parser.add_argument('--instance', default=0, type=int)
     # FNSformer
     parser.add_argument('--alpha', default=1, type=float)
     parser.add_argument('--bandwidth', default=1, type=float) 
@@ -131,21 +132,22 @@ if __name__ == '__main__':
 
     repo_dir = os.getcwd()  # main dir 
     dev = torch.device(f"cuda:{torch.cuda.device_count()-1}"
-                       if torch.cuda.is_available() else "cpu")   
-    print(f'device = {dev}')
+                       if torch.cuda.is_available() else "cpu")       
     device_name = "GPU" if dev.type != "cpu" else "CPU"
     ddp = torch.distributed.is_available() and args.train_with_ddp
     global_rank = None
     if ddp:
         world_size = int(os.environ["WORLD_SIZE"])
         global_rank = int(os.environ["RANK"])
-        print(f"global_rank: {global_rank}")    
-        print(f"Device in use: {dev}.")
+        print(f"global_rank: {global_rank}")            
         device_total = world_size
         master_process = global_rank == 0 # this process will do logging, checkpointing etc.             
     else:        
         device_total = 1       
         master_process = True        
+
+    if master_process:
+        print(f"Device in use: {dev}.")
 
     logging.set_verbosity_debug()
     logger = logging.get_logger()
@@ -214,8 +216,9 @@ if __name__ == '__main__':
             tokenized_dataset_dir = njoin(DROOT, "DATASETS", f"tokenized_{args.dataset_name}-tk=roberta-len={max_length}")
         else:
             tokenized_dataset_dir = njoin(DROOT, "DATASETS", f"tokenized_{args.dataset_name}-tk={pretrained_model_name}-len={max_length}")
-        if not isdir(tokenized_dataset_dir):         
-            print("Downloading data!") if master_process else None
+        if not isdir(tokenized_dataset_dir):   
+            if master_process:      
+                print("Downloading data!")
             # create cache for dataset
             dataset = get_dataset(args.dataset_name, njoin(DROOT, "DATASETS"))        
             tokenized_dataset = dataset.map(preprocess_function, batched=True)
@@ -226,7 +229,8 @@ if __name__ == '__main__':
             tokenized_dataset.save_to_disk(tokenized_dataset_dir)
             del dataset  # alleviate memory
         else:        
-            print("Data downloaded, loading from local now! \n") if master_process else None
+            if master_process:
+                print("Data downloaded, loading from local now! \n")
             tokenized_dataset = load_from_disk(tokenized_dataset_dir)
         if args.dataset_name != 'imdb':
             tokenized_dataset = process_dataset_cols(tokenized_dataset)
@@ -278,7 +282,8 @@ if __name__ == '__main__':
             if args.dataset_name in ["aan-classification"]:
                 # Use retreival model for document matching
                 retrieval = True
-                print("Using retrieval model for document matching")
+                if master_process:
+                    print("Using retrieval model for document matching")
             else:
                 retrieval = False
         else:
@@ -305,23 +310,7 @@ if __name__ == '__main__':
 
         data_collator = None
 
-    # ---------------------------------------- 2. Model setup ----------------------------------------
-
-    # paths
-    if args.model_root == '':
-        model_root = structural_model_root(qk_share=args.qk_share, n_layers=args.n_layers,
-                                           n_attn_heads=args.n_attn_heads, hidden_size=args.hidden_size,
-                                           lr=args.lr, bs=args.train_bs, 
-                                           use_custom_optim=args.use_custom_optim,
-                                           milestones=args.milestones, gamma=args.gamma,
-                                           epochs=args.epochs                                               
-                                           )       
-        model_root = njoin(DROOT, model_root)
-
-
-    else:
-        model_root = args.model_root   
-    #if not isdir(model_root): makedirs(model_root)
+    # ---------------------------------------- 2. Model setup ---------------------------------------- 
 
     #config = ModelConfig.from_json_file(f"{repo_dir}/models/config_simple.json")
     config = {"attention_mode": model_name,
@@ -393,7 +382,8 @@ if __name__ == '__main__':
         config["max_position_embeddings"] = 4098
 
     attn_setup = {'fix_embed': args.fix_embed, 
-                  'qk_share': args.qk_share, 'qkv_bias': args.qkv_bias}    
+                  'qk_share': args.qk_share, 'qkv_bias': args.qkv_bias,
+                  'instance': args.instance}    
     attn_setup['dataset_name'] = args.dataset_name
     if 'fns' in model_name:
         attn_setup['manifold'] = args.manifold
@@ -435,17 +425,34 @@ if __name__ == '__main__':
     assert model_name in MODEL_NAMES, f'{model_name} does not exist in {MODEL_NAMES}'
     attn_setup['model_name'] = model_name
 
+    # paths
+    if args.model_root == '':
+        model_root = structural_model_root(qk_share=args.qk_share, n_layers=args.n_layers,
+                                           n_attn_heads=args.n_attn_heads, hidden_size=args.hidden_size,
+                                           lr=args.lr, bs=args.train_bs, 
+                                           use_custom_optim=args.use_custom_optim,
+                                           milestones=args.milestones, gamma=args.gamma,
+                                           epochs=args.epochs                                               
+                                           )       
+        model_root = njoin(DROOT, model_root)
+
+
+    else:
+        model_root = args.model_root  
+
     models_dir, model_dir = create_model_dir(model_root, **attn_setup)
     if master_process:
-        if not os.path.isdir(models_dir): os.makedirs(models_dir)
-        if not os.path.isdir(model_dir): os.makedirs(model_dir) 
+        os.makedirs(models_dir, exist_ok=True)
+        os.makedirs(model_dir, exist_ok=True)
           
     # save config
-    with open(njoin(model_dir,"config.json"), "w") as ofile: 
-        json.dump(config, ofile)   
+    if not isfile(njoin(model_dir,"config.json")):
+        with open(njoin(model_dir,"config.json"), "w") as ofile: 
+            json.dump(config, ofile)   
     # save attn_setup
-    with open(njoin(model_dir,"attn_setup.json"), "w") as ofile: 
-        json.dump(attn_setup, ofile)        
+    if not isfile(njoin(model_dir,"attn_setup.json")):
+        with open(njoin(model_dir,"attn_setup.json"), "w") as ofile: 
+            json.dump(attn_setup, ofile)        
 
     model_config = ModelConfig.from_json_file(njoin(model_dir, 'config.json'))
     model = FNSFormerForSequenceClassification(model_config, **attn_setup).to(dev)  
@@ -465,7 +472,8 @@ if __name__ == '__main__':
     else:
         warmup_steps = args.warmup_steps
 
-    training_args_dict = {"output_dir": model_dir,                         
+    training_args_dict = {'ddp_find_unused_parameters': False,
+                          "output_dir": model_dir,                         
                           "per_device_train_batch_size": args.train_bs,
                           "per_device_eval_batch_size": args.eval_bs,
                           "num_train_epochs": args.epochs,                                                    
@@ -525,7 +533,7 @@ if __name__ == '__main__':
     training_args = TrainingArguments(**training_args_dict)
     steps_per_train_epoch = int(len(train_dataset)/(training_args.per_device_train_batch_size*device_total*training_args.gradient_accumulation_steps ))    
     if master_process:
-        print("-"*25)
+        print("-"*25 + "\n")
         print(training_args_dict)
         if args.use_custom_optim is True:
             print(f'milestones: {args.milestones}')

@@ -85,7 +85,10 @@ def create_model_dir(model_root_dir, **kwargs):
         dirname += f'-n_it={n_it}-eps={bandwidth}'
 
     models_dir = njoin(model_root_dir, dirname)
-    instance = get_instance(models_dir, 'model=')
+    if 'instance' in kwargs:
+        instance = kwargs.get('instance')
+    else:
+        instance = get_instance(models_dir, 'model=')
     model_dir = njoin(models_dir, f'model={instance}')         
        
     return models_dir, model_dir      

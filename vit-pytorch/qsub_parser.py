@@ -10,7 +10,7 @@ from mutils import njoin
 def qsub(command, pbs_array_data, **kwargs):
     global pbs_array_data_chunks
 
-    system = kwargs.get('system')
+    cluster = kwargs.get('cluster')
     nstack = kwargs.get('nstack', 1)
 
     if 'path' in kwargs:
@@ -27,7 +27,9 @@ def qsub(command, pbs_array_data, **kwargs):
     else:
         post_command = ''
     # Create output folder.
-    if not isdir(njoin(path,"job")): os.makedirs(njoin(path,"job"))
+    date_str = datetime.today().strftime('%Y-%m-%d')
+    job_dir = f"{date_str}_out"
+    if not isdir(njoin(path,job_dir)): os.makedirs(njoin(path,job_dir))
     # source virtualenv
     if 'source' in kwargs:
         #assert os.path.isfile(kwargs.get('source')), "source for virtualenv incorrect"
@@ -53,7 +55,7 @@ END""")
     print(f"Submitting {len(pbs_array_data)} subjobs")
     
     # ---------- begin{ARTEMIS} ----------
-    if system == 'ARTEMIS':
+    if cluster == 'ARTEMIS':
         MAX_SUBJOBS = 1000
         # PBS array jobs are limited to 1000 subjobs by default
         pbs_array_data_chunks = [pbs_array_data[x:x+MAX_SUBJOBS]
@@ -69,7 +71,8 @@ END""")
 #PBS -q {kwargs.get('q','defaultQ')}
 #PBS -V
 #PBS -m n
-#PBS -o {path}job -e {path}job
+##PBS -o {path}job -e {path}job
+#PBS -o {path}/{job_dir} -e {path}/{job_dir}
 #PBS -l select={kwargs.get('select',1)}:ncpus={kwargs.get('ncpus',1)}:mem={kwargs.get('mem','1GB')}{':ngpus='+str(kwargs['ngpus']) if 'ngpus' in kwargs else ''}
 #PBS -l walltime={kwargs.get('walltime','23:59:00')}
 #PBS -J {MAX_SUBJOBS*i}-{MAX_SUBJOBS*i + len(pbs_array_data_chunk)-1}
@@ -92,7 +95,7 @@ END"""
 
 
     # ---------- begin{PHYSICSX} ---------- for bash shell
-    elif system == 'PHYSICS':
+    elif cluster == 'PHYSICS':
         MAX_SUBJOBS = 1000
         # PBS array jobs are limited to 1000 subjobs by default
         pbs_array_data_chunks = [pbs_array_data[x:x+MAX_SUBJOBS]
@@ -108,7 +111,8 @@ END"""
 #PBS -q {kwargs.get('q','defaultQ')}
 #PBS -V
 #PBS -m n
-#PBS -o {path} -e {path}
+##PBS -o {path} -e {path}
+#PBS -o {path}/{job_dir} -e {path}/{job_dir}
 #PBS -l select={kwargs.get('select',1)}:ncpus={kwargs.get('ncpus',1)}:mem={kwargs.get('mem','1GB')}{':ngpus='+str(kwargs['ngpus']) if 'ngpus' in kwargs else ''}
 #PBS -l walltime={kwargs.get('walltime','23:59:00')}                       
 #PBS -J {MAX_SUBJOBS*i}-{MAX_SUBJOBS*i + len(pbs_array_data_chunk)-1}
@@ -133,8 +137,54 @@ END"""
     # ---------- end{PHYSICSX} ----------
 
 
+    # ---------- begin{FUDAN_BRAIN} ---------- for bash shell
+    elif cluster == 'FUDAN_BRAIN':
+        MAX_SUBJOBS = 1000
+        # PBS array jobs are limited to 1000 subjobs by default
+        pbs_array_data_chunks = [pbs_array_data[x:x+MAX_SUBJOBS]
+                                for x in range(0, len(pbs_array_data), MAX_SUBJOBS)]
+        if len(pbs_array_data_chunks[-1]) == 1:  # array jobs must have length >1
+            pbs_array_data_chunks[-1].insert(0, pbs_array_data_chunks[-2].pop())
+        for i, pbs_array_data_chunk in enumerate(pbs_array_data_chunks):
+
+            # https://stackoverflow.com/questions/2500436/how-does-cat-eof-work-in-bash
+            SLURM_SCRIPT = f"""<<'END'
+#!/bin/bash
+#SBATCH --job-name={kwargs.get('N', sys.argv[0] or 'job')}
+#SBATCH -p {kwargs.get('q','DCU')}
+##SBATCH -o {path}/%j.out -e {path}/%j.err
+#SBATCH -o {path}/{job_dir}/%j.out -e {path}/{job_dir}/%j.err
+#SBATCH -N {kwargs.get('select',1)}
+#SBATCH -n {kwargs.get('ncpus',1)}
+#SBATCH --mem={kwargs.get('mem','1GB')}
+#SBATCH --gres={'gpu:'+str(kwargs['ngpus']) if 'ngpus' in kwargs else ''}
+#SBATCH -t {kwargs.get('walltime','23:59:00')}                       
+#SBATCH --array={MAX_SUBJOBS*i}-{MAX_SUBJOBS*i + len(pbs_array_data_chunk)-1}
+
+#SBATCH
+args=($(python -c "import sys;print(' '.join(map(str, {pbs_array_data_chunk}[int(sys.argv[1])-{MAX_SUBJOBS*i}])))" $SLURM_ARRAY_TASK_ID))
+
+cd {kwargs.get('cd', '$SLURM_SUBMIT_DIR')}
+echo "pbs_array_args = ${{args[*]}}"
+if [ {source_exists} ]; then
+    source {kwargs.get('source')}
+fi
+if [ {conda_exists} ]; then
+    conda activate {kwargs.get('conda')}
+fi         
+                                                     
+{command} ${{args[*]}} {additional_command} {post_command}
+exit
+END"""
+
+            os.system(f'sbatch {SLURM_SCRIPT}')
+            #print(SLURM_SCRIPT)
+
+    # ---------- end{FUDAN_BRAIN} ----------
+
+
     # ---------- begin{PHYSICS0} ---------- perhaps can use for SBATCH
-    # elif system == 'PHYSICS':
+    # elif cluster == 'PHYSICS':
     #     MAX_SUBJOBS = 1000
 
     #     if not isdir(SCRIPT_DIR): makedirs(SCRIPT_DIR)                
@@ -156,51 +206,7 @@ END"""
 
     # ---------- end{PHYSICS0} ----------
 
-    # ---------- begin{PHYSICS1} ----------
-    # elif system == 'PHYSICS':
-    #     MAX_SUBJOBS = 1000
-        
-    #     for i, pbs_array_data_point in enumerate(pbs_array_data):
 
-    #         # old args
-    #         # args=($(python -c "import sys;print(' '.join(map(str, {pbs_array_data_point})))"))
-    #         # echo "pbs_array_args = ${{args[*]}}"
-    #         # {command} ${{args}} {additional_command} {post_command}
-
-    #         args = ' '.join(map(str, pbs_array_data_point))
-    #         full_command = f'{command} {args} {additional_command} {post_command}'
-
-    #         # https://stackoverflow.com/questions/2500436/how-does-cat-eof-work-in-bash
-    #         PBS_SCRIPT = f"""<<eof
-    #             #!/bin/bash
-    #             #PBS -N {kwargs.get('N', sys.argv[0] or 'job')}
-    #             #PBS -q {kwargs.get('q','defaultQ')}
-    #             #PBS -V
-    #             #PBS -m n
-    #             #PBS -o {path} -e {path}
-    #             #PBS -l select={kwargs.get('select',1)}:ncpus={kwargs.get('ncpus',1)}:mem={kwargs.get('mem','1GB')}{':ngpus='+str(kwargs['ngpus']) if 'ngpus' in kwargs else ''}
-    #             #PBS -l walltime={kwargs.get('walltime','23:59:00')}                       
-                
-    #             #cd {kwargs.get('cd', '$PBS_O_WORKDIR')}
-    #             echo "pbs_array_args = ${args}"
-    #             # if [ {source_exists} ]; then
-    #             #     source {kwargs.get('source')}
-    #             # fi
-    #             # if [ {conda_exists} ]; then
-    #             #     conda activate {kwargs.get('conda')}
-    #             # fi         
-
-    #             cd fractional-attn/vit-pytorch
-    #             source /usr/physics/python/Anaconda3-2022.10/etc/profile.d/conda.sh
-    #             conda activate frac_attn                                                        
-    #             {full_command}
-    #             exit
-    #         eof"""
-
-    #         os.system(f'qsub {PBS_SCRIPT}')
-            #print(PBS_SCRIPT)
-
-    # ---------- end{PHYSICS1} ----------
 
 
 def write_script(full_command, **kwargs):
@@ -272,8 +278,8 @@ def job_setup(script_name, kwargss, **kwargs):
 
     assert isfile(script_name), f"{script_name} does not exist!"
 
-    # system
-    system = kwargs.get('system')
+    # cluster
+    cluster = kwargs.get('cluster')
     nstack = kwargs.get('nstack', 1)
 
     # computing resource settings
@@ -284,10 +290,10 @@ def job_setup(script_name, kwargss, **kwargs):
     mem = kwargs.get('mem', '8GB')            
     
     pbs_array_data = get_pbs_array_data(kwargss)     
-    if system == 'ARTEMIS':   
+    if cluster == 'ARTEMIS':   
         perm, pbss = job_divider(pbs_array_data, len(PROJECTS))
-    elif system == 'PHYSICS':
-        perm, pbss = job_divider(pbs_array_data, 1)  # not needed for projects
+    else:
+        perm, pbss = job_divider(pbs_array_data, 1)  # projects not needed
 
     #master_port = 0
     HOST_NODE_ADDR = 0
@@ -304,10 +310,10 @@ def job_setup(script_name, kwargss, **kwargs):
                        }        
 
         kwargs_command = kwargs_qsub; del kwargs_command["path"]
-        kwargs_command["system"] = system
+        kwargs_command["cluster"] = cluster
 
         # ----- ARTEMIS -----
-        if system == 'ARTEMIS':            
+        if cluster == 'ARTEMIS':            
             # project names
             kwargs_qsub["P"] = PROJECTS[pidx]
             print(PROJECTS[pidx])
@@ -318,9 +324,10 @@ def job_setup(script_name, kwargss, **kwargs):
 
             kwargs_command["HOST_NODE_ADDR"] = HOST_NODE_ADDR
             kwargs_command["singularity_path"] = SPATH
+        # -------------------
 
         # ----- PHYSICS -----
-        elif system == 'PHYSICS':
+        elif cluster == 'PHYSICS':
             if ngpus >= 1:
                 kwargs_qsub["q"] = 'l40s'
             else:
@@ -329,6 +336,18 @@ def job_setup(script_name, kwargss, **kwargs):
 
             kwargs_qsub["source"] = PHYSICS_SOURCE 
             kwargs_qsub["conda"] = PHYSICS_CONDA
+        # -------------------
+
+        # ----- FUDAN -----
+        elif cluster == 'FUDAN_BRAIN':
+            if ngpus >= 1:
+                kwargs_qsub["q"] = 'gpu'
+            else:
+                #kwargs_qsub["q"] = 'yossarian'
+                pass
+
+            kwargs_qsub["conda"] = FUDAN_CONDA
+        # -------------------        
 
         command, additional_command = command_setup_ddp(**kwargs_command)                
 
@@ -404,7 +423,7 @@ def command_setup(singularity_path, **kwargs):
 
 def command_setup_ddp(**kwargs):
 
-    system = kwargs.get('system')
+    cluster = kwargs.get('cluster')
     ncpus = kwargs.get('ncpus', 1) 
     ngpus = kwargs.get('ngpus', 0)
     select = kwargs.get('select', 1)
@@ -442,9 +461,10 @@ def command_setup_ddp(**kwargs):
         #python -m torch.distributed.launch --nproc_per_node=4 --use_env train_classification_imdb.py run --backend=gloo
         #additional_command = 'run --backend=gloo'
         if select == 1:
-            command += f" torchrun --rdzv-backend=c10d --rdzv-endpoint=localhost:0"            
-            command += f" --nnodes=1 --nproc_per_node={ncpus} --max-restarts=3"
+            # command += f" torchrun --rdzv-backend=c10d --rdzv-endpoint=localhost:0"            
+            # command += f" --nnodes=1 --nproc_per_node={ncpus} --max-restarts=3"
             #command += f" torchrun --standalone --nnodes=1 --nproc_per_node={ncpus}"
+            command += f" torchrun --nnodes=1 --nproc_per_node={ncpus}"
         else:
             command += f" torchrun --nnodes={select} --nproc_per_node={ncpus}"
             command += f" --max-restarts=3 --rdzv-id=$JOB_ID"
@@ -463,8 +483,8 @@ def train_submit(script_name, kwargss, **kwargs):
 
     assert isfile(script_name), f"{script_name} does not exist!"
 
-    # system
-    system = kwargs.get('system')
+    # cluster
+    cluster = kwargs.get('cluster')
     nstack = kwargs.get('nstack', 1)
 
     # computing resource settings
@@ -475,9 +495,9 @@ def train_submit(script_name, kwargss, **kwargs):
     mem = kwargs.get('mem', '8GB')            
     
     pbs_array_data =  (kwargss)     
-    if system == 'ARTEMIS':   
+    if cluster == 'ARTEMIS':   
         perm, pbss = job_divider(pbs_array_data, len(PROJECTS))
-    elif system == 'PHYSICS':
+    elif cluster == 'PHYSICS':
         perm, pbss = job_divider(pbs_array_data, 1)  # not needed for projects
 
     #master_port = 0
@@ -494,10 +514,10 @@ def train_submit(script_name, kwargss, **kwargs):
                        }        
 
         kwargs_command = kwargs_qsub; del kwargs_command["path"]
-        kwargs_command["system"] = system
+        kwargs_command["cluster"] = cluster
 
         # ----- ARTEMIS -----
-        if system == 'ARTEMIS':            
+        if cluster == 'ARTEMIS':            
             # project names
             kwargs_qsub["P"] = PROJECTS[pidx]
             print(PROJECTS[pidx])
@@ -510,7 +530,7 @@ def train_submit(script_name, kwargss, **kwargs):
             kwargs_command["singularity_path"] = SPATH
 
         # ----- PHYSICS -----
-        elif system == 'PHYSICS':
+        elif cluster == 'PHYSICS':
             if ngpus >= 1:
                 kwargs_qsub["q"] = 'l40s'
             else:

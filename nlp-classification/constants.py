@@ -3,28 +3,28 @@ import os
 from mutils import njoin
 from matplotlib.cm import get_cmap
 
-# ----- ARTEMIS -----
-PROJECTS = ['phys_DL','PDLAI','dnn_maths','dyson','vortex_dl','frac_attn', 'ddl']
+# ----- GENERAL -----
+RT = os.path.abspath(os.getcwd())
+DROOT = njoin(RT, '.droot')
+FIGS_DIR = njoin(DROOT, 'figs_dir')
+SCRIPT_DIR = njoin(DROOT, 'submitted_scripts')
+
+CLUSTER = 'ARTEMIS' if 'project' in DROOT else 'PHYSICS' if 'headnode' in DROOT else 'FUDAN_BRAIN'
 # -------------------
 
-# ----- PATHS -----
-RT = os.path.abspath(os.getcwd())
-if 'project' in RT:
-    DROOT = njoin('/project/frac_attn/fractional-attn/nlp-classification', '.droot')
-else:
-    DROOT = njoin(RT, '.droot')
-
-FIGS_DIR = njoin(DROOT, 'figs_dir')
-
+# ----- ARTEMIS -----
+PROJECTS = ['phys_DL','PDLAI','dnn_maths','dyson','vortex_dl','frac_attn', 'ddl']
 BPATH = njoin('/project')  # path for binding to singularity container
 SPATH = njoin('/project/frac_attn/built_containers/FaContainer_v5.sif')  # singularity container path
-
-SCRIPT_PATH = njoin(DROOT, 'submitted_scripts')
 # -------------------
 
 # ----- PHYSICS -----
 PHYSICS_SOURCE = '/usr/physics/python/Anaconda3-2022.10/etc/profile.d/conda.sh'
 PHYSICS_CONDA = 'frac_attn' if 'chqu7424' in RT else '~/conda'
+# -------------------
+
+# ----- FUDAN-BRAIN -----
+FUDAN_CONDA = 'frac_attn'
 # -------------------
 
 # ----- FIGURES -----

@@ -56,7 +56,7 @@ python -i main.py --n_layers=1 --n_attn_heads=2 --model_name=sinkformer --n_it=1
 torchrun --nnodes=1 --nproc_per_node=4 main.py --n_layers=1 --n_attn_heads=2 --model_name=opfnsformer --alpha=1.5\
  --max_len=256 --max_steps=2 --logging_steps=2 --save_steps=2 --eval_steps=2\
  --divider=1 --warmup_steps=0 --grad_accum_step=1 --dataset_name=rotten_tomatoes\
- --model_root=.droot/debug-mode
+ --model_root=.droot/debug-mode --train_with_ddp=True
 """
 
 #torch.autograd.set_detect_anomaly(True)  # delete
@@ -139,7 +139,7 @@ if __name__ == '__main__':
     if ddp:
         world_size = int(os.environ["WORLD_SIZE"])
         global_rank = int(os.environ["RANK"])
-        print(f"global_rank: {global_rank}")            
+        #print(f"global_rank: {global_rank}")            
         device_total = world_size
         master_process = global_rank == 0 # this process will do logging, checkpointing etc.             
     else:        
@@ -220,12 +220,19 @@ if __name__ == '__main__':
             if master_process:      
                 print("Downloading data!")
             # create cache for dataset
-            dataset = get_dataset(args.dataset_name, njoin(DROOT, "DATASETS"))        
+            dataset_dir = njoin(DROOT, "DATASETS", args.dataset_name.upper())
+            # original dataset
+            if not isdir(dataset_dir):
+                dataset = get_dataset(args.dataset_name, njoin(DROOT, "DATASETS"))     
+                dataset.save_to_disk(dataset_dir)
+            else:
+                dataset = load_from_disk(dataset_dir)
+
             tokenized_dataset = dataset.map(preprocess_function, batched=True)
             column_names = get_dataset_cols(tokenized_dataset)
             if 'text' in column_names:
                 tokenized_dataset = tokenized_dataset.map(remove_columns=['text'])
-            if not isdir(tokenized_dataset_dir): os.makedirs(tokenized_dataset_dir)
+            os.makedirs(tokenized_dataset_dir, exist_ok=True)
             tokenized_dataset.save_to_disk(tokenized_dataset_dir)
             del dataset  # alleviate memory
         else:        
@@ -309,6 +316,8 @@ if __name__ == '__main__':
         max_length = seq_len
 
         data_collator = None
+
+    del tokenized_dataset
 
     # ---------------------------------------- 2. Model setup ---------------------------------------- 
 
@@ -441,9 +450,9 @@ if __name__ == '__main__':
         model_root = args.model_root  
 
     models_dir, model_dir = create_model_dir(model_root, **attn_setup)
-    if master_process:
-        os.makedirs(models_dir, exist_ok=True)
-        os.makedirs(model_dir, exist_ok=True)
+    #if master_process:
+    #os.makedirs(models_dir, exist_ok=True)
+    os.makedirs(model_dir, exist_ok=True)
           
     # save config
     if not isfile(njoin(model_dir,"config.json")):
@@ -670,7 +679,7 @@ if __name__ == '__main__':
         model_settings['train_secs'] = train_secs
         model_settings.update(trainer.state.log_history[-1])
         final_perf = pd.DataFrame()
-        final_perf = final_perf.append(model_settings, ignore_index=True)    
+        final_perf = final_perf._append(model_settings, ignore_index=True)    
         final_perf.to_csv(njoin(model_dir, "final_performance.csv"))
 
         print('\n')

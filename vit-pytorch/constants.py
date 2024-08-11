@@ -27,17 +27,20 @@ PHYSICS_CONDA = 'frac_attn' if 'chqu7424' in RT else '~/conda'
 FUDAN_CONDA = 'frac_attn'
 # -------------------
 
-MODEL_NAMES = ['fnsvit', 'opfnsvit', 'sinkvit', 'dpvit',
-               'spfnsvit', 'spopfnsvit',
-               'rdfnsvit', 'rdopfnsvit']  # model str names
-               
-NAMES_DICT = {'fnsvit': 'FNS', 'opfnsvit': 'OPFNS',
-              'spfnsvit': 'SPDMFNS', 'spopfnsvit': 'SPOPFNS',
-              'rdfnsvit': 'RDFNS', 'rdopfnsvit': 'RDOPFNS',
-              'sinkvit': 'SINK', 'dpvit': 'DP', 
-              'cifar10': 'CIFAR10',
-              'val_loss': 'Eval Loss', 'val_acc': 'Eval Acc.', 'train_loss': 'Train Loss', 'train_acc': 'Train Acc.'
-              }
+# ----- MODELS -----
+
+MODEL_PREFIXES = ['fns', 'opfns', 'spfns', 'spopfns', 'rdfns', 'rdopfns' 'sink', 'dp']
+MODEL_SUFFIX = 'vit'
+
+MODEL_NAMES = []
+NAMES_DICT = {}
+for MODEL_PREFIX in MODEL_PREFIXES:
+    MODEL_NAMES.append(MODEL_PREFIX + MODEL_SUFFIX)
+    NAMES_DICT[MODEL_PREFIX + MODEL_SUFFIX] = MODEL_PREFIX.upper()
+
+NAMES_DICT.update({'cifar10': 'CIFAR10', 'val_loss': 'Eval Loss',
+                   'val_acc': 'Eval Acc.', 'train_loss': 'Train Loss', 'train_acc': 'Train Acc.'}
+                   )               
 
 # color for model hyperparameters
 #HYP_CM = 'gist_ncar'

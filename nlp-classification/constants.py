@@ -27,21 +27,28 @@ PHYSICS_CONDA = 'frac_attn' if 'chqu7424' in RT else '~/conda'
 FUDAN_CONDA = 'frac_attn'
 # -------------------
 
-# ----- FIGURES -----
-MODEL_NAMES = ['fnsformer', 
-               'spfnsformer','spopfnsformer',
-               'rdfnsformer', 'rdopfnsformer',
-               'sinkformer',
-               'dpformer', 
-               'l2former']  # model str names
-               
-NAMES_DICT = {'fnsformer': 'FNS', 
-              'spfnsformer': 'SPFNS', 'spopfnsformer': 'SPOPFNS',               
-              'rdfnsformer': 'RDFNS', 'rdopfnsformer': 'RDOPFNS',
-              'sinkformer': 'SINK',
-              'dpformer': 'DP',
-              'imdb': 'IMDb', 'rotten_tomatoes': 'Rotten Tomatoes',
-              'eval_loss': 'Loss', 'eval_accuracy': 'Accuracy', 'eval_f1_score': r'$F_1$ score'}
+# ----- MODELS -----
+
+MODEL_PREFIXES = ['fns', 'opfns', 'spfns', 'spopfns', 'rdfns', 'rdopfns' 'sink', 'dp']
+MODEL_SUFFIX = 'former'
+
+MODEL_NAMES = []
+NAMES_DICT = {}
+for MODEL_PREFIX in MODEL_PREFIXES:
+    MODEL_NAMES.append(MODEL_PREFIX + MODEL_SUFFIX)
+    NAMES_DICT[MODEL_PREFIX + MODEL_SUFFIX] = MODEL_PREFIX.upper()
+
+NAMES_DICT.update({'imdb': 'IMDb', 'rotten_tomatoes': 'Rotten Tomatoes',
+                   'eval_loss': 'Loss', 'eval_accuracy': 'Accuracy', 'eval_f1_score': r'$F_1$ score'}
+                   )
+
+# NAMES_DICT = {'fnsformer': 'FNS', 
+#               'spfnsformer': 'SPFNS', 'spopfnsformer': 'SPOPFNS',               
+#               'rdfnsformer': 'RDFNS', 'rdopfnsformer': 'RDOPFNS',
+#               'sinkformer': 'SINK',
+#               'dpformer': 'DP',
+#               'imdb': 'IMDb', 'rotten_tomatoes': 'Rotten Tomatoes',
+#               'eval_loss': 'Loss', 'eval_accuracy': 'Accuracy', 'eval_f1_score': r'$F_1$ score'}
 
 # color for model hyperparameters
 #HYP_CM = 'gist_ncar'

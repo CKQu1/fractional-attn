@@ -34,11 +34,15 @@ def qsub(command, pbs_array_data, **kwargs):
     if 'source' in kwargs:
         #assert os.path.isfile(kwargs.get('source')), "source for virtualenv incorrect"
         source_exists = 'true'
+        source_activate = f"source {kwargs.get('source')}"
     else:
-        source_exists = 'false'
-    # conda activate    
-    conda_exists = 'true' if 'conda' in kwargs else 'false'
-
+        source_activate = ''
+    # conda activate  
+    if 'conda' in kwargs:  
+        conda_exists = 'true' if 'conda' in kwargs else 'false'
+        conda_activate = f"conda activate {kwargs.get('conda')}"
+    else:
+        conda_activate = ''
     if kwargs.get('local', False):  # Run the subjobs in the current process.
         for pbs_array_args in pbs_array_data:
             str_pbs_array_args = ' '.njoin(map(str, pbs_array_args))
@@ -79,12 +83,8 @@ END""")
 args=($(python -c "import sys;print(' '.join(map(str, {pbs_array_data_chunk}[int(sys.argv[1])-{MAX_SUBJOBS*i}])))" $PBS_ARRAY_INDEX))
 cd {kwargs.get('cd', '$PBS_O_WORKDIR')}
 echo "pbs_array_args = ${{args[*]}}"
-if [ {source_exists} ]; then
-   source {kwargs.get('source')}
-fi
-if [ {conda_exists} ]; then
-   conda activate {kwargs.get('conda')}
-fi
+{source_activate}
+{conda_activate}
 {command} ${{args[*]}} {additional_command} {post_command}
 END"""        
 
@@ -92,7 +92,6 @@ END"""
             #print(PBS_SCRIPT)
 
     # ---------- end{ARTEMIS} ----------
-
 
     # ---------- begin{PHYSICSX} ---------- for bash shell
     elif cluster == 'PHYSICS':
@@ -117,16 +116,10 @@ END"""
 #PBS -l walltime={kwargs.get('walltime','23:59:00')}                       
 #PBS -J {MAX_SUBJOBS*i}-{MAX_SUBJOBS*i + len(pbs_array_data_chunk)-1}
 args=($(python -c "import sys;print(' '.join(map(str, {pbs_array_data_chunk}[int(sys.argv[1])-{MAX_SUBJOBS*i}])))" $PBS_ARRAY_INDEX))
-
 cd {kwargs.get('cd', '$PBS_O_WORKDIR')}
-echo "pbs_array_args = ${{args[*]}}"
-if [ {source_exists} ]; then
-    source {kwargs.get('source')}
-fi
-if [ {conda_exists} ]; then
-    conda activate {kwargs.get('conda')}
-fi         
-                                                     
+echo "pbs_array_args = ${{args[*]}}"    
+{source_activate}
+{conda_activate}                                                     
 {command} ${{args[*]}} {additional_command} {post_command}
 exit
 END"""  
@@ -135,7 +128,6 @@ END"""
             #print(PBS_SCRIPT)
 
     # ---------- end{PHYSICSX} ----------
-
 
     # ---------- begin{FUDAN_BRAIN} ---------- for bash shell
     elif cluster == 'FUDAN_BRAIN':
@@ -166,13 +158,9 @@ args=($(python -c "import sys;print(' '.join(map(str, {pbs_array_data_chunk}[int
 
 cd {kwargs.get('cd', '$SLURM_SUBMIT_DIR')}
 echo "pbs_array_args = ${{args[*]}}"
-if [ {source_exists} ]; then
-    source {kwargs.get('source')}
-fi
-if [ {conda_exists} ]; then
-    conda activate {kwargs.get('conda')}
-fi         
-                                                     
+       
+{source_activate}
+{conda_activate}                                                       
 {command} ${{args[*]}} {additional_command} {post_command}
 exit
 END"""
@@ -181,7 +169,6 @@ END"""
             #print(SLURM_SCRIPT)
 
     # ---------- end{FUDAN_BRAIN} ----------
-
 
     # ---------- begin{PHYSICS0} ---------- perhaps can use for SBATCH
     # elif cluster == 'PHYSICS':
@@ -205,74 +192,6 @@ END"""
     #     #time.sleep(.1)
 
     # ---------- end{PHYSICS0} ----------
-
-
-
-
-def write_script(full_command, **kwargs):
-    '''
-    Writes the bash script to launch expe
-    '''
-
-    scheduler = kwargs.get('scheduler', 'PBS')
-    assert scheduler in ['PBS', 'SBATCH']
-
-    path = kwargs.get('path', njoin(DROOT, 'jobs_all'))
-
-    # -------------------- 1. SBATCH --------------------
-#     if scheduler == 'SBATCH':
-#         with open('%s.sh' % sh_name, 'w') as rsh:
-#             rsh.write(f'''\
-# #!/bin/bash
-# #SBATCH -A ynt@gpu
-# #SBATCH --job-name=%s%%j     # job name
-# #SBATCH --ntasks=1                   # number of MP tasks
-# #SBATCH --ntasks-per-node=1          # number of MPI tasks per node
-# #SBATCH --ntasks-per-node=1          # number of MPI tasks per node
-# #SBATCH --gres=gpu:1               # number of GPUs per node
-# #SBATCH --cpus-per-task=10           # number of cores per tasks
-# #SBATCH --hint=nomultithread         # we get physical cores not logical
-# #SBATCH --distribution=block:block   # we pin the tasks on contiguous cores
-# #SBATCH --time=16:00:00              # maximum execution time (HH:MM:SS)
-# #SBATCH --output=job_outputs/%s%%j.out # output file name
-# #SBATCH --partition=gpu_p13
-# #SBATCH --qos=qos_gpu-t3
-# #SBATCH --error=job_outputs/%s%%j.err  # error file name
-
-# set -x
-# cd ${SLURM_SUBMIT_DIR}    
-
-# module purge
-# module load pytorch-gpu/py3/1.8.1
-# module load cmake
-# module load cuda
-
-# python ./one_expe.py %s
-# ''' % (name, name, name, args_string))
-    # ---------------------------------------------------
-
-    # -------------------- 2. PBS --------------------
-    if scheduler == 'PBS':                   
-        with open(kwargs.get('sh_path'), 'w') as rsh:
-            rsh.write(f'''\
-#PBS -N {kwargs.get('N', sys.argv[0] or 'job')}
-#PBS -q {kwargs.get('q','defaultQ')}
-#PBS -V
-#PBS -m n
-#PBS -o {path} -e {path}
-#PBS -l select={kwargs.get('select',1)}:ncpus={kwargs.get('ncpus',1)}:mem={kwargs.get('mem','1GB')}{':ngpus='+str(kwargs['ngpus']) if 'ngpus' in kwargs else ''}
-#PBS -l walltime={kwargs.get('walltime','23:59:59')}     
-
-cd {kwargs.get('cd', '$PBS_O_WORKDIR')}
-#cd fractional-attn/vit-pytorch
-
-source /usr/physics/python/Anaconda3-2022.10/etc/profile.d/conda.sh
-conda activate frac_attn                                                        
-{full_command}
-
-''')        
-    # ---------------------------------------------------
-
 
 def job_setup(script_name, kwargss, **kwargs):
 
@@ -400,30 +319,8 @@ def job_divider(pbs_array: list, N: int):
 
     return perm, pbss
 
-def command_setup(singularity_path, **kwargs):
-    assert isfile(singularity_path), "singularity_path does not exist!"
-
-    ncpus = kwargs.get('ncpus', 1) 
-    ngpus = kwargs.get('ngpus', 0)
-    select = kwargs.get('select', 1)
-    bind_path = kwargs.get('bind_path', BPATH)
-    home_path = kwargs.get('home_path', os.getcwd())
-    if len(singularity_path) > 0:
-        command = f"singularity exec --bind {bind_path} --home {home_path} {singularity_path}"
-    else:
-        command = ""
-
-    additional_command = ''
-    command += " python"
-
-    if len(singularity_path) == 0:
-        command = command[1:]
-
-    return command, additional_command
-
 def command_setup_ddp(**kwargs):
 
-    cluster = kwargs.get('cluster')
     ncpus = kwargs.get('ncpus', 1) 
     ngpus = kwargs.get('ngpus', 0)
     select = kwargs.get('select', 1)
@@ -461,10 +358,14 @@ def command_setup_ddp(**kwargs):
         #python -m torch.distributed.launch --nproc_per_node=4 --use_env train_classification_imdb.py run --backend=gloo
         #additional_command = 'run --backend=gloo'
         if select == 1:
-            # command += f" torchrun --rdzv-backend=c10d --rdzv-endpoint=localhost:0"            
-            # command += f" --nnodes=1 --nproc_per_node={ncpus} --max-restarts=3"
+            # 1.
+            command += f" torchrun --rdzv-backend=c10d --rdzv-endpoint=localhost:0"            
+            # command += f" --nnodes=1 --nproc_per_node={ncpus} --max-restarts=3"  # (optional)
+            command += f" --nnodes=1 --nproc_per_node={ncpus}"
+            # 2.
             #command += f" torchrun --standalone --nnodes=1 --nproc_per_node={ncpus}"
-            command += f" torchrun --nnodes=1 --nproc_per_node={ncpus}"
+            # 3.
+            # command += f" torchrun --nnodes=1 --nproc_per_node={ncpus}"
         else:
             command += f" torchrun --nnodes={select} --nproc_per_node={ncpus}"
             command += f" --max-restarts=3 --rdzv-id=$JOB_ID"
@@ -476,7 +377,75 @@ def command_setup_ddp(**kwargs):
 
     return command, additional_command    
 
-# originall in submit_main.py
+
+# ---------------------------------------- UNUNSED FUNCTIONS ----------------------------------------
+
+
+def write_script(full_command, **kwargs):
+    '''
+    Writes the bash script to launch expe
+    '''
+
+    scheduler = kwargs.get('scheduler', 'PBS')
+    assert scheduler in ['PBS', 'SBATCH']
+
+    path = kwargs.get('path', njoin(DROOT, 'jobs_all'))
+
+    # -------------------- 1. SBATCH --------------------
+#     if scheduler == 'SBATCH':
+#         with open('%s.sh' % sh_name, 'w') as rsh:
+#             rsh.write(f'''\
+# #!/bin/bash
+# #SBATCH -A ynt@gpu
+# #SBATCH --job-name=%s%%j     # job name
+# #SBATCH --ntasks=1                   # number of MP tasks
+# #SBATCH --ntasks-per-node=1          # number of MPI tasks per node
+# #SBATCH --ntasks-per-node=1          # number of MPI tasks per node
+# #SBATCH --gres=gpu:1               # number of GPUs per node
+# #SBATCH --cpus-per-task=10           # number of cores per tasks
+# #SBATCH --hint=nomultithread         # we get physical cores not logical
+# #SBATCH --distribution=block:block   # we pin the tasks on contiguous cores
+# #SBATCH --time=16:00:00              # maximum execution time (HH:MM:SS)
+# #SBATCH --output=job_outputs/%s%%j.out # output file name
+# #SBATCH --partition=gpu_p13
+# #SBATCH --qos=qos_gpu-t3
+# #SBATCH --error=job_outputs/%s%%j.err  # error file name
+
+# set -x
+# cd ${SLURM_SUBMIT_DIR}    
+
+# module purge
+# module load pytorch-gpu/py3/1.8.1
+# module load cmake
+# module load cuda
+
+# python ./one_expe.py %s
+# ''' % (name, name, name, args_string))
+    # ---------------------------------------------------
+
+    # -------------------- 2. PBS --------------------
+    if scheduler == 'PBS':                   
+        with open(kwargs.get('sh_path'), 'w') as rsh:
+            rsh.write(f'''\
+#PBS -N {kwargs.get('N', sys.argv[0] or 'job')}
+#PBS -q {kwargs.get('q','defaultQ')}
+#PBS -V
+#PBS -m n
+#PBS -o {path} -e {path}
+#PBS -l select={kwargs.get('select',1)}:ncpus={kwargs.get('ncpus',1)}:mem={kwargs.get('mem','1GB')}{':ngpus='+str(kwargs['ngpus']) if 'ngpus' in kwargs else ''}
+#PBS -l walltime={kwargs.get('walltime','23:59:59')}     
+
+cd {kwargs.get('cd', '$PBS_O_WORKDIR')}
+#cd fractional-attn/vit-pytorch
+
+source /usr/physics/python/Anaconda3-2022.10/etc/profile.d/conda.sh
+conda activate frac_attn                                                        
+{full_command}
+
+''')        
+    # ---------------------------------------------------
+
+# originally in submit_main.py
 
 """
 def train_submit(script_name, kwargss, **kwargs):

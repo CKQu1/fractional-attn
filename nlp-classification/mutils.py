@@ -200,7 +200,7 @@ def collect_model_dirs(models_root, **kwargs):
             for col in cols_other:
                 model_dir_dct[col] = locals()[col]
 
-            df = df.append(model_dir_dct, ignore_index=True)
+            df = df._append(model_dir_dct, ignore_index=True)
 
         DCT_ALL[model_name] = df
 
@@ -227,8 +227,8 @@ def convert_train_history(ls):  # convert trainer.state.log_history to df
         if cur_step == next_step:
             cur_dict.update(convert_dict(next_dict))
         else:
-            df_model = df_model.append(cur_dict, ignore_index=True)
+            df_model = df_model._append(cur_dict, ignore_index=True)
             cur_dict = convert_dict(next_dict)
             cur_step = cur_dict['step']
-    df_model = df_model.append(cur_dict, ignore_index=True)
+    df_model = df_model._append(cur_dict, ignore_index=True)
     return df_model

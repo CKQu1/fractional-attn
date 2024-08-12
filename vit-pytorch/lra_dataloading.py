@@ -205,7 +205,7 @@ def create_lra_image_classification_dataset(cache_dir: Union[str, Path] = DEFAUL
 	"""
 
 	print("[*] Generating LRA-listops Classification Dataset")
-	from dataloaders.basic import CIFAR10
+	from lra_dataloaders.basic import CIFAR10
 	name = 'cifar'
 
 	kwargs = {

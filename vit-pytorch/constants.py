@@ -55,7 +55,7 @@ def HYP_TRANS(alpha):
     b = max_trans - m * min_alpha
     return m*alpha + b
 
-LINESTYLE_DICT = {'spfnsvit': 'solid', 'spopfnsvit': (0,(5,1)),               
-                  'rdfnsvit': 'solid', 'rdopfnsvit': (0,(5,1)),
-                  'sinkvit': (0,(1,1)),
-                  'dpvit': (0,(1,1))}              
+LINESTYLE_DICT = {'spfnsformer': 'solid', 'spopfnsformer': 'solid',  # (0,(5,1))               
+                  'rdfnsformer': 'solid', 'rdopfnsformer': 'solid',
+                  'sinkformer': (0,(5,5)),
+                  'dpformer': (0,(1,1))}           

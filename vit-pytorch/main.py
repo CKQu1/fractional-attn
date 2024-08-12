@@ -311,11 +311,16 @@ if __name__ == '__main__':
         #data_dir = njoin(DROOT,'DATA','cifar-10-batches-py')
         trainloader, testloader, _ = prepare_data(batch_size=batch_size, num_workers=ddp_world_size)    
 
-        config['image_size'] = 32
-        config['num_classes'] = len(trainloader.dataset.classes)
-        config['num_channels'] = 3
+        if trainloader.dataset[0][0].ndim == 2:
+            config['image_size'] = trainloader.dataset[0][0].shape[0]
+            config['num_channels'] = 1
+        else:
+            config['image_size'] = trainloader.dataset[0][0].shape[1]
+            config['num_channels'] = trainloader.dataset[0][0].shape[0]
 
-    elif dataset_name in ['pathfinder-classification', 'pathx-classification', 'lra-cifar-classification']:
+        config['num_classes'] = len(trainloader.dataset.classes)        
+
+    elif dataset_name in ['pathfinder-classification', 'pathx-classification']:  # 'lra-cifar-classification'
         from lra_dataloading import Datasets
 
         # Get dataset creation function
@@ -339,10 +344,15 @@ if __name__ == '__main__':
             create_dataset_fn(cache_dir=args.cache_dir, seed=args.seed, train_bs=batch_size, eval_bs=batch_size)
         eval_size = len(testloader.dataset)          
 
-        config['image_size'] = 32
-        config['num_classes'] = trainloader.dataset.tensors[1].unique().shape[0]
-        config['num_channels'] = 1
+        if trainloader.dataset[0][0].ndim == 2:
+            config['image_size'] = trainloader.dataset[0][0].shape[0]
+            config['num_channels'] = 1
+        else:
+            config['image_size'] = trainloader.dataset[0][0].shape[1]
+            config['num_channels'] = trainloader.dataset[0][0].shape[0]
 
+        config['num_classes'] = trainloader.dataset.tensors[1].unique().shape[0]
+        
     # These are not hard constraints, but are used to prevent misconfigurations
     assert config["hidden_size"] % config["num_attention_heads"] == 0
     assert config['intermediate_size'] == 4 * config['hidden_size']

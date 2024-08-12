@@ -63,10 +63,10 @@ def HYP_TRANS(alpha):
     b = max_trans - m * min_alpha
     return m*alpha + b
 
-LINESTYLE_DICT = {'spfnsformer': 'solid', 'spopfnsformer': 'solid',  # (0,(5,1))               
-                  'rdfnsformer': 'solid', 'rdopfnsformer': 'solid',
-                  'sinkformer': (0,(5,5)),
-                  'dpformer': (0,(1,1))}
+LINESTYLE_DICT = {'spfns'+MODEL_SUFFIX: 'solid', 'spopfns'+MODEL_SUFFIX: 'solid',  # (0,(5,1))               
+                  'rdfns'+MODEL_SUFFIX: 'solid', 'rdopfns'+MODEL_SUFFIX: 'solid',
+                  'sink'+MODEL_SUFFIX: (0,(5,5)),
+                  'dp'+MODEL_SUFFIX: (0,(1,1))}
 
 # NAMES_DICT = {'fnsformer': 'FNS', 
 #               'spfnsformer': rf'FNS ($\mathbb{S}^{{d-1}}$)', 'spopfnsformer': rf'OPFNS ($\mathbb{S}^{{d-1}}$)',               

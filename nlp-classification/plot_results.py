@@ -27,7 +27,7 @@ markers = ['s', 'D', 'd', 'v', '^', 'o', '.']
 markersize = '3'
 colors = list(mcl.TABLEAU_COLORS.keys())
 OTHER_COLORS = ['m', 'dimgray']
-OTHER_COLORS_DICT = {'sinkformer': OTHER_COLORS[0], 'dpformer': OTHER_COLORS[1]}
+OTHER_COLORS_DICT = {'sink'+MODEL_SUFFIX: OTHER_COLORS[0], 'dp'+MODEL_SUFFIX: OTHER_COLORS[1]}
 # ------------------------------------------
 
 # Plots average of metrics over ensembles
@@ -37,7 +37,7 @@ PROMPT input:
 """
 
 # Ablation study on alphas
-def plot_fns_ensembles(models_roots, fns_type='spopfnsformer', metrics='eval_accuracy',
+def plot_fns_ensembles(models_roots, fns_type='spopfns'+MODEL_SUFFIX, metrics='eval_accuracy',
                        cbar_separate=True, display=False):
     global df, df_setting, df_filtered, fig_file, axs
     global model_dirs, subpath, dirnames, model_root_dirs
@@ -283,9 +283,8 @@ def plot_fns_ensembles(models_roots, fns_type='spopfnsformer', metrics='eval_acc
         plt.savefig(njoin(SAVE_DIR,"alpha_colorbar.pdf"), bbox_inches='tight')  
 
 
-
-# Ablation study on alphas
-def fns_fix_eps(models_roots, fns_type='spopfnsformer', metrics='eval_accuracy',
+# Ablation study on bandwidth
+def fns_fix_eps(models_roots, fns_type='spopfns'+MODEL_SUFFIX, metrics='eval_accuracy',
                 include_others=False, display=False):
     global df, df_setting, df_filtered, fig_file, axs
     global model_dirs, subpath, dirnames, model_root_dirs

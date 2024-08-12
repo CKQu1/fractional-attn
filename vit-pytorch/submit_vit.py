@@ -12,40 +12,42 @@ torchrun --nnodes=1 --nproc_per_node=2 ddp_main.py --max_iters=5 --eval_interval
 
 if __name__ == '__main__':
       
-    date_str = datetime.today().strftime('%Y-%m-%d')    
     #script_name = "ddp_main.py"  
     script_name = "main.py"
     nstack = 1  
 
     # add or change datasets here
-    DATASET_NAMES = ['pathfinder-classification']  #  'pathfinder-classification'            
+    DATASET_NAMES = ['cifar10', 'pathfinder-classification']  #  'pathfinder-classification'            
     
-    ROOT = njoin(DROOT, 'full-models-v3')    
-    job_path = njoin(ROOT, 'jobs_all', date_str)
+    ROOT = njoin(DROOT, 'small-model-v2')    
+    job_path = njoin(ROOT, 'jobs_all')
 
     #instances = list(range(5))    
     instances = [0]
-    #model_sizes = ['small', 'large']
-    model_sizes = ['large']
+    model_sizes = ['small']
+    #model_sizes = ['large']
 
     for model_size in model_sizes:
         kwargss_all = []    
         for instance in instances:
             for didx, dataset_name in enumerate(DATASET_NAMES):            
-                select = 1; ngpus, ncpus = 1, 0                            
+                select = 1; 
+                #ngpus, ncpus = 1, 0  # GPU
+                ngpus, ncpus = 0, 1  # CPU                            
                 walltime = '23:59:59'
-                mem = '32GB'                                              
+                mem = '32GB' if model_size == 'large' else '16GB'                                              
                 num_proc = ngpus if ngpus > 1 else ncpus
 
-                #for qk_share in [True, False]:
-                for qk_share in [False]:
+                for qk_share in [True, False]:
+                #for qk_share in [False]:
                     kwargss = []
 
                     if model_size == 'small':
                         for model_name in ['opfnsvit']:                        
                             for alpha in [1.2, 1.6, 2]:                            
                                 for bandwidth in [0.01, 0.1, 0.5, 1]:
-                                    for manifold in ['rd', 'sphere']:                                
+                                    #for manifold in ['rd', 'sphere']:                                
+                                    for manifold in ['sphere']:
                                         kwargss.append({'model_name':model_name,'manifold':manifold,'alpha': alpha,'a': 0,'bandwidth':bandwidth})       
                     else:
                         for model_name in ['opfnsvit']:                        
@@ -56,9 +58,9 @@ if __name__ == '__main__':
 
                     #kwargss.append({'model_name':'opfnsvit','manifold':'sphere','alpha': 1.2,'a': 0,'bandwidth':1})
 
-                    # kwargss.append({'model_name':'dpvit'})
-                    # for n_it in [3]:
-                    #     kwargss.append({'model_name':'sinkvit','n_it':n_it})
+                    kwargss.append({'model_name':'dpvit'})
+                    for n_it in [3]:
+                        kwargss.append({'model_name':'sinkvit','n_it':n_it})
                         
                     common_kwargs = {'instance':          instance,
                                     'qk_share':          qk_share, 
@@ -75,7 +77,8 @@ if __name__ == '__main__':
                         common_kwargs['epochs'] = 200
                         common_kwargs['n_layers'] = 1
                         common_kwargs['n_attn_heads'] = 1   
-                        common_kwargs['train_bs'] = 32                         
+                        common_kwargs['train_bs'] = 32     
+                        common_kwargs['patch_size'] = 4                    
                     else:
                         common_kwargs['epochs'] = 300 if dataset_name == 'cifar10' else 100
                         common_kwargs['n_layers'] = 6

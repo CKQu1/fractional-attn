@@ -372,7 +372,10 @@ def fns_fix_eps(models_roots, fns_type='spopfnsformer', metrics='eval_accuracy',
                 epochs = run_perf.loc[:,'step'].astype(int) // int(run_perf.loc[0,'step'].astype(int))                
 
                 fns_final_epoch_metrics[0, eps_idx, alp_idx] = run_perf.loc[run_perf.index[-1],metrics[0]]                                            
-                fns_final_epoch_metrics[1, eps_idx, alp_idx] = run_perf.loc[:,metrics[0]].max() 
+                if 'acc' in metrics[0]:
+                    fns_final_epoch_metrics[1, eps_idx, alp_idx] = run_perf.loc[:,metrics[0]].max()  
+                else:
+                    fns_final_epoch_metrics[1, eps_idx, alp_idx] = run_perf.loc[:,metrics[0]].min()
 
             if eps_idx == 0:                
             # -------------------- SINK --------------------                
@@ -427,7 +430,7 @@ def fns_fix_eps(models_roots, fns_type='spopfnsformer', metrics='eval_accuracy',
         for col_idx in range(fns_final_epoch_metrics.shape[0]):
             ax = axs[row_idx, col_idx]
             for eps_idx, eps in tqdm(enumerate(epss)):
-                ax.plot(alphas, fns_final_epoch_metrics[row_idx,eps_idx,:], label = rf'$\varepsilon$ = {eps}',
+                ax.plot(alphas, fns_final_epoch_metrics[col_idx,eps_idx,:], label = rf'$\varepsilon$ = {eps}',
                         linestyle=f'--', marker=markers[eps_idx],markersize=2)
 
             if include_others:

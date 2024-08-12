@@ -57,7 +57,8 @@ def plot_fns_ensembles(models_roots, fns_type='spopfnsformer', metrics='eval_acc
     model_types = list(DCT_ALL.keys())
     for model_type in model_types:
         if 'fns' in model_type:
-            df_model = DCT_ALL[model_type]
+            df_model = DCT_ALL[model_type].dropna(subset='alpha')
+            df_model.reset_index(drop=True, inplace=True)
             break
 
     # ----- general settings -----
@@ -95,7 +96,8 @@ def plot_fns_ensembles(models_roots, fns_type='spopfnsformer', metrics='eval_acc
             if model_type not in model_types_plotted:
                 model_types_plotted.append(model_type)
 
-            model_df = DCT_ALL[model_type]
+            model_df = DCT_ALL[model_type].dropna(subset='alpha')
+            model_df.reset_index(drop=True, inplace=True)
             lstyle_model = LINESTYLE_DICT[model_type]
 
             # -------------------- FNS --------------------
@@ -128,13 +130,6 @@ def plot_fns_ensembles(models_roots, fns_type='spopfnsformer', metrics='eval_acc
                                         #,marker=model_markers[model_name], markersize=markersize,
                                         #,label=model_legend)                                    
 
-                # if row_idx == nrows - 1:
-                #     if len(epochs) > 50:
-                #         ax.set_xticks(epochs[49::50])
-                #         ax.set_xticklabels(epochs[49::50])
-                #     else:
-                #         ax.set_xticks(epochs)
-                #         ax.set_xticklabels(epochs)
                 if row_idx != nrows - 1:
                     ax.set_xticklabels([])
 
@@ -207,14 +202,15 @@ def plot_fns_ensembles(models_roots, fns_type='spopfnsformer', metrics='eval_acc
                     if model_type not in model_types_plotted:
                         model_types_plotted.append(model_type)
 
-            #ax.grid()
-            ax.yaxis.grid(True)
+            ax.grid()
+            #ax.yaxis.grid(True)
             total_figs += 1
 
     # legend
     # for alpha in alphas:
     #     axs[0,0].plot([], [], c=HYP_CMAP(HYP_CNORM(alpha)), linestyle='solid', 
     #                 label=rf'$\alpha$ = {alpha}')    
+
     for model_type in model_types_plotted:   
         if 'fns' in model_type:
             color = 'k'
@@ -224,9 +220,12 @@ def plot_fns_ensembles(models_roots, fns_type='spopfnsformer', metrics='eval_acc
             color = OTHER_COLORS[1]
         axs[0,0].plot([], [], c=color, linestyle=LINESTYLE_DICT[model_type], 
                     label=NAMES_DICT[model_type])
-    #axs[0,0].legend(loc='best', ncol=2, frameon=False)           
-    axs[0,0].legend(bbox_to_anchor=(0.85, 1.35),
-                  loc='best', ncol=2, frameon=False)                    
+
+    ncol_legend = 2 if len(model_types_plotted) == 3 else 1
+    if len(model_types_plotted) >= 2:
+        #axs[0,0].legend(loc='best', ncol=ncol_legend, frameon=False)           
+        axs[0,0].legend(bbox_to_anchor=(0.85, 1.35),
+                    loc='best', ncol=ncol_legend, frameon=False)                    
 
     # Add shared x and y labels
     # fig.text(0.5, 0.01, 'Epochs', fontsize='medium', ha='center')

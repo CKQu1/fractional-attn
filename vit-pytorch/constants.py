@@ -29,7 +29,7 @@ FUDAN_CONDA = 'frac_attn'
 
 # ----- MODELS -----
 
-MODEL_PREFIXES = ['fns', 'opfns', 'spfns', 'spopfns', 'rdfns', 'rdopfns' 'sink', 'dp']
+MODEL_PREFIXES = ['fns', 'opfns', 'spfns', 'spopfns', 'rdfns', 'rdopfns', 'sink', 'dp']
 MODEL_SUFFIX = 'vit'
 
 MODEL_NAMES = []

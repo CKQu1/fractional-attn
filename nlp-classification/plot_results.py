@@ -320,7 +320,7 @@ def fns_fix_eps(models_roots, fns_type='spopfnsformer', metrics='eval_accuracy',
     alphas = sorted(df_model.loc[:,'alpha'].unique())[::-1]  # large to small
     epss = sorted(df_model.loc[:,'bandwidth'].unique())    
 
-    nrows, ncols = 1, len(models_roots)
+    nrows, ncols = len(models_roots), 2
 
     figsize = (3*ncols,3*nrows)
     fig, axs = plt.subplots(nrows,ncols,figsize=figsize,sharex=True,sharey=True)  # layout='constrained'
@@ -334,12 +334,10 @@ def fns_fix_eps(models_roots, fns_type='spopfnsformer', metrics='eval_accuracy',
     
     total_figs = 0
     model_types_plotted = []
-    for col_idx, models_root in enumerate(models_roots):
-        fns_final_epoch_metrics = np.zeros([len(epss), len(alphas)])
+    for row_idx, models_root in enumerate(models_roots):
+        fns_final_epoch_metrics = np.zeros([2, len(epss), len(alphas)])
         fns_final_epoch_metrics[:] = np.nan
-        other_final_epoch_metrics = {}
-
-        ax = axs[0, col_idx]
+        other_final_epoch_metrics = {}        
 
         DCT_ALL = collect_model_dirs(models_root)
         if DCT_ALL == {}:
@@ -373,7 +371,8 @@ def fns_fix_eps(models_roots, fns_type='spopfnsformer', metrics='eval_accuracy',
 
                 epochs = run_perf.loc[:,'step'].astype(int) // int(run_perf.loc[0,'step'].astype(int))                
 
-                fns_final_epoch_metrics[eps_idx, alp_idx] = run_perf.loc[run_perf.index[-1],metrics[0]]                                            
+                fns_final_epoch_metrics[0, eps_idx, alp_idx] = run_perf.loc[run_perf.index[-1],metrics[0]]                                            
+                fns_final_epoch_metrics[1, eps_idx, alp_idx] = run_perf.loc[:,metrics[0]].max() 
 
             if eps_idx == 0:                
             # -------------------- SINK --------------------                
@@ -425,28 +424,37 @@ def fns_fix_eps(models_roots, fns_type='spopfnsformer', metrics='eval_accuracy',
                     if model_type not in model_types_plotted:
                         model_types_plotted.append(model_type)
 
-            #ax.grid()
+        for col_idx in range(fns_final_epoch_metrics.shape[0]):
+            ax = axs[row_idx, col_idx]
+            for eps_idx, eps in tqdm(enumerate(epss)):
+                ax.plot(alphas, fns_final_epoch_metrics[row_idx,eps_idx,:], label = rf'$\varepsilon$ = {eps}',
+                        linestyle=f'--', marker=markers[eps_idx],markersize=2)
+
+            if include_others:
+                for model_type in other_final_epoch_metrics.keys():
+                    ax.axhline(y=other_final_epoch_metrics[model_type], linestyle=LINESTYLE_DICT[model_type], c=OTHER_COLORS_DICT[model_type])
+
+            if row_idx == 0:
+                title = 'Final' if col_idx==0 else 'Best'
+                ax.set_title(title)
+
+            # row labels (Q = K)
+            if col_idx == ncols - 1:
+                title = r'$W_Q \neq W_K$' if not qk_share else r'$W_Q = W_K$'               
+                ax.text(1.2, 0.5, title, transform=(
+                                ax.transAxes + ScaledTranslation(-20/72, +7/72, fig.dpi_scale_trans)),
+                                va='center', rotation='vertical')  # fontsize='medium',                            
+
+            # subplot labels
+            ax.text(
+                0.0, 1.0, f'({ascii_lowercase[total_figs]})', transform=(
+                    ax.transAxes + ScaledTranslation(-20/72, +7/72, fig.dpi_scale_trans)),
+                va='bottom', fontfamily='sans-serif')  # fontsize='medium',     
+
+            ax.grid()
             #ax.yaxis.grid(True)
 
-        for eps_idx, eps in tqdm(enumerate(epss)):
-            ax.plot(alphas, fns_final_epoch_metrics[eps_idx,:], label = rf'$\varepsilon$ = {eps}',
-                    linestyle=f'--', marker=markers[eps_idx],markersize=2)
-
-        if include_others:
-            for model_type in other_final_epoch_metrics.keys():
-                ax.axhline(y=other_final_epoch_metrics[model_type], linestyle=LINESTYLE_DICT[model_type], c=OTHER_COLORS_DICT[model_type])
-
-        # row labels (Q = K)
-        title = r'$W_Q \neq W_K$' if not qk_share else r'$W_Q = W_K$'   
-        ax.set_title(title)                          
-
-        # subplot labels
-        ax.text(
-            0.0, 1.0, f'({ascii_lowercase[total_figs]})', transform=(
-                ax.transAxes + ScaledTranslation(-20/72, +7/72, fig.dpi_scale_trans)),
-            va='bottom', fontfamily='sans-serif')  # fontsize='medium',     
-
-        total_figs += 0
+            total_figs += 0
 
     # for model_type in model_types_plotted:   
     #     if 'fns' in model_type:
@@ -459,7 +467,7 @@ def fns_fix_eps(models_roots, fns_type='spopfnsformer', metrics='eval_accuracy',
     #                 label=NAMES_DICT[model_type])                  
 
     ncol_legend = 2 if len(epss) > 1 else 1
-    axs[0,0].legend(bbox_to_anchor=(0.85, 1.45),
+    axs[0,0].legend(bbox_to_anchor=(0.85, 1.4),
                     loc='best', ncol=ncol_legend, frameon=False)  
 
     # axs[0,0].legend(loc='upper left', ncol=1, frameon=False)  

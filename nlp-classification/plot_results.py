@@ -456,7 +456,7 @@ def fns_fix_eps(models_roots, fns_type='spopfns'+MODEL_SUFFIX, metrics='eval_acc
             ax.grid()
             #ax.yaxis.grid(True)
 
-            total_figs += 0
+            total_figs += 1
 
     # for model_type in model_types_plotted:   
     #     if 'fns' in model_type:

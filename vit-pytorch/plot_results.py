@@ -36,7 +36,7 @@ OTHER_COLORS_DICT = {'sink'+MODEL_SUFFIX: OTHER_COLORS[0], 'dp'+MODEL_SUFFIX: OT
 
 # Ablation study on alphas
 def plot_fns_ensembles(models_roots, fns_type='spopfnsvit', metrics='val_acc',
-                       is_single=True, cbar_separate=True, display=False):
+                       is_single=False, cbar_separate=True, display=False):
     global df, df_setting, df_filtered, fig_file, axs
     global model_dirs, subpath, dirnames, model_root_dirs
     global model_combo, model_combos
@@ -141,8 +141,8 @@ def plot_fns_ensembles(models_roots, fns_type='spopfnsvit', metrics='val_acc',
                 #     else:
                 #         ax.set_xticks(epochs)
                 #         ax.set_xticklabels(epochs)
-                if row_idx != nrows - 1:
-                    ax.set_xticklabels([])                
+                # if row_idx != nrows - 1 and nrows != 1:
+                #     ax.set_xticklabels([])                
 
                 # col labels (bandwidth)
                 if row_idx == 0:
@@ -464,7 +464,7 @@ def fns_fix_eps(models_roots, fns_type='spopfns'+MODEL_SUFFIX, metrics='val_acc'
             ax.grid()
             #ax.yaxis.grid(True)
 
-            total_figs += 0
+            total_figs += 1
 
     # for model_type in model_types_plotted:   
     #     if 'fns' in model_type:

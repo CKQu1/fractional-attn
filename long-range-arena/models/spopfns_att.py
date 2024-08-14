@@ -252,8 +252,8 @@ class FasterSPOPFNSMultiHeadAttention(nn.Module):
             self.qkv_projection = nn.Linear(
                 self.hidden_size, self.all_head_size * 3, bias=self.qkv_bias
             )
-        """
-        self.q_projection = orthogonal(nn.Linear(self.hidden_size, self.all_head_size, bias=self.qkv_bias))
+        """        
+        #self.q_projection = orthogonal(nn.Linear(self.hidden_size, self.all_head_size, bias=self.qkv_bias))
         if self.use_key:
             self.k_projection = orthogonal(nn.Linear(self.hidden_size, self.all_head_size, bias=self.qkv_bias))
         self.v_projection = nn.Linear(self.hidden_size, self.all_head_size, bias=self.qkv_bias)
@@ -286,7 +286,8 @@ class FasterSPOPFNSMultiHeadAttention(nn.Module):
         # Split the projected query, key, and value into query, key, and value
         # (batch_size, sequence_length, all_head_size * 3) -> (batch_size, sequence_length, all_head_size)
         #query, key, value = torch.chunk(qkv, 3, dim=-1)
-        query = self.q_projection(x)
+        #query = self.q_projection(x)
+        query = x
         if self.use_key:
             key = self.k_projection(x)
         value = self.v_projection(x)       
@@ -311,27 +312,20 @@ class FasterSPOPFNSMultiHeadAttention(nn.Module):
         if alpha < 2:
             d_intrinsic = self.d_intrinsic
 
-        query = F.normalize(
-            query.view(
+        query = query.view(
                 batch_size,
                 src_sequence_length,
                 num_attention_heads,
                 attention_head_size,
-            ).transpose(1, 2),
-            p=2,
-            dim=-1,
-        )
+                ).transpose(1, 2)
         if self.use_key:
-            key = F.normalize(
-                key.view(
+            key = key.view(
                     batch_size,
                     trg_sequence_length,
                     num_attention_heads,
                     attention_head_size,
-                ).transpose(1, 2),
-                p=2,
-                dim=-1,
-            )
+                    ).transpose(1, 2)
+                    
         value = value.view(
             batch_size, trg_sequence_length, num_attention_heads, attention_head_size
         ).transpose(1, 2)

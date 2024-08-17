@@ -167,31 +167,32 @@ def collect_model_dirs(models_root, **kwargs):
                 if 'model=' in instance_dir:
                     fpath = njoin(model_dir, instance_dir)
                     instance = int(instance_dir.split('=')[-1])
+
+                    # get configs
+                    f = open(njoin(fpath,'config.json'))
+                    config = json.load(f)
+                    f.close()
+                    f = open(njoin(fpath,'attn_setup.json'))
+                    attn_setup = json.load(f)
+                    f.close()  
+                    train_setting = pd.read_csv(njoin(fpath, 'train_setting.csv'))
+
+                    # attn-hyperparameters + attn-setup
+                    for col in cols[:-len(metrics + cols_config + cols_train + cols_other)]:
+                        model_dir_dct[col] = attn_setup[col]
+                    # config
+                    for col in cols_config:
+                        model_dir_dct[col] = config[col]
+                    # train setting
+                    for col in cols_train:
+                        model_dir_dct[col] = train_setting[col]
+
                     if isfile(njoin(fpath, 'run_performance.csv')):
                         ensembles += 1
                         instances.append(instance)  
                         run_perf = pd.read_csv(njoin(fpath, 'run_performance.csv'), index_col=False)                         
                         for metric in metrics:
                             metrics_dict[metric].append(run_perf.loc[run_perf.index[-1],metric])
-                        if ensembles == 1:
-                            # get configs
-                            f = open(njoin(fpath,'config.json'))
-                            config = json.load(f)
-                            f.close()
-                            f = open(njoin(fpath,'attn_setup.json'))
-                            attn_setup = json.load(f)
-                            f.close()  
-                            train_setting = pd.read_csv(njoin(fpath, 'train_setting.csv'))
-
-                            # attn-hyperparameters + attn-setup
-                            for col in cols[:-len(metrics + cols_config + cols_train + cols_other)]:
-                                model_dir_dct[col] = attn_setup[col]
-                            # config
-                            for col in cols_config:
-                                model_dir_dct[col] = config[col]
-                            # train setting
-                            for col in cols_train:
-                                model_dir_dct[col] = train_setting[col]
 
             # metrics
             for metric in metrics:
@@ -219,7 +220,7 @@ def convert_dict(dct):  # change elements of dict its value is a dict
     return dct
 
 def convert_train_history(ls):  # convert trainer.state.log_history to df
-    df_model = pd.DataFrame()
+    df_model = pd.DataFrame ()
     cur_dict = convert_dict(ls[0])
     cur_step = cur_dict['step']
     for idx, next_dict in enumerate(ls[1:]):        

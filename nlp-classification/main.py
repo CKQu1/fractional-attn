@@ -317,7 +317,7 @@ if __name__ == '__main__':
 
         data_collator = None
 
-    del tokenized_dataset
+    del tokenized_dataset  # alleviate memory
 
     # ---------------------------------------- 2. Model setup ---------------------------------------- 
 
@@ -350,8 +350,8 @@ if __name__ == '__main__':
               "num_hidden_layers": args.n_layers,
               "num_attention_heads": args.n_attn_heads,
               "hidden_size": args.hidden_size,
-              "attention_window": args.max_len  # full attn, no sliding windows
-              #"attention_window": max_length
+              #"attention_window": args.max_len  # full attn, no sliding windows
+              "attention_window": max_length
               }     
 
     # config["bos_token_id"] = 0    
@@ -378,7 +378,8 @@ if __name__ == '__main__':
             config["type_vocab_size"] = 1
             #config["vocab_size"] = torch.concat([train_dataset['input_ids'].unique(), eval_dataset['input_ids'].unique()]).unique().shape[0]
             config["vocab_size"] = 50265
-            config["max_position_embeddings"] = 4098
+            #config["max_position_embeddings"] = 4098
+            config["max_position_embeddings"] = max_length
 
         else:
             config["type_vocab_size"] =  pretrained_model.embeddings.token_type_embeddings.weight.shape[0]
@@ -388,7 +389,8 @@ if __name__ == '__main__':
     else:
         config["type_vocab_size"] = 1
         config["vocab_size"] = len(vocab.vocab)
-        config["max_position_embeddings"] = 4098
+        #config["max_position_embeddings"] = 4098
+        config["max_position_embeddings"] = max_length
 
     attn_setup = {'fix_embed': args.fix_embed, 
                   'qk_share': args.qk_share, 'qkv_bias': args.qkv_bias,
@@ -417,7 +419,8 @@ if __name__ == '__main__':
                 config['d_intrinsic'] = attn_setup['d_intrinsic'] = args.hidden_size//args.n_attn_heads  # head_dim                
 
             # mask for attn score
-            config['mask_val'] = attn_setup['mask_val'] = 1e-5
+            #config['mask_val'] = attn_setup['mask_val'] = 1e-5
+            config['mask_val'] = attn_setup['mask_val'] = 1e-9
 
             model_name = 'rd' + model_name
 
@@ -469,7 +472,7 @@ if __name__ == '__main__':
     if args.fix_embed:
         model.transformer.embeddings.load_state_dict(pretrained_model.embeddings.state_dict())
         model.transformer.embeddings.requires_grad_(False)
-        #del pretrained_model
+        del pretrained_model
     
     ########## add other model options here ##########            
             

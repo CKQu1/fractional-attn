@@ -93,8 +93,8 @@ def fig_metrics(root, iter_size=100, tag='accu'):
                     except:
                         continue
                 if ii > 0:
-                    tag_values = tag_values/(ii+1)
-                    axs[task_idx].plot(tag_values, label=model_name+f'avg={ii}')
+                    tag_values = tag_values/ii
+                    axs[task_idx].plot(tag_values, label=model_name+f'avg={ii}')                    
 
         axs[task_idx].set_title(task_name)
     axs[0].legend()

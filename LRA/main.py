@@ -347,8 +347,8 @@ if __name__ == '__main__':
         device_ids = list(range(torch.cuda.device_count()))
         #device_ids = int(os.environ["WORLD_SIZE"])
         print(f"GPU list: {device_ids}")
-        if len(device_ids) > 1:    
-            model = nn.DataParallel(model, device_ids = device_ids)
+        #if len(device_ids) > 1:    
+        model = nn.DataParallel(model, device_ids = device_ids)
 
     ### data preparation ###
 

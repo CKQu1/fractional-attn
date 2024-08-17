@@ -333,8 +333,10 @@ class DPSelfAttention(nn.Module):
         # attention_mask (B,N)
         # project hidden states
 
+        qk_share = self.qk_share
+
         query_vectors = self.query(hidden_states)
-        if not self.qk_share:
+        if not qk_share:
             key_vectors = self.key(hidden_states)        
         value_vectors = self.value(hidden_states)
 
@@ -346,7 +348,7 @@ class DPSelfAttention(nn.Module):
         ), f"hidden_states should have embed_dim = {self.embed_dim}, but has {embed_dim}"
 
         # (B, N, H, D) = (batch_size, seq_len, num_heads, head_dim)
-        if not self.qk_share:
+        if not qk_share:
             query_vectors = query_vectors.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2) # (B,H,N,D)
             key_vectors = key_vectors.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2)     # (B,H,N,D)
             value_vectors = value_vectors.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2) # (B,H,N,D)            
@@ -362,13 +364,19 @@ class DPSelfAttention(nn.Module):
         #     attention_mask_expanded = attention_mask.view(1, 1, seq_len, seq_len).expand(batch_size, num_heads, -1, -1)
 
         if attention_mask is not None:
+            # # type 1: key_pad_mask
+            # bool_mask = (attention_mask>=0).long()
+            # if not qk_share:
+            #     attention_mask_expanded = bool_mask.unsqueeze(1).unsqueeze(2).expand([-1,self.num_heads,1,-1])
+
+            # # type 2: symmetrical mask
+            # else:
+            #     # bool_mask = (attention_mask>=0).long()
+            #     attention_mask_expanded = (bool_mask.unsqueeze(-1)@bool_mask.unsqueeze(1)).view(batch_size, 1, seq_len, seq_len).expand(-1, num_heads, -1, -1)    
+
             # type 1: key_pad_mask
             bool_mask = (attention_mask>=0).long()
             attention_mask_expanded = bool_mask.unsqueeze(1).unsqueeze(2).expand([-1,self.num_heads,1,-1])
-
-            # type 2: symmetrical mask
-            # bool_mask = (attention_mask>=0).long()
-            # attention_mask_expanded = (bool_mask.unsqueeze(-1)@bool_mask.unsqueeze(1)).view(batch_size, 1, seq_len, seq_len).expand(-1, num_heads, -1, -1)     
 
             att = att.masked_fill(attention_mask_expanded==0, -1e9)
 
@@ -1119,6 +1127,8 @@ class SPOPFNSSelfAttention(nn.Module):
         output_attentions=False,
     ):
 
+        qk_share = self.qk_share
+
         alpha = self.alpha
         bandwidth = self.bandwidth
         a = self.a
@@ -1148,7 +1158,7 @@ class SPOPFNSSelfAttention(nn.Module):
 
         # pairwise Euclidean distance (H,BN,D) @ (H,D,BN)
         eps = 1e-7  # for limiting the divergence from acos
-        if not self.qk_share:
+        if not qk_share:
             key_vectors = self.key(hidden_states)    
             #key_vectors = F.normalize(key_vectors.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2), p=2, dim=-1)      # (B,H,N,D)  
             key_vectors = key_vectors.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2)      # (B,H,N,D)
@@ -1159,13 +1169,17 @@ class SPOPFNSSelfAttention(nn.Module):
             g_dist = torch.acos(torch.clamp(query_vectors @ query_vectors.transpose(-2, -1), -1+eps, 1-eps)) * self.sphere_radius                        
 
         if attention_mask is not None:
+            # bool_mask = (attention_mask>=0).long()
+            # # type 1: key_pad_mask
+            # if not qk_share:                
+            #     attention_mask_expanded = bool_mask.unsqueeze(1).unsqueeze(2).expand([-1,self.num_heads,1,-1])
+            # # type 2: symmetrical mask
+            # else:
+            #     attention_mask_expanded = (bool_mask.unsqueeze(-1)@bool_mask.unsqueeze(1)).view(batch_size, 1, seq_len, seq_len).expand(-1, num_heads, -1, -1)      
+
             # type 1: key_pad_mask
             bool_mask = (attention_mask>=0).long()
             attention_mask_expanded = bool_mask.unsqueeze(1).unsqueeze(2).expand([-1,self.num_heads,1,-1])
-
-            # type 2: symmetrical mask
-            # bool_mask = (attention_mask>=0).long()
-            # attention_mask_expanded = (bool_mask.unsqueeze(-1)@bool_mask.unsqueeze(1)).view(batch_size, 1, seq_len, seq_len).expand(-1, num_heads, -1, -1)      
 
             g_dist = g_dist.masked_fill(attention_mask_expanded==0, self.mask_val)  # 1e9
 
@@ -1177,7 +1191,7 @@ class SPOPFNSSelfAttention(nn.Module):
         attn_score_shape = attn_score.shape
         #attn_score = attn_score.view(-1, attn_score_shape[2], attn_score_shape[3])
         if a > 0:
-            # if self.qk_share:
+            # if qk_share:
             #     D_inv = torch.diag_embed(attn_score.sum(-1)**(-a))  # inverse of degree matrix of attn_score
             #     K_tilde = D_inv @ attn_score @ D_inv
             # else:
@@ -1229,7 +1243,6 @@ class RDOPFNSSelfAttention(nn.Module):
         self.qk_share = config.qk_share
         self.bias = config.qkv_bias
 
-        self.query = orthogonal(nn.Linear(config.hidden_size, self.embed_dim, bias=self.bias))
         if not self.qk_share:           
             self.key = orthogonal(nn.Linear(config.hidden_size, self.embed_dim, bias=self.bias))        
         self.value = nn.Linear(config.hidden_size, self.embed_dim, bias=self.bias)
@@ -1261,6 +1274,8 @@ class RDOPFNSSelfAttention(nn.Module):
         output_attentions=False,
     ):
 
+        qk_share = self.qk_share
+
         alpha = self.alpha
         bandwidth = self.bandwidth
         a = self.a
@@ -1270,7 +1285,7 @@ class RDOPFNSSelfAttention(nn.Module):
         if alpha < 2:
             d_intrinsic = self.d_intrinsic
 
-        query_vectors = self.query(hidden_states)
+        query_vectors = hidden_states
         value_vectors = self.value(hidden_states)   # (N,B,HD)
 
         #seq_len, batch_size, embed_dim = hidden_states.size()
@@ -1289,7 +1304,7 @@ class RDOPFNSSelfAttention(nn.Module):
         value_vectors = value_vectors.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2)                            # (B,H,N,D)                 
 
         # pairwise Euclidean distance (H,BN,D) @ (H,D,BN)
-        if not self.qk_share:
+        if not qk_share:
             key_vectors = self.key(hidden_states) 
             key_vectors = key_vectors.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2)      # (B,H,N,D)              
             # directly get geodesic distance
@@ -1304,19 +1319,25 @@ class RDOPFNSSelfAttention(nn.Module):
         if alpha < 2:            
             #attn_score = (1 + (d_intrinsic**(1/d_intrinsic) - 1) / math.sqrt(d_intrinsic) * g_dist / bandwidth**0.5)**(-d_intrinsic-alpha)
             #attn_score = (1 + 1 / math.sqrt(d_intrinsic) * g_dist / bandwidth**0.5)**(-d_intrinsic-alpha)
-            attn_score = (1 + g_dist / bandwidth**0.5)**(-d_intrinsic-alpha)
+            attn_score = (1 + g_dist / head_dim**0.5 / bandwidth**0.5)**(-d_intrinsic-alpha)
+            #attn_score = (1 + g_dist / bandwidth**0.5)**(-d_intrinsic-alpha)
         else:             
-            #attn_score = torch.exp(-(g_dist / head_dim**0.5 / bandwidth**0.5)**(alpha/(alpha-1)))
-            attn_score = torch.exp(-(g_dist / bandwidth**0.5)**(alpha/(alpha-1)))            
+            attn_score = torch.exp(-(g_dist / head_dim**0.5 / bandwidth**0.5)**(alpha/(alpha-1)))
+            #attn_score = torch.exp(-(g_dist / bandwidth**0.5)**(alpha/(alpha-1)))            
 
         if attention_mask is not None:
+            # # type 1: key_pad_mask
+            # bool_mask = (attention_mask>=0).long()
+            # if not qk_share:
+            #     attention_mask_expanded = bool_mask.unsqueeze(1).unsqueeze(2).expand([-1,self.num_heads,1,-1])
+            # # type 2: symmetrical mask
+            # else:
+            #     # bool_mask = (attention_mask>=0).long()
+            #     attention_mask_expanded = (bool_mask.unsqueeze(-1)@bool_mask.unsqueeze(1)).view(batch_size, 1, seq_len, seq_len).expand(-1, num_heads, -1, -1)   
+
             # type 1: key_pad_mask
             bool_mask = (attention_mask>=0).long()
             attention_mask_expanded = bool_mask.unsqueeze(1).unsqueeze(2).expand([-1,self.num_heads,1,-1])
-
-            # type 2: symmetrical mask
-            # bool_mask = (attention_mask>=0).long()
-            # attention_mask_expanded = (bool_mask.unsqueeze(-1)@bool_mask.unsqueeze(1)).view(batch_size, 1, seq_len, seq_len).expand(-1, num_heads, -1, -1)   
 
             attn_score = attn_score.masked_fill(attention_mask_expanded==0, mask_val)
 
@@ -1423,6 +1444,8 @@ class SINKSelfAttention(nn.Module):
         output_attentions=False,
     ):
 
+        qk_share = self.qk_share
+
         query_vectors = self.query(hidden_states)
         value_vectors = self.value(hidden_states)   # (N,B,HD)
 
@@ -1439,7 +1462,7 @@ class SINKSelfAttention(nn.Module):
         query_vectors = query_vectors.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2)  # (B,N,H,D)        
         value_vectors = value_vectors.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2)  # (B,H,N,D)                 
 
-        if not self.qk_share:
+        if not qk_share:
             key_vectors = self.key(hidden_states) 
             key_vectors = key_vectors.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2)  # (B,H,N,D)  
             attn_score = query_vectors @ key_vectors.transpose(-2, -1) / np.sqrt(head_dim)
@@ -1447,15 +1470,23 @@ class SINKSelfAttention(nn.Module):
             attn_score = query_vectors @ query_vectors.transpose(-2, -1) / np.sqrt(head_dim)   
 
         if attention_mask is not None:
+            # # type 1: key_pad_mask
+            # #bool_mask = (attention_mask>=0).long()            
+            # if not qk_share:
+            #     bool_mask = (attention_mask>=0)
+            #     attention_mask_expanded = bool_mask.unsqueeze(1).unsqueeze(2).expand([-1,self.num_heads,1,-1])
+
+            # # type 2: symmetrical mask
+            # else:
+            #     bool_mask = (attention_mask>=0).long()
+            #     attention_mask_expanded = (bool_mask.unsqueeze(-1)@bool_mask.unsqueeze(1)).view(batch_size, 1, seq_len, seq_len).expand(-1, num_heads, -1, -1) 
+            #     #attention_mask_expanded = (attention_mask_expanded == 1)
+            #     attention_mask_expanded = attention_mask_expanded.type(torch.bool)
+
             # type 1: key_pad_mask
-            #bool_mask = (attention_mask>=0).long()
             bool_mask = (attention_mask>=0)
             attention_mask_expanded = bool_mask.unsqueeze(1).unsqueeze(2).expand([-1,self.num_heads,1,-1])
 
-            # type 2: symmetrical mask
-            # bool_mask = (attention_mask>=0).long()
-            # attention_mask_expanded = (bool_mask.unsqueeze(-1)@bool_mask.unsqueeze(1)).view(batch_size, 1, seq_len, seq_len).expand(-1, num_heads, -1, -1) 
-        
             attn_score.masked_fill_(attention_mask_expanded, mask_val)
 
         attn_score_shape = attn_score.shape

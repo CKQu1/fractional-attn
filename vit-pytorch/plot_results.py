@@ -149,7 +149,7 @@ def plot_fns_ensembles(models_roots, fns_type='spopfnsvit', metrics='val_acc',
                     ax.set_title(rf'$\varepsilon = {{{eps}}}$')
                 # row labels (Q = K)
                 if col_idx == ncols - 1:
-                    title = r'$W_Q \neq W_K$' if not qk_share else r'$W_Q = W_K$'               
+                    title = r'$Q \neq K$' if not qk_share else r'$Q = K$'               
                     ax.text(1.2, 0.5, title, transform=(
                                     ax.transAxes + ScaledTranslation(-20/72, +7/72, fig.dpi_scale_trans)),
                                     va='center', rotation='vertical')  # fontsize='medium',                 
@@ -450,7 +450,7 @@ def fns_fix_eps(models_roots, fns_type='spopfns'+MODEL_SUFFIX, metrics='val_acc'
 
             # row labels (Q = K)
             if col_idx == ncols - 1:
-                title = r'$W_Q \neq W_K$' if not qk_share else r'$W_Q = W_K$'               
+                title = r'$Q \neq K$' if not qk_share else r'$Q = K$'               
                 ax.text(1.2, 0.5, title, transform=(
                                 ax.transAxes + ScaledTranslation(-20/72, +7/72, fig.dpi_scale_trans)),
                                 va='center', rotation='vertical')  # fontsize='medium',                            

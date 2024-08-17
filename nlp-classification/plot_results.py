@@ -41,7 +41,7 @@ def plot_fns_ensembles(models_roots, fns_type='spopfns'+MODEL_SUFFIX, metrics='e
                        cbar_separate=True, display=False):
     global df, df_setting, df_filtered, fig_file, axs
     global model_dirs, subpath, dirnames, model_root_dirs
-    global model_combo, model_combos
+    global model_combo, model_combos, model_types_plotted, model_types_short
     global alphas, epss, DCT_ALL, model_info, model_df, run_perf, dataset, df_model
     global model_types, model_info, epochs, ensembles
 
@@ -131,15 +131,15 @@ def plot_fns_ensembles(models_roots, fns_type='spopfns'+MODEL_SUFFIX, metrics='e
                                         #,marker=model_markers[model_name], markersize=markersize,
                                         #,label=model_legend)                                    
 
-                if row_idx != nrows - 1:
-                    ax.set_xticklabels([])
+                # if row_idx != nrows - 1:
+                #     ax.set_xticklabels([])
 
                 # col labels (bandwidth)
                 if row_idx == 0:
                     ax.set_title(rf'$\varepsilon = {{{eps}}}$')
                 # row labels (Q = K)
                 if col_idx == ncols - 1:
-                    title = r'$W_Q \neq W_K$' if not qk_share else r'$W_Q = W_K$'               
+                    title = r'$Q \neq K$' if not qk_share else r'$Q = K$'               
                     ax.text(1.2, 0.5, title, transform=(
                                     ax.transAxes + ScaledTranslation(-20/72, +7/72, fig.dpi_scale_trans)),
                                     va='center', rotation='vertical')  # fontsize='medium',                 
@@ -150,8 +150,8 @@ def plot_fns_ensembles(models_roots, fns_type='spopfns'+MODEL_SUFFIX, metrics='e
                         ax.transAxes + ScaledTranslation(-20/72, +7/72, fig.dpi_scale_trans)),
                     va='bottom', fontfamily='sans-serif')  # fontsize='medium',              
 
-            if eps == 1:
-                pass
+            #if eps == 1:                
+            if col_idx == ncols - 1:
             # -------------------- SINK --------------------                
                 model_type = 'sink' + suffix
                 if model_type in model_types:
@@ -245,6 +245,8 @@ def plot_fns_ensembles(models_roots, fns_type='spopfns'+MODEL_SUFFIX, metrics='e
         else:
             dataset_name_short += dataset
 
+    model_types_short = [model_type.replace(MODEL_SUFFIX,'') for model_type in model_types_plotted]
+
     from constants import FIGS_DIR
     SAVE_DIR = njoin(FIGS_DIR, 'nlp-task')
     if display:
@@ -252,7 +254,7 @@ def plot_fns_ensembles(models_roots, fns_type='spopfns'+MODEL_SUFFIX, metrics='e
     else:
         if not isdir(SAVE_DIR): makedirs(SAVE_DIR)
         fig_file = f'layers={num_hidden_layers}-heads={num_attention_heads}-hidden={hidden_size}-'            
-        fig_file += '-'.join(model_types_plotted)+'_' + f'ds={dataset_name_short}'
+        fig_file += '_'.join(model_types_short)+ '-' + metrics[0] + '-' + f'ds={dataset_name_short}'
         # if isfile(njoin(SAVE_DIR, fig_file)):
         #     version = len([fname for fname in os.listdir(SAVE_DIR) if fname==fig_file])
         #     fig_file += f'-v{version}'
@@ -442,7 +444,7 @@ def fns_fix_eps(models_roots, fns_type='spopfns'+MODEL_SUFFIX, metrics='eval_acc
 
             # row labels (Q = K)
             if col_idx == ncols - 1:
-                title = r'$W_Q \neq W_K$' if not qk_share else r'$W_Q = W_K$'               
+                title = r'$Q \neq K$' if not qk_share else r'$Q = K$'               
                 ax.text(1.2, 0.5, title, transform=(
                                 ax.transAxes + ScaledTranslation(-20/72, +7/72, fig.dpi_scale_trans)),
                                 va='center', rotation='vertical')  # fontsize='medium',                            
@@ -700,7 +702,7 @@ def plot_ensembles(model_root_dirs, metrics=['eval_accuracy'],
             axs[mr_ii].set_title(rf'$\varepsilon = {{{bandwidth}}}$')
         # row labels (Q = K)
         if mr_ii % ncols == ncols-1:      
-            title = r'$W_Q \neq W_K$' if qk_share == 'qkv' else r'$W_Q = W_K$'               
+            title = r'$Q \neq K$' if qk_share == 'qkv' else r'$Q = K$'               
             axs[mr_ii].text(1.2, 0.5, title, transform=(
                             axs[mr_ii].transAxes + ScaledTranslation(-20/72, +7/72, fig.dpi_scale_trans)),
                             fontsize='medium', va='center', rotation='vertical')

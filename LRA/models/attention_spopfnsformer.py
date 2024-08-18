@@ -4,6 +4,10 @@ import math
 
 from torch.nn import functional as F
 
+# import functorch
+# from torchmetrics.functional import pairwise_cosine_similarity
+# batched_pairwise_cosine_similarity = functorch.vmap(pairwise_cosine_similarity)
+
 class SPOPFNSAttention(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -24,11 +28,29 @@ class SPOPFNSAttention(nn.Module):
     def forward(self, Q, K, V, mask):
 
         alpha, bandwidth, a = self.alpha, self.bandwidth, self.a
-        d_intrinsic, sphere_radius, mask_val = self.d_intrinsic, self.sphere_radius, self.mask_val
+        if alpha < 2:
+            d_intrinsic = self.d_intrinsic
+        sphere_radius, mask_val = self.sphere_radius, self.mask_val
 
         # geodesic distance on sphere
-        eps = 1e-7  # for limiting the divergence from acos                     
+        # method 1
+        eps = 1e-7  # for limiting the divergence from acos                             
         g_dist = torch.acos(torch.clamp(torch.matmul(Q, torch.transpose(K, -2, -1)), -1 + eps, 1 - eps)) * sphere_radius
+        #g_dist = torch.acos(torch.matmul(Q, torch.transpose(K, -2, -1))) * sphere_radius
+        
+        # method 2
+        # batch_size, num_head, seq_len, head_dim = Q.shape
+        # g_dist = torch.acos(batched_pairwise_cosine_similarity(Q.reshape(-1, seq_len, head_dim), K.reshape(-1, seq_len, head_dim)).view(batch_size, num_head, seq_len, seq_len)) * sphere_radius
+
+        # method 3
+        # cossim = F.cosine_similarity(Q.reshape(-1, seq_len, head_dim)[None,:,:], 
+        #                              K.reshape(-1, seq_len, head_dim)[:,None,:], dim=-1)
+
+        # cossim = nn.CosineSimilarity(Q.reshape(-1, seq_len, head_dim), 
+        #                              K.reshape(-1, seq_len, head_dim), dim=-1)
+        # print(f'cossim shape: {cossim.shape}')
+        # g_dist = torch.acos(cossim).view(batch_size, num_head, seq_len, seq_len) * sphere_radius        
+        #print(f'g_dist shape: {g_dist.shape}')
 
         if mask is not None:        
             # type 1: key_pad_mask

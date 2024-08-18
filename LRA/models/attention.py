@@ -16,6 +16,9 @@ def attn_selector(attn_type, config, W_q=None, W_k=None, W_v=None):
     elif attn_type.startswith("spopfns"):
         from models.attention_spopfnsformer import SPOPFNSAttention
         attn = SPOPFNSAttention(config)
+    elif attn_type.startswith("rdopfns"):
+        from models.attention_rdopfnsformer import RDOPFNSAttention
+        attn = RDOPFNSAttention(config)    
     if attn_type.startswith("sink"):
         from models.attention_sinkformer import SINKAttention
         attn = SINKAttention(config)        
@@ -142,6 +145,22 @@ class Attention(nn.Module):
                 attn_out = self.attn(X.float(), mask.float())
         elif 'fns' in self.attn_type and 'sp' in self.attn_type:
             X = F.normalize(X, p=2, dim=-1)
+            batch_size, seq_len = hidden_dim = X.shape[:2]
+            Q = X
+            Q = Q.view(batch_size, seq_len, self.num_head, self.head_dim).transpose(1, 2)
+            K = self.split_heads(self.W_k(X))
+            V = self.split_heads(self.W_v(X))
+            # print(f'Q shape: {Q.shape}')
+            # print(f'K shape: {K.shape}')
+            # print(f'V shape: {V.shape}')
+            with torch.cuda.amp.autocast(enabled = False):
+                if self.grad_checkpointing:
+                    attn_out = checkpoint(self.attn, Q.float(), K.float(), V.float(), mask.float())
+                else:
+                    attn_out = self.attn(Q.float(), K.float(), V.float(), mask.float())
+            attn_out = self.combine_heads(attn_out)
+
+        elif 'fns' in self.attn_type and 'rd' in self.attn_type:
             batch_size, seq_len = hidden_dim = X.shape[:2]
             Q = X
             Q = Q.view(batch_size, seq_len, self.num_head, self.head_dim).transpose(1, 2)

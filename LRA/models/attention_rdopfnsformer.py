@@ -77,4 +77,4 @@ class RDOPFNSAttention(nn.Module):
         return X
 
     def extra_repr(self):
-        return f'spopfnsformer-alpha={self.alpha}-bandwidth={self.bandwidth}-a={self.a}'
+        return f'rdopfnsformer-alpha={self.alpha}-bandwidth={self.bandwidth}-a={self.a}'

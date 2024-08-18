@@ -27,7 +27,9 @@ class RDOPFNSAttention(nn.Module):
     def forward(self, Q, K, V, mask):
 
         alpha, bandwidth, a = self.alpha, self.bandwidth, self.a
-        d_intrinsic, mask_val = self.d_intrinsic, self.mask_val
+        if alpha < 2:
+            d_intrinsic = self.d_intrinsic        
+        mask_val = self.mask_val
 
         # geodesic distance on R^d        
         g_dist = torch.cdist(Q, K, p=2)  # (H,B,N,N)

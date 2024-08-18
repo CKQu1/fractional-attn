@@ -250,8 +250,8 @@ def job_setup(script_name, kwargss, **kwargs):
             if ngpus >= 1:
                 kwargs_qsub["q"] = 'l40s'
             else:
-                #kwargs_qsub["q"] = 'yossarian'
-                pass
+                #kwargs_qsub["q"] = 'yossarian'                
+                kwargs_qsub["q"] = 'defaultQ'
 
             kwargs_qsub["source"] = PHYSICS_SOURCE 
             kwargs_qsub["conda"] = PHYSICS_CONDA

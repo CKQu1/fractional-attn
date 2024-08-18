@@ -265,7 +265,8 @@ if __name__ == '__main__':
         elif args.manifold == 'rd':
             if args.alpha < 2:
                 model_config['d_intrinsic'] = Config[args.task]['model']['head_dim']  # head_dim                
-            model_config['mask_val'] = 1 / model_config["max_length"]
+            #model_config['mask_val'] = 1 / model_config["max_length"]
+            model_config['mask_val'] = 1e-5
 
             model_config["attn_type"] = 'rd' + args.attn
 
@@ -291,7 +292,8 @@ if __name__ == '__main__':
     # if not os.path.exists(log_dir):
     #     os.mkdir(log_dir)    
     if args.log_dir == '':        
-        _, log_dir = create_model_dir(njoin(DROOT, 'trained_models'), task=args.task.split('-')[1], **model_config)
+        _, log_dir = create_model_dir(njoin(DROOT, 'trained_models'), attn=args.attn, 
+                                      task=args.task.split('-')[1], **model_config)
     else:
         log_dir = args.log_dir
     os.makedirs(log_dir, exist_ok=True)

@@ -12,6 +12,7 @@ from mutils import *
 # Specify the path to your .tfevents file
 #event_file = '.droot/full-models/lra-listops/opfns-listops-alpha=1.2-eps=1-a=0/seed=0/test.tensorboard/events.out.tfevents.1723821971.hpc219.225203.0'
 def load_tfevents(event_file):
+    global event_acc, events
 
     # Load the event file
     event_acc = EventAccumulator(event_file)
@@ -87,6 +88,7 @@ def fig_metrics(root, iter_size=100, tag='accu'):
                         assert tag in DCT.keys()
                         if ii==0:
                             tag_values = DCT[tag].loc[::iter_size,'value']
+                            steps = DCT[tag].loc[::iter_size,'step']
                         else:
                             tag_values += DCT[tag].loc[::iter_size,'value']
                         ii += 1
@@ -94,7 +96,7 @@ def fig_metrics(root, iter_size=100, tag='accu'):
                         continue
                 if ii > 0:
                     tag_values = tag_values/ii
-                    axs[task_idx].plot(tag_values, label=model_name+f'avg={ii}')                    
+                    axs[task_idx].plot(steps, tag_values, label=model_name+f'avg={ii}')                    
 
         axs[task_idx].set_title(task_name)
     axs[0].legend()

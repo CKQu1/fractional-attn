@@ -72,7 +72,13 @@ def create_model_dir(model_root_dir, **kwargs):
 
     dirname = f'{attn}-{dataset_code}'
     #dirname += '-qqv' if qk_share is True else '-qkv'  # qk weight-tying
-    if 'fns' in attn:                 
+    if 'fns' in attn:             
+        manifolds_dict = {'sphere': 'sp', 'rd': 'rd'}
+        manifold = kwargs.get('manifold', 'sphere')       
+        if dirname[:2] not in manifolds_dict.values():
+            dirname = manifolds_dict[manifold] + dirname
+        else:
+             assert dirname[:2] == manifolds_dict[manifold]
         alpha = kwargs.get("alpha", 1)
         bandwidth = kwargs.get("bandwidth", 1)
         a = kwargs.get("a", 1)             

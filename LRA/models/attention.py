@@ -143,7 +143,7 @@ class Attention(nn.Module):
         if self.attn_type.startswith("longformer") or self.attn_type.startswith("reformer"):
             with torch.cuda.amp.autocast(enabled = False):
                 attn_out = self.attn(X.float(), mask.float())
-        elif 'fns' in self.attn_type and 'sp' in self.attn_type:
+        elif 'fns' in self.attn_type and self.attn_type[:2] == 'sp':
             X = F.normalize(X, p=2, dim=-1)
             batch_size, seq_len = hidden_dim = X.shape[:2]
             Q = X
@@ -160,7 +160,7 @@ class Attention(nn.Module):
                     attn_out = self.attn(Q.float(), K.float(), V.float(), mask.float())
             attn_out = self.combine_heads(attn_out)
 
-        elif 'fns' in self.attn_type and 'rd' in self.attn_type:
+        elif 'fns' in self.attn_type and self.attn_type[:2] == 'rd':
             batch_size, seq_len = hidden_dim = X.shape[:2]
             Q = X
             Q = Q.view(batch_size, seq_len, self.num_head, self.head_dim).transpose(1, 2)

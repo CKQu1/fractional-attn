@@ -31,8 +31,14 @@ class RDOPFNSAttention(nn.Module):
             d_intrinsic = self.d_intrinsic        
         mask_val = self.mask_val
 
-        # geodesic distance on R^d        
-        g_dist = torch.cdist(Q, K, p=2)  # (H,B,N,N)
+        # geodesic distance on R^d     
+        # method 1   
+        g_dist = torch.cdist(Q, K, p=2)  # (H,B,N,N)      
+        #g_dist = torch.cdist(Q, K, p=2) / math.sqrt(self.head_dim)  # (H,B,N,N)
+        # method 2
+        #eps = 1e-5  
+        #g_dist = torch.sqrt( 2 + eps - 2 * torch.matmul(Q, torch.transpose(K, -2, -1)) )  # (H,B,N,N)
+        #print(f'g_dist nans: {torch.isnan(g_dist).sum()}')
 
         # Calculate the attention scores
         if alpha < 2:

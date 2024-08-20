@@ -15,11 +15,18 @@ class Embeddings(nn.Module):
 
         self.dim = config["embedding_dim"]
 
-        self.word_embeddings = nn.Embedding(config["vocab_size"], config["embedding_dim"])
-        torch.nn.init.normal_(self.word_embeddings.weight, std = 0.02)
+        if config["attn_type"] == 'rdopfns':
+            self.word_embeddings = nn.Embedding(config["vocab_size"], config["embedding_dim"], max_norm=1)
+            torch.nn.init.normal_(self.word_embeddings.weight, std = 0.02)
 
-        self.position_embeddings = nn.Embedding(config["max_seq_len"], config["embedding_dim"])
-        torch.nn.init.normal_(self.position_embeddings.weight, std = 0.02)
+            self.position_embeddings = nn.Embedding(config["max_seq_len"], config["embedding_dim"], max_norm=1)
+            torch.nn.init.normal_(self.position_embeddings.weight, std = 0.02)
+        else:
+            self.word_embeddings = nn.Embedding(config["vocab_size"], config["embedding_dim"])
+            torch.nn.init.normal_(self.word_embeddings.weight, std = 0.02)
+
+            self.position_embeddings = nn.Embedding(config["max_seq_len"], config["embedding_dim"])
+            torch.nn.init.normal_(self.position_embeddings.weight, std = 0.02)
 
         self.dropout = torch.nn.Dropout(p = config["dropout_prob"])
 

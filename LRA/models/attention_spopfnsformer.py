@@ -4,10 +4,6 @@ import math
 
 from torch.nn import functional as F
 
-# import functorch
-# from torchmetrics.functional import pairwise_cosine_similarity
-# batched_pairwise_cosine_similarity = functorch.vmap(pairwise_cosine_similarity)
-
 class SPOPFNSAttention(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -33,16 +29,23 @@ class SPOPFNSAttention(nn.Module):
         sphere_radius, mask_val = self.sphere_radius, self.mask_val
 
         # geodesic distance on sphere
-        # method 1
-        eps = 1e-7  # for limiting the divergence from acos                             
-        g_dist = torch.acos(torch.clamp(torch.matmul(Q, torch.transpose(K, -2, -1)), -1 + eps, 1 - eps)) * sphere_radius
+        eps = 1e-7  # for limiting the divergence from acos
+
+        # method 1                                     
+        #g_dist = torch.acos_(torch.clamp_(torch.matmul(Q, torch.transpose(K, -2, -1)), -1 + eps, 1 - eps)) * sphere_radius
         #g_dist = torch.acos(torch.matmul(Q, torch.transpose(K, -2, -1))) * sphere_radius
         
-        # method 2
+        # method 2 
+        batch_size, num_head, seq_len, head_dim = Q.shape
+        dot = torch.matmul(Q, torch.transpose(K, -2, -1))
+        dot = dot.masked_fill_(torch.diag_embed(torch.ones(seq_len, device=Q.device))==1, 1)
+        g_dist = torch.acos_(dot) * sphere_radius
+
+        # method 3
         # batch_size, num_head, seq_len, head_dim = Q.shape
         # g_dist = torch.acos(batched_pairwise_cosine_similarity(Q.reshape(-1, seq_len, head_dim), K.reshape(-1, seq_len, head_dim)).view(batch_size, num_head, seq_len, seq_len)) * sphere_radius
 
-        # method 3
+        # method 4
         # cossim = F.cosine_similarity(Q.reshape(-1, seq_len, head_dim)[None,:,:], 
         #                              K.reshape(-1, seq_len, head_dim)[:,None,:], dim=-1)
 
@@ -50,7 +53,7 @@ class SPOPFNSAttention(nn.Module):
         #                              K.reshape(-1, seq_len, head_dim), dim=-1)
         # print(f'cossim shape: {cossim.shape}')
         # g_dist = torch.acos(cossim).view(batch_size, num_head, seq_len, seq_len) * sphere_radius        
-        #print(f'g_dist shape: {g_dist.shape}')
+        # print(f'g_dist shape: {g_dist.shape}')
 
         if mask is not None:        
             # type 1: key_pad_mask
@@ -58,7 +61,7 @@ class SPOPFNSAttention(nn.Module):
             # print(f'mask_expanded shape: {mask_expanded.shape}')
             # print(mask_expanded)
             # quit()
-            g_dist = g_dist.masked_fill(mask_expanded==0, mask_val)
+            g_dist = g_dist.masked_fill_(mask_expanded==0, mask_val)
 
         # Calculate the attention scores
         if alpha < 2:
@@ -68,9 +71,8 @@ class SPOPFNSAttention(nn.Module):
 
         if a == 0:
             # attn_score = attn_score.masked_fill_(attention_mask==0, -1e9) # Mask
-            attn = F.normalize(
-                attn_score, p=1, dim=3
-            )  # can do this as the attn weights are always positive
+            attn = F.normalize(attn_score, p=1, dim=3)  # can do this as the attn weights are always positive            
+            #attn.div_(torch.norm(attn, p=1, dim=3, keepdim=True) + 1e-6)  # In-place division            
         else:
             """
             D_inv_row = torch.diag_embed(

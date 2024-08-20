@@ -242,7 +242,8 @@ def job_setup(script_name, kwargss, **kwargs):
                 HOST_NODE_ADDR += 1
 
             kwargs_command["HOST_NODE_ADDR"] = HOST_NODE_ADDR
-            kwargs_command["singularity_path"] = SPATH
+            #kwargs_command["singularity_path"] = SPATH
+            kwargs_command["source"] = '/project/phys_DL/extended-criticality-dnn/virt-test-qu/bin/activate'
         # -------------------
 
         # ----- PHYSICS -----
@@ -333,8 +334,11 @@ def command_setup_ddp(**kwargs):
 
     if len(singularity_path) > 0:
         bind_path = kwargs.get('bind_path', BPATH)
-        home_path = kwargs.get('home_path', os.getcwd())        
-        command = f"singularity exec --bind {bind_path} --home {home_path} {singularity_path}"
+        home_path = kwargs.get('home_path', os.getcwd())    
+        if ngpus == 0:     
+            command = f"singularity exec --bind {bind_path} --home {home_path} {singularity_path}"
+        else:
+            command = f"singularity exec --nv --bind {bind_path} --home {home_path} {singularity_path}"
     else:
         command = ""
 

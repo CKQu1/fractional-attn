@@ -199,7 +199,7 @@ if __name__ == '__main__':
                         help="train eval")
     parser.add_argument("--checkpoint", type = str, default="test",
                         help="load ./checkpoints/model_name.model to evaluation")
-    parser.add_argument("--attn", type = str, default="softmaxQKV",
+    parser.add_argument("--attn", type = str, default="softmax",
                         help = "softmax, opfns, sink")
     parser.add_argument("--task", type = str, default="lra-listops",
                         help = "lra-listops, lra-retrieval, lra-text, lra-pathfinder32-curv_contour_length_14")
@@ -217,6 +217,8 @@ if __name__ == '__main__':
     parser.add_argument("--n_it", type=int, default=1)
     # General
     parser.add_argument('--qkv_bias', type=str2bool, nargs='?', const=True, default=False)
+    # Training
+    parser.add_argument("--lr_scheduler", type=str, default='onecyclelr', help="onecyclelr | constantlr")
     # -----------------
 
     args = parser.parse_args()    
@@ -226,6 +228,8 @@ if __name__ == '__main__':
     if args.task == 'lra-pathfinder':
         args.task = 'lra-pathfinder32-curv_contour_length_14'
 
+    assert args.task in TASKS, f'{args.task} does not exist!'
+    assert args.attn in ['opfns', 'sink', 'softmax'], f'{args.attn} attn doese not exist!'
 
     ### get model config ###
     model_config = Config[args.task]["model"]
@@ -285,12 +289,7 @@ if __name__ == '__main__':
 
     training_config = Config[args.task]["training"]    
     ### log preparation ###
-    # log_dir = './log-{}/'.format(args.random)
-    # if not os.path.exists(log_dir):
-    #     os.mkdir(log_dir)
-    # log_dir = njoin(log_dir, args.task)
-    # if not os.path.exists(log_dir):
-    #     os.mkdir(log_dir)    
+    # log_dir = './log-{}/'.format(args.random)  
     if args.log_dir == '':        
         _, log_dir = create_model_dir(njoin(DROOT, 'trained_models'), attn=args.attn, 
                                       task=args.task.split('-')[1], **model_config)
@@ -337,8 +336,6 @@ if __name__ == '__main__':
         model.load_state_dict(checkpoint["model_state_dict"])
         print("model loaded from: " + checkpoint_path)
 
-
-    #model = model.cuda()
     model = model.to(dev)
     print(model)
     print(f"parameter_size: {[weight.size() for weight in model.parameters()]}", flush = True)
@@ -377,13 +374,20 @@ if __name__ == '__main__':
         betas = (0.9, 0.999), eps = 1e-6, weight_decay = training_config["weight_decay"]
     )
 
-    lr_scheduler = torch.optim.lr_scheduler.OneCycleLR(
-        optimizer = optimizer,
-        max_lr = training_config["learning_rate"],
-        pct_start = training_config["warmup"] / training_config["num_train_steps"],
-        anneal_strategy = training_config["lr_decay"],
-        total_steps = training_config["num_train_steps"]
-    )
+    if args.lr_scheduler == 'onecyclelr':
+        lr_scheduler = torch.optim.lr_scheduler.OneCycleLR(
+            optimizer = optimizer,
+            max_lr = training_config["learning_rate"],
+            pct_start = training_config["warmup"] / training_config["num_train_steps"],
+            anneal_strategy = training_config["lr_decay"],
+            total_steps = training_config["num_train_steps"]
+        )
+
+    elif args.lr_scheduler == 'constantlr':
+        lr_scheduler = torch.optim.lr_scheduler.ConstantLR(
+            optimizer = optimizer,        
+            total_iters = int(training_config["num_train_steps"] / 3)
+        )        
 
     amp_scaler = torch.cuda.amp.GradScaler() if model_config["mixed_precision"] else None
 

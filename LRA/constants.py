@@ -27,15 +27,24 @@ PHYSICS_CONDA = 'frac_attn' if 'chqu7424' in RT else '~/conda'
 FUDAN_CONDA = 'frac_attn'
 # -------------------
 
+# ----- TASKS -----
+TASKS = ["lra-listops", "lra-retrieval", "lra-text", "lra-pathfinder32-curv_contour_length_14", "lra-image"]
+# -------------------
+
 # ----- MODELS -----
-MODEL_PREFIXES = ['fns', 'opfns', 'spfns', 'spopfns', 'rdfns', 'rdopfns', 'sink', 'dp']
+MODEL_PREFIXES = ['fns', 'opfns', 'spfns', 'spopfns', 'rdfns', 'rdopfns', 'sink', 'softmax']
+MODEL_PREFIXES_UPPER = [model_prefix.upper() for model_prefix in MODEL_PREFIXES]
 MODEL_SUFFIX = 'former'
 
 MODEL_NAMES = []
 NAMES_DICT = {}
 for MODEL_PREFIX in MODEL_PREFIXES:
-    MODEL_NAMES.append(MODEL_PREFIX + MODEL_SUFFIX)
-    NAMES_DICT[MODEL_PREFIX + MODEL_SUFFIX] = MODEL_PREFIX.upper()
+    if MODEL_PREFIX != 'softmax':
+        MODEL_NAMES.append(MODEL_PREFIX + MODEL_SUFFIX)
+        NAMES_DICT[MODEL_PREFIX] = MODEL_PREFIX.upper()
+    else:
+        MODEL_NAMES.append('dp' + MODEL_SUFFIX)
+        NAMES_DICT[MODEL_PREFIX] = 'dp'.upper()        
 
 NAMES_DICT.update({'imdb': 'IMDb', 'rotten_tomatoes': 'Rotten Tomatoes',
                    'eval_loss': 'Loss', 'eval_accuracy': 'Accuracy', 'eval_f1_score': r'$F_1$ score'}
@@ -55,7 +64,10 @@ def HYP_TRANS(alpha):
     b = max_trans - m * min_alpha
     return m*alpha + b
 
-LINESTYLE_DICT = {'spfns'+MODEL_SUFFIX: 'solid', 'spopfns'+MODEL_SUFFIX: 'solid',  # (0,(5,1))               
-                  'rdfns'+MODEL_SUFFIX: 'solid', 'rdopfns'+MODEL_SUFFIX: 'solid',
-                  'sink'+MODEL_SUFFIX: (0,(5,5)),
-                  'dp'+MODEL_SUFFIX: (0,(1,1))}            
+OTHER_COLORS = ['m', 'dimgray']
+OTHER_COLORS_DICT = {'sink': OTHER_COLORS[0], 'softmax': OTHER_COLORS[1]}
+
+LINESTYLE_DICT = {'spfns': 'solid', 'spopfns': 'solid',  # (0,(5,1))               
+                  'rdfns': 'solid', 'rdopfns': 'solid',
+                  'sink': (0,(5,5)),
+                  'softmax': (0,(1,1))}            

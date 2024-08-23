@@ -25,7 +25,7 @@ if __name__ == '__main__':
     seeds = [0]
 
     #ROOT = njoin(DROOT, 'V100-run')
-    ROOT = njoin(DROOT, 'V100-run-constantlr')
+    ROOT = njoin(DROOT, 'V100-run-cycliclr')
     job_path = njoin(ROOT, 'jobs_all')
 
     kwargss_all = []    
@@ -47,7 +47,7 @@ if __name__ == '__main__':
             kwargss = []
             for alpha in [1.2,2]:        
             #for alpha in [1, 1.4, 1.8]:                                                       
-                for bandwidth in [1]:
+                for bandwidth in [0.01, 1]:
                     kwargss.append({'attn':'opfns','alpha':alpha,'a': 0,'bandwidth':bandwidth,'manifold':'sphere'})
                     #kwargss.append({'attn':'opfns','alpha':alpha,'a': 0,'bandwidth':bandwidth,'manifold':'rd'})
 
@@ -58,7 +58,7 @@ if __name__ == '__main__':
             #     kwargss.append({'attn':'sink','n_it':n_it})
 
             common_kwargs = {      
-               "lr_scheduler":    'constantlr',      
+                "lr_scheduler":    'cycliclr',      
                 "task":            task,                         
                 "random":          seed,
                 "qkv_bias":        False
@@ -89,4 +89,4 @@ if __name__ == '__main__':
                         cluster=CLUSTER)
         
         for i in range(len(commands)):
-            qsub(f'{commands[i]} {script_names[i]}', pbs_array_trues[i], path=job_path, **kwargs_qsubs[i])          
+            qsub(f'{commands[i]} {script_names[i]}', pbs_array_trues[i], **kwargs_qsubs[i])          

@@ -228,7 +228,7 @@ def job_setup(script_name, kwargss, **kwargs):
                        "nstack":      nstack                       
                        }        
 
-        kwargs_command = kwargs_qsub; del kwargs_command["path"]
+        kwargs_command = kwargs_qsub; # del kwargs_command["path"]
         kwargs_command["cluster"] = cluster
 
         # ----- ARTEMIS -----
@@ -243,7 +243,8 @@ def job_setup(script_name, kwargss, **kwargs):
 
             kwargs_command["HOST_NODE_ADDR"] = HOST_NODE_ADDR
             #kwargs_command["singularity_path"] = SPATH
-            kwargs_command["source"] = '/project/phys_DL/extended-criticality-dnn/virt-test-qu/bin/activate'
+            #kwargs_command["source"] = '/project/phys_DL/extended-criticality-dnn/virt-test-qu/bin/activate'
+            kwargs_command["source"] = '/project/frac_attn/fractional-attn/.project_env/fav/bin/activate'
         # -------------------
 
         # ----- PHYSICS -----

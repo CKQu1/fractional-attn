@@ -44,8 +44,8 @@ from torch.nn import functional as F
 c_clears = [0.5, 1]
 markers = ['o', 'x']
 
-cmap_attn = get_cmap('plasma')
-cmap_norm = mpl.colors.Normalize(vmin=0, vmax=1)
+cmap_attn = get_cmap('inferno')
+#cmap_norm = mpl.colors.Normalize(vmin=0, vmax=1)
 # --------------------------------
 
 # True attn score
@@ -75,7 +75,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='main_seq_classification.py training arguments')    
     # parser.add_argument('--train_with_ddp', default=False, type=bool, help='to use DDP or not')
     parser.add_argument('--models_root', default='', help='Pretrained models root')
-    parser.add_argument('--N_batch', default=25, type=int)
+    parser.add_argument('--N_batch', default=1, type=int)
     parser.add_argument('--wandb_log', default=False, type=bool)
 
     args = parser.parse_args()    
@@ -114,9 +114,15 @@ if __name__ == '__main__':
     suffix = MODEL_SUFFIX
     DCT_ALL = collect_model_dirs(models_root, suffix=suffix)
     model_types = list(DCT_ALL.keys())
+
+    SELECTED_ALPHAS = [1.2,1.6,2.0]
     for model_type in model_types:
         if 'fns' in model_type:
-            df_model = DCT_ALL[model_type]
+            df_model = DCT_ALL[model_type].dropna(subset='alpha')
+            # ----- filter alphas -----
+            df_model = df_model[df_model['alpha'].isin(SELECTED_ALPHAS)]
+            # ------------------------
+            df_model.reset_index(drop=True, inplace=True)
             break
 
     # ----- general settings -----
@@ -148,7 +154,7 @@ if __name__ == '__main__':
 
     # Set up plots for later    
     #nrows, ncols = 1 + len(alphas), len(epss)
-    nrows, ncols = 3, len(epss)
+    nrows, ncols = len(alphas), len(epss)
     figsize = (3*ncols,3*nrows)
 
     figs, axss = [], []
@@ -164,8 +170,9 @@ if __name__ == '__main__':
         axs = axs.flatten()    
 
         figs.append(fig); axss.append(axs)
-      
-    row_labels = ['Uniform', 'Non-uniform']
+
+    attn_weightss = []      
+    K_tildes = []
     for model_idx, model_dir in enumerate(model_dirs):        
 
         train_setting = pd.read_csv(njoin(model_dir, 'train_setting.csv'))
@@ -286,8 +293,13 @@ if __name__ == '__main__':
 
             #idxs_max = torch.argsort(seq_lens, descending=True)  # long to short sequences
             idxs_max = torch.argsort(seq_lens, descending=False)  # short to long sequences
+            seq_lens = seq_lens[idxs_max]
 
-            bidxs = list(idxs_max[:N_batch].numpy())
+            min_len = 50
+            if min_len is not None:
+                bidxs = list(idxs_max[seq_lens>=min_len][:N_batch].numpy())
+            else:
+                bidxs = list(idxs_max[:N_batch].numpy())
 
         # ---------------------------------------- 2. Load pretrained model ----------------------------------------
         print(f'---------- Load pretrained model: (alpha, eps) = ({alpha}, {bandwidth}) ----------')
@@ -442,10 +454,13 @@ if __name__ == '__main__':
                 # attn_weights = F.dropout(attn_weights, p=model.transformer.encoder.layer[hidx].attention.self.dropout, 
                 #                          training=model.transformer.encoder.layer[hidx].attention.self.training)           
 
-                for token_step in range(1, attn_weights.shape[0] - 1):
-                    selected_entries = torch.diagonal_scatter(torch.zeros(attn_weights.shape), torch.ones(attn_weights.shape[0] - token_step), token_step)
-                    selected_entries += torch.diagonal_scatter(torch.zeros(attn_weights.shape), torch.ones(attn_weights.shape[0] - token_step), -token_step)
-                    pairwise_overlaps[1, hidx, b_ii, token_step] = (attn_weights * selected_entries).mean()
+                # for token_step in range(1, attn_weights.shape[0] - 1):
+                #     selected_entries = torch.diagonal_scatter(torch.zeros(attn_weights.shape), torch.ones(attn_weights.shape[0] - token_step), token_step)
+                #     selected_entries += torch.diagonal_scatter(torch.zeros(attn_weights.shape), torch.ones(attn_weights.shape[0] - token_step), -token_step)
+                #     pairwise_overlaps[1, hidx, b_ii, token_step] = (attn_weights * selected_entries).mean()
+
+                attn_weightss.append(attn_weights)
+                K_tildes.append(K_tilde)
 
                 alpidx = alphas.index(alpha)
                 row = alpidx + 1
@@ -485,8 +500,10 @@ if __name__ == '__main__':
                 ax_idx = mr_ii + alpidx * ncols
                 print('\n')
                 print(f'ax_idx = {ax_idx}')   
-                print(attn_weights)                
-                axss[hidx][ax_idx].imshow(attn_weights.detach().numpy(), cmap=cmap_attn, norm=cmap_norm)  # K_tilde                
+                #print(attn_weights)                
+                print(attn_weights.shape)
+                # K_tilde or attn_weights
+                axss[hidx][ax_idx].imshow(K_tilde.detach().numpy(), cmap=cmap_attn)  # norm=cmap_norm                
 
         #break
     

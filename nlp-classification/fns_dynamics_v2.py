@@ -75,7 +75,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='main_seq_classification.py training arguments')    
     # parser.add_argument('--train_with_ddp', default=False, type=bool, help='to use DDP or not')
     parser.add_argument('--models_root', default='', help='Pretrained models root')
+    parser.add_argument('--fns_type', default='spopfns'+MODEL_SUFFIX)
     parser.add_argument('--N_batch', default=25, type=int)
+    parser.add_argument('--use_mask', type=str2bool, nargs='?', const=True, default=False)
     parser.add_argument('--wandb_log', default=False, type=bool)
 
     args = parser.parse_args()    
@@ -110,13 +112,18 @@ if __name__ == '__main__':
     models_root = args.models_root.replace('\\','')
     dirnames = sorted([dirname for dirname in os.listdir(models_root) if 'former' in dirname])  
 
-    # select based on bandwidth
-    suffix = MODEL_SUFFIX
-    DCT_ALL = collect_model_dirs(models_root, suffix=suffix)
+    # select based on bandwidth    
+    DCT_ALL = collect_model_dirs(models_root, suffix=MODEL_SUFFIX)
     model_types = list(DCT_ALL.keys())
+
+    SELECTED_ALPHAS = [1.2,1.6,2.0]
     for model_type in model_types:
-        if 'fns' in model_type:
-            df_model = DCT_ALL[model_type]
+        if args.fns_type in model_type:
+            df_model = DCT_ALL[model_type].dropna(subset='alpha')
+            # ----- filter alphas -----
+            df_model = df_model[df_model['alpha'].isin(SELECTED_ALPHAS)]
+            # ------------------------
+            df_model.reset_index(drop=True, inplace=True)
             break
 
     # ----- general settings -----
@@ -148,14 +155,14 @@ if __name__ == '__main__':
 
     # Set up plots for later    
     #nrows, ncols = 1 + len(alphas), len(epss)
-    nrows, ncols = 3, len(epss)
+    nrows, ncols = len(alphas), len(epss)
     figsize = (3*ncols,3*nrows)
 
     figs, axss = [], []
     for _ in range(num_hidden_layers):
         fig, axs = plt.subplots(nrows,ncols,figsize=figsize,
-                                sharex=False,sharey=False)
-                                #sharex=True,sharey=True)          
+                                #sharex=False,sharey=False)
+                                sharex=True,sharey=True)          
         if nrows == 1:
             if ncols > 1:
                 axs = np.expand_dims(axs, axis=0)
@@ -172,8 +179,6 @@ if __name__ == '__main__':
         if os.path.isdir(njoin(model_dir, 'run_performance.csv')):
             run_performance = pd.read_csv(njoin(model_dir, 'run_performance.csv'))
         train_setting = pd.read_csv(njoin(model_dir, 'train_setting.csv'))
-        if os.path.isdir(njoin(model_dir, 'run_performance.csv')):
-            run_performance = pd.read_csv(njoin(model_dir, 'run_performance.csv'))
         f = open(njoin(model_dir,'config.json'))
         config = json.load(f)
         f.close()
@@ -198,11 +203,7 @@ if __name__ == '__main__':
         if model_idx == 0:
             print('---------- Dataset setup ----------')
                     
-            if 'fix_embed' in config.keys():
-                fix_embed = config['fix_embed']
-            else:
-                fix_embed = False
-
+            fix_embed = config['fix_embed'] if 'fix_embed' in config.keys() else False
             dataset_name = attn_setup['dataset_name']
 
             def preprocess_function(examples):
@@ -285,9 +286,14 @@ if __name__ == '__main__':
             max_seq_len = seq_lens.max()
 
             #idxs_max = torch.argsort(seq_lens, descending=True)  # long to short sequences
-            idxs_max = torch.argsort(seq_lens, descending=False)  # short to long sequences
+            idxs_max = torch.argsort(seq_lens, descending=False)  # short to long sequences            
+            seq_lens = seq_lens[idxs_max]
 
-            bidxs = list(idxs_max[:N_batch].numpy())
+            min_len = min(100, seq_lens.max().item())
+            if min_len is not None:
+                bidxs = list(idxs_max[seq_lens>=min_len][:N_batch].numpy())
+            else:
+                bidxs = list(idxs_max[:N_batch].numpy())
 
         # ---------------------------------------- 2. Load pretrained model ----------------------------------------
         print(f'---------- Load pretrained model: (alpha, eps) = ({alpha}, {bandwidth}) ----------')
@@ -298,7 +304,8 @@ if __name__ == '__main__':
 
         if 'fns' in model_name:
             manifold = attn_setup['manifold']
-            sphere_radius = config['sphere_radius']
+            if 'sphere_radius' in config.keys():
+                sphere_radius = config['sphere_radius']
             mask_val = config['mask_val']
         else:
             manifold = None
@@ -311,21 +318,26 @@ if __name__ == '__main__':
             if 'checkpoint-' in subdir:
                 checkpoints.append(njoin(model_dir,subdir))
                 checkpoint_steps.append(int(subdir.split('-')[-1]))
+        # load final checkpoint
+        checkpoint_steps = sorted(checkpoint_steps)
         checkpoint = torch.load(njoin(model_dir, f'checkpoint-{checkpoint_steps[-1]}', 'pytorch_model.bin'), map_location=dev)
         model.load_state_dict(checkpoint)
         model.eval() 
      
         ###### 1. Compute geodesic distances and attention-score ######
 
-        pairwise_overlaps = np.empty([2, num_hidden_layers, N_batch, max_seq_len])  # for attn score and weights     
+        #pairwise_overlaps = np.empty([2, num_hidden_layers, N_batch, max_seq_len])  # for attn score and weights     
+        pairwise_overlaps = np.empty([2, num_hidden_layers, N_batch, max(max_seq_len, train_dataset['input_ids'].shape[1])])
         pairwise_overlaps[:] = np.nan        
         for b_ii, bidx in tqdm(enumerate(bidxs)):         
 
             ###### 2. Extract single data-point only ######
             X = train_dataset['input_ids'][bidx * batch_size : (bidx+1) * batch_size]  # batch_size must be one if mask is set to None
             Y = train_dataset['label'][bidx * batch_size : (bidx+1) * batch_size]
-            bool_mask = train_dataset['attention_mask'][bidx * batch_size : (bidx+1) * batch_size]        
-            if batch_size == 1:  # remove padding, only keep the seq from sos to eos        
+            bool_mask = train_dataset['attention_mask'][bidx * batch_size : (bidx+1) * batch_size]     
+            attention_mask = bool_mask   
+            #if batch_size == 1:  # remove padding, only keep the seq from sos to eos        
+            if not args.use_mask:
                 X_len = bool_mask.sum().item()
                 X = X[:,:X_len]  
                 attention_mask = None
@@ -389,7 +401,8 @@ if __name__ == '__main__':
                 if alpha < 2:
                     # g_dist = Dist / head_dim  # (H,B,N,N)
                     if manifold == 'rd':
-                        g_dist = Dist * (2**(1/head_dim) - 1) / head_dim    
+                        #g_dist = Dist * (2**(1/head_dim) - 1) / head_dim    
+                        g_dist = Dist / head_dim**0.5
                     elif manifold == 'sphere':
                         g_dist = Dist
                     attn_score = (1 + g_dist/bandwidth**0.5)**(-d_intrinsic-alpha)
@@ -399,14 +412,16 @@ if __name__ == '__main__':
                     elif manifold == 'sphere':
                         g_dist = Dist                
                     attn_score = torch.exp(-(g_dist/bandwidth**0.5)**(alpha/(alpha-1)))
-
+main
                 #attn_score = attn_score.masked_fill(attention_mask_expanded==0, -1e9)
                 #assert (attn_score==attn_score.transpose(2,3)).sum() == attn_score.numel()
 
+                # ----- compute attn score decay w.r.t. token steps -----
                 for token_step in range(1, attn_score[0,0].shape[0] - 1):
                     selected_entries = torch.diagonal_scatter(torch.zeros(attn_score[0,0].shape), torch.ones(attn_score[0,0].shape[0] - token_step), token_step)
                     selected_entries += torch.diagonal_scatter(torch.zeros(attn_score[0,0].shape), torch.ones(attn_score[0,0].shape[0] - token_step), -token_step)
                     pairwise_overlaps[0, hidx, b_ii, token_step] = (attn_score[0,0] * selected_entries).mean()
+                # -------------------------------------------------------
 
                 ###### 3. Extended analysis on removing non-uniform sampling (MC equiv to attn-score) ######
 
@@ -450,7 +465,7 @@ if __name__ == '__main__':
                 alpidx = alphas.index(alpha)
                 row = alpidx + 1
 
-                """
+                # ----- compute spectrum of MC -----
                 K_hat = torch.diag(D_tilde**(-0.5)) @ K_tilde @ torch.diag(D_tilde**(-0.5))
                 K_hat_sym = 0.5*(K_hat + K_hat.T)
                 eigvals, eigvecs = torch.linalg.eigh(K_hat_sym)    
@@ -462,11 +477,12 @@ if __name__ == '__main__':
                 ii = np.argsort(eigvals)
                 eigvals = eigvals[ii]
                 eigvecs = eigvecs[:,ii]          
+                # ----------------------------------
 
                 attn_output = attn_weights @ value_vectors  
 
                 EDs[hidx, alpidx, mr_ii] += (eigvals.sum())**2/(eigvals**2).sum() / N_batch
-                """
+                
 
                 ###### 5. Plot results ######     
 
@@ -481,16 +497,17 @@ if __name__ == '__main__':
                 lstyles = ['-', '--', '--']
                 #axss[hidx][mr_ii].plot(idxs, eigvals, c=c_hyp, linestyle=lstyles[alphas.index(alpha)], label=r'$q$ kept')  # Non-uniform
 
-                # plot attn-score colormap      
+                # plot attn-score array      
                 ax_idx = mr_ii + alpidx * ncols
                 print('\n')
                 print(f'ax_idx = {ax_idx}')   
-                print(attn_weights)                
-                axss[hidx][ax_idx].imshow(attn_weights.detach().numpy(), cmap=cmap_attn, norm=cmap_norm)  # K_tilde                
+                #print(attn_weights)                
+                #axss[hidx][ax_idx].imshow(attn_weights.detach().numpy(), cmap=cmap_attn, norm=cmap_norm)  # attn_weights or K_tilde                
+                axss[hidx][ax_idx].scatter(eigvecs[:,-1], eigvecs[:,-3], c=c_hyp, s=2)
 
         #break
     
-        # attn-score and weights
+        # pairwise overlaps
         # for hidx in range(num_hidden_layers):
         #     for ii in range(pairwise_overlaps.shape[0]):
         #         axss[hidx][mr_ii + ncols*(ii + 1)].plot(np.arange(max_seq_len), pairwise_overlaps[ii,hidx].mean(0),
@@ -500,9 +517,9 @@ if __name__ == '__main__':
     for hidx in range(num_hidden_layers):
 
         # share x, y axis for eigvecs (from second row of subfigures)
-        share_xy_list = list(axss[hidx][nrows:])
-        if len(share_xy_list) > 1:
-            share_xy_list[0].get_shared_x_axes().join(share_xy_list[0], *share_xy_list)        
+        # share_xy_list = list(axss[hidx][nrows:])
+        # if len(share_xy_list) > 1:
+        #     share_xy_list[0].get_shared_x_axes().join(share_xy_list[0], *share_xy_list)        
 
         for mr_ii in range(len(axss[hidx])):
             if mr_ii < ncols:
@@ -543,9 +560,8 @@ if __name__ == '__main__':
         SAVE_DIR = njoin(FIGS_DIR, 'pretrained_analysis')
         if not isdir(SAVE_DIR): makedirs(SAVE_DIR)
         layers, heads, hidden = config['num_hidden_layers'], config['num_attention_heads'], int(config['hidden_size'])
-        #fig_file = 'fdm-'
-        fig_file = 'attn_w-'
-        fig_file += f'{model_name}-layers={layers}-heads={heads}-hidden={hidden}-l={hidx}'
+        fig_file = 'dynamics-'
+        fig_file += f'{model_name}-ds={dataset_name}-L={layers}-H={heads}-D={hidden}-l={hidx}'
         # if isfile(njoin(SAVE_DIR, fig_file)):
         #     version = len([fname for fname in os.listdir(SAVE_DIR) if fname==fig_file])
         #     fig_file += f'-v{version}'    

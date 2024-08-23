@@ -18,7 +18,7 @@ if __name__ == '__main__':
     nstack = 1    
     
     # ----- Paths -----
-    ROOT = njoin(DROOT, 'archi-test')
+    ROOT = njoin(DROOT, 'small-model')
     job_path = njoin(ROOT, 'jobs_all', date_str)
     if not isdir(job_path): makedirs(job_path)
 
@@ -27,7 +27,7 @@ if __name__ == '__main__':
     kwargss_all = []    
 
     # 'imdb-classification' , 'lra-cifar-classification', 'pathfinder-classification', 'listops-classification'
-    DATASET_NAMES = ['listops-classification']  
+    DATASET_NAMES = ['listops-classification', 'imdb-classification']  
     for instance in instances:        
         for didx, dataset_name in enumerate(DATASET_NAMES):
         #for didx, dataset_name in enumerate(DATASET_NAMES[0:1]):
@@ -35,8 +35,8 @@ if __name__ == '__main__':
             walltime, mem = '23:59:59', '16GB'                                         
             num_proc = ngpus if ngpus > 1 else ncpus
                         
-            #for qk_share in [True, False]:
-            for qk_share in [True]:
+            for qk_share in [True, False]:
+            #for qk_share in [True]:
                 kwargss = []
 
                 for model_name in ['opfnsformer']:  # 'fnsformer'                
@@ -44,12 +44,13 @@ if __name__ == '__main__':
                     for alpha in [1.2, 2]:
                         #for bandwidth in [0.01, 0.1, 0.5, 1]:
                         #for bandwidth in [0.01, 0.1, 1]:
-                        for bandwidth in [1]:
-                            for manifold in ['rd', 'sphere']:
+                        for bandwidth in [0.01, 1]:
+                            #for manifold in ['rd', 'sphere']:
+                            for manifold in ['sphere']:
                                 kwargss.append({'model_name':model_name, 'alpha': alpha, 'a': 0,'bandwidth':bandwidth,'manifold':manifold})
 
-                # kwargss.append({'model_name':'sinkformer', 'n_it': 1})
-                # kwargss.append({'model_name':'sinkformer', 'n_it': 3})
+                # for n_it in [3]:
+                #     kwargss.append({'model_name':'sinkformer', 'n_it': n_it})
 
                 kwargss.append({'model_name':'dpformer'})
 
@@ -59,8 +60,8 @@ if __name__ == '__main__':
                                 'qk_share':             qk_share,
                                 'num_encoder_layers':   1,
                                 'num_heads':            1,                      
-                                'train_bs':             16,   
-                                'eval_bs':              16,                                                                       
+                                'train_bs':             32,   
+                                'eval_bs':              32,                                                                       
                                 'weight_decay':         0,
                                 'lr_scheduler_type':    'constant',
                                 #'lr_scheduler_type':    'cosine',

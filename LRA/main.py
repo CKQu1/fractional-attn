@@ -389,6 +389,14 @@ if __name__ == '__main__':
             total_iters = int(training_config["num_train_steps"] / 3)
         )        
 
+    elif args.lr_scheduler == 'cycliclr':
+        lr_scheduler = torch.optim.lr_scheduler.CyclicLR(
+            optimizer = optimizer,        
+            base_lr = training_config["learning_rate"]/10,
+            max_lr = training_config["learning_rate"],
+        )   
+
+
     amp_scaler = torch.cuda.amp.GradScaler() if model_config["mixed_precision"] else None
 
 

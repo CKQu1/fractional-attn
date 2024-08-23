@@ -26,7 +26,8 @@ if __name__ == '__main__':
     model_sizes = ['small']
     #model_sizes = ['large']
 
-    ROOT = njoin(DROOT, 'fix-embed-v3')
+    #ROOT = njoin(DROOT, 'new-fix-embed')
+    ROOT = njoin(DROOT, 'rt-test-v3')
     #job_path = njoin(ROOT, 'jobs_all', date_str)
     job_path = njoin(ROOT, 'jobs_all')
 
@@ -34,36 +35,38 @@ if __name__ == '__main__':
         kwargss_all = []    
         for instance in instances:
             #for didx, dataset_name in enumerate(DATASET_NAMES):   
-            for didx in [1]:
+            #for didx in [1]:
+            for didx in [0]:
 
                 dataset_name = DATASET_NAMES[didx]
                 
-                select = 1; ngpus, ncpus = 0, 1  # CPUs        
-                #select = 1; ngpus, ncpus = 1, 0  # GPUs
-
-                #mem = '20GB'       
-                mem = '12GB'  # 1L1H
-                #mem = '32GB'  # 6L8H (512 len)
+                # CPUs
+                #select = 1; ngpus, ncpus = 0, 8; mem = '24GB'  # imdb          
+                select = 1; ngpus, ncpus = 0, 16; mem = '32GB'  # rotten_tomatoes
+                # GPUs
+                #select = 1; ngpus, ncpus = 1, 0; #mem = '32GB'  # 6L8H (512 len)                                     
                                 
                 walltime = '23:59:59'                    
                 train_with_ddp = max(ncpus, ngpus) > 1
 
                 #for qk_share in [True, False]:
-                for qk_share in [False]:
+                for qk_share in [True]:
 
                     kwargss = []
-                    for alpha in [1.2, 1.6, 2]:        
+                    for alpha in [1.2, 2]:        
+                    #for alpha in [1, 1.4, 1.8]:                    
                         #for bandwidth in [0.01, 0.1, 0.5, 1]:                                    
-                        for bandwidth in [0.01]:
+                        for bandwidth in [0.1,1]:
+                        #for bandwidth in [1]:
                             kwargss.append({'model_name':'opfnsformer','alpha':alpha,'a': 0,'bandwidth':bandwidth,'manifold':'sphere'})
-                            #kwargss.append({'model_name':'opfnsformer','alpha':alpha,'a': 0,'bandwidth':bandwidth,'manifold':'rd'})
+                            kwargss.append({'model_name':'opfnsformer','alpha':alpha,'a': 0,'bandwidth':bandwidth,'manifold':'rd'})
                             #kwargss.append({'model_name':'fnsformer','alpha':alpha,'a': 0,'bandwidth':bandwidth,'manifold':'sphere'})                        
 
                             #kwargss.append({'model_name':'opfnsformer','manifold':'sphere','alpha': 1.2,'a': 0,'bandwidth':1})
 
-                    # kwargss.append({'model_name':'dpformer'})
-                    # for n_it in [3]:
-                    #     kwargss.append({'model_name':'sinkformer','n_it':n_it})
+                    kwargss.append({'model_name':'dpformer'})
+                    for n_it in [3]:
+                        kwargss.append({'model_name':'sinkformer','n_it':n_it})
                         
                     common_kwargs = {        
                         "instance":          instance,                             
@@ -74,8 +77,7 @@ if __name__ == '__main__':
                         "grad_accum_step":   2,                            
                         "train_bs":          32,
                         "eval_bs":           32,                                            
-                        "lr_scheduler_type": "constant",
-                        "lr":                1e-4,    
+                        "lr_scheduler_type": "constant",                           
                         #"gamma":             0.1,      
                         "gamma":             0,
                         "milestones":        "",                                          
@@ -89,20 +91,27 @@ if __name__ == '__main__':
                         common_kwargs["epochs"] = 15
                         common_kwargs['fix_embed'] = False
 
+                        common_kwargs["lr"] = 1e-4
+
                     elif model_size == 'small':
                         common_kwargs["n_layers"] = 1
                         common_kwargs["n_attn_heads"] = 1                             
                         common_kwargs["epochs"] = 15
-                        common_kwargs['fix_embed'] = True
+                        #common_kwargs['fix_embed'] = True
+                        common_kwargs['fix_embed'] = False
+
+                        common_kwargs["lr"] = 1e-4
 
                     # add more settings here
                     common_kwargs['max_len'] = MAX_LENS[didx]                    
 
                     # test-run
+                    # common_kwargs["train_bs"] = 4; common_kwargs["eval_bs"] = 4
                     # common_kwargs['max_steps'] = 10
                     # common_kwargs['logging_steps'] = 5
                     # common_kwargs['eval_steps'] = 5
                     # common_kwargs['save_steps'] = 5
+                    # common_kwargs["epochs"] = 1
 
                     #use_custom_optim = False if 'use_custom_optim' not in common_kwargs.keys() else common_kwargs['use_custom_optim']                                                        
                     model_root_dirname = structural_model_root(dataset_name=dataset_name, **common_kwargs)                          

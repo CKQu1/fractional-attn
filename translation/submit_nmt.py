@@ -89,10 +89,11 @@ if __name__ == '__main__':
                           
                 # {'model_name':'dpnmt'}
                 kwargss = [{'model_name':'dpnmt'},
-                           {'model_name':'rdfnsnmt','alpha':1.2,'a':0,'bandwidth':1},
-                           {'model_name':'rdopfnsnmt','alpha':1.2,'a':0,'bandwidth':1},]
+                           {'model_name':'rdfnsnmt','alpha':1.2,'a':1,'bandwidth':1},
+                           {'model_name':'rdfnsnmt','alpha':1.2,'a':0.5,'bandwidth':1},
+                           {'model_name':'rdfnsnmt','alpha':1.2,'a':0,'bandwidth':1}]
 
-                epochs = 30
+                epochs = 3
                 common_kwargs = {'num_encoder_layers':          2,
                                  'num_decoder_layers':          2,
                                  'n_attn_heads':                4,
@@ -126,7 +127,7 @@ if __name__ == '__main__':
                                                            num_decoder_layers=common_kwargs['num_decoder_layers'], 
                                                            num_heads=common_kwargs['n_attn_heads'], hidden_size=common_kwargs['hidden_size']
                                                            )       
-                model_root = njoin(DROOT, 'test-run-v7', model_root_dirname)
+                model_root = njoin(DROOT, 'test-run-v9', model_root_dirname)
 
             else:                         
                 ngpus, ncpus = 0, 1

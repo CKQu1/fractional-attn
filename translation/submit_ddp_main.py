@@ -2,7 +2,7 @@ import os
 from os.path import isfile, isdir
 from time import sleep
 from constants import *
-from mutils import njoin, get_instance
+from mutils import njoin, get_instance, structural_model_root
 from qsub_parser import command_setup_ddp, qsub, job_divider
 
 def add_common_kwargs(kwargss, common_kwargs):
@@ -70,50 +70,78 @@ torchrun --nnodes=1 --nproc_per_node=2 ddp_main.py --max_iters=5 --eval_interval
 if __name__ == '__main__':
     
     script_name = "ddp_main.py"       # script for running
-    dataset_names = ['cifar10']   # add or change datasets here
+    dataset_names = ['iwslt14']   # add or change datasets here
     
     debug_mode = False
     print(f'---------- debug_mode = {debug_mode} ---------- \n')
     
-    seeds = [0]    
+    instances = [0]
+    #instances = [0,1,2]    
+    #instances = [0,1,2,3,4]
     kwargss_all = []    
-    for seed in seeds:
+    for instance in instances:
         for didx, dataset_name in enumerate(dataset_names):
             if not debug_mode:
-                select = 1; ngpus, ncpus = 0, 1            
-                walltime, mem = '23:59:59', '6GB'                             
+                select = 1; ngpus, ncpus = 0, 12            
+                walltime, mem = '23:59:59', '8GB'    
+                num_proc = ngpus if ngpus > 1 else ncpus                                                                       
 
-                kwargss = [{'model_name':'fnsvit', 'beta': 1.5}, {'model_name':'fnsvit', 'beta': 2}, 
-                           {'model_name':'dpvit'}]                                        
-                common_kwargs = {'n_layers':          3,
-                                 'n_attn_heads':      2,    
-                                 'max_iters':         25000,
-                                 'eval_interval':     50,
-                                 'eval_iters':        50,                     
-                                 'train_bs':          8,                                                                          
-                                 'weight_decay':      0
+                kwargss = [{'model_name':'fnsnmt', 'alpha': 1.7, 'a': 0}, {'model_name':'fnsnmt', 'alpha': 2, 'a': 0}, 
+                           {'model_name':'sinknmt', 'n_it': 1}, {'model_name':'sinknmt', 'n_it': 3},                           
+                           {'model_name':'dpnmt'}] 
+
+                epochs = 20
+                common_kwargs = {'instance':                    instance,
+                                 'num_encoder_layers':          1,
+                                 'num_decoder_layers':          1,
+                                 'n_attn_heads':                2,
+                                 'hidden_size':                 128,    
+                                 'max_iters':                   200,
+                                 'eval_interval':               10,
+                                 'eval_iters':                  10,                     
+                                 'train_bs':                    16,                                                                          
+                                 'weight_decay':                0
                                  }  
 
-                model_root = njoin(DROOT, 'formers_trained')
+                if epochs is not None:       
+                    if dataset_name == 'iwslt14':             
+                        train_data_size = 2377
+                    steps_per_epoch = train_data_size // (num_proc * common_kwargs['train_bs']) + 1  
+                    common_kwargs['max_iters'] = steps_per_epoch * epochs
+                    common_kwargs['eval_interval'] = steps_per_epoch
+                    common_kwargs['log_interval'] = steps_per_epoch  # for mfu
+                    
+                if num_proc > 1:
+                    common_kwargs['grad_accum_step'] = num_proc
+
+                qk_share = False if 'qk_share' not in common_kwargs.keys() else common_kwargs['qk_share']
+                use_custom_optim = False if 'use_custom_optim' not in common_kwargs.keys() else common_kwargs['use_custom_optim']                                 
+
+                model_root_dirname = structural_model_root(qk_share=qk_share, num_encoder_layers=common_kwargs['num_encoder_layers'],
+                                                           num_decoder_layers=common_kwargs['num_decoder_layers'], 
+                                                           num_attention_heads=common_kwargs['n_attn_heads'], hidden_size=common_kwargs['hidden_size']
+                                                           )       
+                model_root = njoin(DROOT, 'formers_trained', model_root_dirname)
 
             else:                         
-                ngpus, ncpus = 0, 8
+                ngpus, ncpus = 0, 1
                 select = 1  
                 walltime, mem = '23:59:59', '8GB'                
         
-                kwargss = [{'model_name':'fnsvit', 'beta': 1.5}, {'model_name':'fnsvit', 'beta': 2}, 
-                           {'model_name':'dpvit'}]            
-                common_kwargs = {'n_layers':          2,
-                                 'n_attn_heads':      2,    
-                                 'max_iters':         1000,
-                                 'eval_interval':     200,
-                                 'eval_iters':        200,                     
-                                 'train_bs':          8,                                                                          
-                                 'weight_decay':      0
+                kwargss = [{'model_name':'sinknmt', 'n_it': 1}, {'model_name':'sinknmt', 'n_it': 3},                           
+                           {'model_name':'dpnmt'}]        
+                common_kwargs = {'instance':                    instance,
+                                 'num_encoder_layers':          1,
+                                 'num_decoder_layers':          1,
+                                 'n_attn_heads':                1,    
+                                 'max_iters':                   10,
+                                 'eval_interval':               5,
+                                 'eval_iters':                  5,                     
+                                 'train_bs':                    16,                                                                          
+                                 'weight_decay':                0
                                  }      
-
-                #model_root = njoin(DROOT, 'ddp_test_stage')                                                                                
-                model_root = njoin(DROOT, f'select={select}-ncpus={ncpus}-ngpus={ngpus}')
+                                                                            
+                model_root = njoin(DROOT, 'ddp_test_stage', f'select={select}-ncpus={ncpus}-ngpus={ngpus}')
             
             for idx in range(len(kwargss)):
                 # function automatically creates dir

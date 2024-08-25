@@ -262,8 +262,7 @@ def job_setup(script_name, kwargss, **kwargs):
             if ngpus >= 1:
                 kwargs_qsub["q"] = 'gpu'
             else:
-                #kwargs_qsub["q"] = 'yossarian'
-                pass
+                kwargs_qsub["q"] = 'defaultQ'                
 
             kwargs_qsub["conda"] = FUDAN_CONDA
         # -------------------        
@@ -327,14 +326,23 @@ def command_setup_ddp(**kwargs):
     
     if 'singularity_path' in kwargs:
         singularity_path = kwargs.get('singularity_path')
-        assert isfile(singularity_path), "singularity_path does not exist!"
+        assert isfile(singularity_path) or isdir(singularity_path), "singularity_path does not exist!"
     else:
         singularity_path = ''
 
     if len(singularity_path) > 0:
         bind_path = kwargs.get('bind_path', BPATH)
-        home_path = kwargs.get('home_path', os.getcwd())        
-        command = f"singularity exec --bind {bind_path} --home {home_path} {singularity_path}"
+        home_path = kwargs.get('home_path', os.getcwd())    
+        if ngpus > 0:
+            if 'pydl.img' not in singularity_path:
+                command = f"singularity exec --nv --bind {bind_path} --home {home_path} {singularity_path}"
+            else:
+                command = f"singularity exec --nv {singularity_path}"
+        else:
+            if 'pydl.img' not in singularity_path:
+                command = f"singularity exec --bind {bind_path} --home {home_path} {singularity_path}"
+            else:
+                command = f"singularity exec {singularity_path}"
     else:
         command = ""
 

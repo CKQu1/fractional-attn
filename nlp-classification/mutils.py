@@ -175,7 +175,10 @@ def collect_model_dirs(models_root, **kwargs):
                     f = open(njoin(fpath,'attn_setup.json'))
                     attn_setup = json.load(f)
                     f.close()  
-                    train_setting = pd.read_csv(njoin(fpath, 'train_setting.csv'))
+                    if isfile(njoin(fpath, 'train_setting.csv')):
+                        train_setting = pd.read_csv(njoin(fpath, 'train_setting.csv'))
+                    else:
+                        continue
 
                     # attn-hyperparameters + attn-setup
                     for col in cols[:-len(metrics + cols_config + cols_train + cols_other)]:

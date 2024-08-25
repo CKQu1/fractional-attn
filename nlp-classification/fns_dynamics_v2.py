@@ -311,7 +311,9 @@ if __name__ == '__main__':
             manifold = None
 
         model_config = ModelConfig.from_json_file(njoin(model_dir, 'config.json'))
-        model = FNSFormerForSequenceClassification(model_config, **attn_setup).to(dev)
+        model = FNSFormerForSequenceClassification(model_config, **attn_setup)
+        #model = model.to(dev)
+        #quit()
         checkpoints = []
         checkpoint_steps = []
         for subdir in os.listdir(model_dir):
@@ -320,7 +322,8 @@ if __name__ == '__main__':
                 checkpoint_steps.append(int(subdir.split('-')[-1]))
         # load final checkpoint
         checkpoint_steps = sorted(checkpoint_steps)
-        checkpoint = torch.load(njoin(model_dir, f'checkpoint-{checkpoint_steps[-1]}', 'pytorch_model.bin'), map_location=dev)
+        #checkpoint = torch.load(njoin(model_dir, f'checkpoint-{checkpoint_steps[-1]}', 'pytorch_model.bin'), map_location=dev)
+        checkpoint = torch.load(njoin(model_dir, f'checkpoint-{checkpoint_steps[-1]}', 'pytorch_model.bin'))
         model.load_state_dict(checkpoint)
         model.eval() 
      
@@ -412,7 +415,7 @@ if __name__ == '__main__':
                     elif manifold == 'sphere':
                         g_dist = Dist                
                     attn_score = torch.exp(-(g_dist/bandwidth**0.5)**(alpha/(alpha-1)))
-main
+
                 #attn_score = attn_score.masked_fill(attention_mask_expanded==0, -1e9)
                 #assert (attn_score==attn_score.transpose(2,3)).sum() == attn_score.numel()
 
@@ -499,8 +502,8 @@ main
 
                 # plot attn-score array      
                 ax_idx = mr_ii + alpidx * ncols
-                print('\n')
-                print(f'ax_idx = {ax_idx}')   
+                #print('\n')
+                #print(f'ax_idx = {ax_idx}')   
                 #print(attn_weights)                
                 #axss[hidx][ax_idx].imshow(attn_weights.detach().numpy(), cmap=cmap_attn, norm=cmap_norm)  # attn_weights or K_tilde                
                 axss[hidx][ax_idx].scatter(eigvecs[:,-1], eigvecs[:,-3], c=c_hyp, s=2)

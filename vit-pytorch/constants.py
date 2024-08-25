@@ -15,7 +15,8 @@ CLUSTER = 'ARTEMIS' if 'project' in DROOT else 'PHYSICS' if 'headnode' in DROOT 
 # ----- ARTEMIS -----
 PROJECTS = ['phys_DL','PDLAI','dnn_maths','dyson','vortex_dl','frac_attn', 'ddl']
 BPATH = njoin('/project')  # path for binding to singularity container
-SPATH = njoin('/project/frac_attn/built_containers/FaContainer_v5.sif')  # singularity container path
+#SPATH = njoin('/project/frac_attn/built_containers/FaContainer_v5.sif')  # singularity container path
+SPATH = njoin('/project/frac_attn/built_containers/pydl.img')
 # -------------------
 
 # ----- PHYSICS -----

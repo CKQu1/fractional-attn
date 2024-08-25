@@ -304,11 +304,19 @@ class FasterOPDMFNSMultiHeadAttention(nn.Module):
         if not self.qk_share:        
             key = self.k_projection(x)
             key = key.view(batch_size, sequence_length, num_attention_heads, attention_head_size).transpose(1, 2)                      
-            # geodesic distance on sphere        
-            g_dist = torch.acos(torch.clamp(query @ key.transpose(-2, -1), -1+eps, 1-eps)) * sphere_radius
+            # geodesic distance on sphere      
+            # old method  
+            #g_dist = torch.acos(torch.clamp(query @ key.transpose(-2, -1), -1+eps, 1-eps)) * sphere_radius
+            # new method
+            g_dist = torch.acos_(query @ key.transpose(-2, -1)) * sphere_radius
         else:
-            # geodesic distance on sphere        
-            g_dist = torch.acos(torch.clamp(query @ query.transpose(-2, -1), -1+eps, 1-eps)) * sphere_radius
+            # geodesic distance on sphere      
+            # old method    
+            #g_dist = torch.acos(torch.clamp(query @ query.transpose(-2, -1), -1+eps, 1-eps)) * sphere_radius
+            # new method
+            dot = query @ query.transpose(-2, -1)
+            dot = dot.masked_fill_(torch.diag_embed(torch.ones(sequence_length, device=query.device))==1, 1)
+            g_dist = torch.acos_(dot) * sphere_radius            
         
         # Calculate the attention scores
         if alpha < 2:

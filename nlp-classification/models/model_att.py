@@ -1163,10 +1163,21 @@ class SPOPFNSSelfAttention(nn.Module):
             #key_vectors = F.normalize(key_vectors.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2), p=2, dim=-1)      # (B,H,N,D)  
             key_vectors = key_vectors.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2)      # (B,H,N,D)
             # directly get geodesic distance
-            g_dist = torch.acos(torch.clamp(query_vectors @ key_vectors.transpose(-2, -1), -1+eps, 1-eps)) * self.sphere_radius
+            # old method
+            #g_dist = torch.acos(torch.clamp(query_vectors @ key_vectors.transpose(-2, -1), -1+eps, 1-eps)) * self.sphere_radius
+            g_dist = torch.acos_(query_vectors @ key_vectors.transpose(-2, -1)) * self.sphere_radius
+            # new method
+            # dot = query_vectors @ key_vectors.transpose(-2, -1)
+            # dot = dot.masked_fill_(torch.diag_embed(torch.ones(seq_len, device=query_vectors.device))==1, 1)
+            # g_dist = torch.acos_(dot) * self.sphere_radius
         else:   
-            # directly get geodesic distance            
-            g_dist = torch.acos(torch.clamp(query_vectors @ query_vectors.transpose(-2, -1), -1+eps, 1-eps)) * self.sphere_radius                        
+            # directly get geodesic distance   
+            # old method         
+            #g_dist = torch.acos(torch.clamp(query_vectors @ query_vectors.transpose(-2, -1), -1+eps, 1-eps)) * self.sphere_radius                        
+            # new method
+            dot = query_vectors @ query_vectors.transpose(-2, -1)
+            dot = dot.masked_fill_(torch.diag_embed(torch.ones(seq_len, device=query_vectors.device))==1, 1)
+            g_dist = torch.acos_(dot) * self.sphere_radius
 
         if attention_mask is not None:
             # bool_mask = (attention_mask>=0).long()

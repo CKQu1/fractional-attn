@@ -37,7 +37,7 @@ PROMPT input:
 """
 
 # Ablation study on alphas
-def plot_fns_ensembles(models_roots, fns_type='spopfns'+MODEL_SUFFIX, metrics='eval_accuracy',
+def fns_ensembles(models_roots, fns_type='spopfns'+MODEL_SUFFIX, metrics='eval_accuracy',
                        cbar_separate=True, display=False):
     global df, df_setting, df_filtered, fig_file, axs
     global model_dirs, subpath, dirnames, model_root_dirs

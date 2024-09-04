@@ -238,7 +238,7 @@ class FasterDMFNSMultiHeadAttention(nn.Module):
             return (attention_output, attention_probs)
 
 
-class DMFNSBlock(nn.Module):
+class SPFNSBlock(nn.Module):
     """
     A single transformer block.
     """
@@ -289,7 +289,7 @@ class DMFNSBlock(nn.Module):
             return (x, attention_probs)              
 
 
-class DMFNSEncoder(nn.Module):
+class SPFNSEncoder(nn.Module):
     """
     The transformer encoder module.
     """
@@ -299,7 +299,7 @@ class DMFNSEncoder(nn.Module):
         # Create a list of transformer blocks
         self.blocks = nn.ModuleList([])
         for _ in range(config["num_hidden_layers"]):
-            block = DMFNSBlock(config)
+            block = SPFNSBlock(config)
             self.blocks.append(block)
 
     def forward(self, x, output_attentions=False):
@@ -330,7 +330,7 @@ class SPFNSViTForClassfication(nn.Module):
         # Create the embedding module
         self.embedding = Embeddings(config)
         # Create the transformer encoder module
-        self.encoder = DMFNSEncoder(config)
+        self.encoder = SPFNSEncoder(config)
         # Create a linear layer to project the encoder's output to the number of classes
         self.classifier = nn.Linear(self.hidden_size, self.num_classes)
         # Initialize the weights

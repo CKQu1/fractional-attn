@@ -285,8 +285,8 @@ if __name__ == '__main__':
             seq_lens = train_dataset['attention_mask'].sum(-1)
             max_seq_len = seq_lens.max()
 
-            #idxs_max = torch.argsort(seq_lens, descending=True)  # long to short sequences
-            idxs_max = torch.argsort(seq_lens, descending=False)  # short to long sequences            
+            idxs_max = torch.argsort(seq_lens, descending=True)  # long to short sequences
+            #idxs_max = torch.argsort(seq_lens, descending=False)  # short to long sequences            
             seq_lens = seq_lens[idxs_max]
 
             min_len = min(100, seq_lens.max().item())
@@ -305,7 +305,8 @@ if __name__ == '__main__':
         if 'fns' in model_name:
             manifold = attn_setup['manifold']
             if 'sphere_radius' in config.keys():
-                sphere_radius = config['sphere_radius']
+                #sphere_radius = config['sphere_radius']  # revert back
+                sphere_radius = 1
             mask_val = config['mask_val']
         else:
             manifold = None
@@ -332,7 +333,8 @@ if __name__ == '__main__':
         #pairwise_overlaps = np.empty([2, num_hidden_layers, N_batch, max_seq_len])  # for attn score and weights     
         pairwise_overlaps = np.empty([2, num_hidden_layers, N_batch, max(max_seq_len, train_dataset['input_ids'].shape[1])])
         pairwise_overlaps[:] = np.nan        
-        for b_ii, bidx in tqdm(enumerate(bidxs)):         
+        #for b_ii, bidx in tqdm(enumerate(bidxs)):         
+        for b_ii, bidx in enumerate(bidxs):
 
             ###### 2. Extract single data-point only ######
             X = train_dataset['input_ids'][bidx * batch_size : (bidx+1) * batch_size]  # batch_size must be one if mask is set to None
@@ -382,14 +384,22 @@ if __name__ == '__main__':
                     if manifold == 'rd':
                         Dist = torch.cdist(query_vectors, key_vectors, p=2)
                     elif manifold == 'sphere':
-                        eps = 1e-7  # for limiting the divergence from acos                                                
-                        Dist = torch.acos(torch.clamp(query_vectors @ key_vectors.transpose(-2, -1), -1+eps, 1-eps)) * sphere_radius               
+                        eps = 1e-7  # for limiting the divergence from acos    
+                        # old method                                            
+                        #Dist = torch.acos(torch.clamp(query_vectors @ key_vectors.transpose(-2, -1), -1+eps, 1-eps)) * sphere_radius               
+                        # new method
+                        Dist = torch.acos(query_vectors @ key_vectors.transpose(-2, -1)) * sphere_radius
                 else:
                     if manifold == 'rd':
                         Dist = torch.cdist(query_vectors, query_vectors, p=2)     
                     elif manifold == 'sphere':
                         eps = 1e-7  # for limiting the divergence from acos                        
-                        Dist = torch.acos(torch.clamp(query_vectors @ query_vectors.transpose(-2, -1), -1+eps, 1-eps)) * sphere_radius                                                                 
+                        # old method
+                        #Dist = torch.acos(torch.clamp(query_vectors @ query_vectors.transpose(-2, -1), -1+eps, 1-eps)) * sphere_radius                                                                 
+                        # new method
+                        dot = query_vectors @ query_vectors.transpose(-2, -1)
+                        dot = dot.masked_fill_(torch.diag_embed(torch.ones(seq_len, device=query_vectors.device))==1, 1)
+                        Dist = torch.acos_(dot) * sphere_radius
 
                 if attention_mask is not None:
                     # type 1: key_pad_mask
@@ -506,7 +516,9 @@ if __name__ == '__main__':
                 #print(f'ax_idx = {ax_idx}')   
                 #print(attn_weights)                
                 #axss[hidx][ax_idx].imshow(attn_weights.detach().numpy(), cmap=cmap_attn, norm=cmap_norm)  # attn_weights or K_tilde                
-                axss[hidx][ax_idx].scatter(eigvecs[:,-1], eigvecs[:,-3], c=c_hyp, s=2)
+                axss[hidx][ax_idx].scatter(eigvecs[:,-1], eigvecs[:,-2], c=c_hyp, s=2)
+
+                quit()
 
         #break
     

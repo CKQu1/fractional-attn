@@ -35,7 +35,7 @@ OTHER_COLORS_DICT = {'sink'+MODEL_SUFFIX: OTHER_COLORS[0], 'dp'+MODEL_SUFFIX: OT
 
 
 # Ablation study on alphas
-def plot_fns_ensembles(models_roots, fns_type='spopfnsvit', metrics='val_acc',
+def fns_ensembles(models_roots, fns_type='spopfnsvit', metrics='val_acc',
                        is_single=False, cbar_separate=True, display=False):
     global df, df_setting, df_filtered, fig_file, axs
     global model_dirs, subpath, dirnames, model_root_dirs
@@ -49,6 +49,7 @@ def plot_fns_ensembles(models_roots, fns_type='spopfnsvit', metrics='val_acc',
 
     metrics = str2ls(metrics)    
     is_single = str2bool(is_single)
+    cbar_separate = str2bool(cbar_separate)
     display = str2bool(display)    
     assert len(metrics) == 1
 
@@ -76,7 +77,8 @@ def plot_fns_ensembles(models_roots, fns_type='spopfnsvit', metrics='val_acc',
         nrows = len(model_root_dirs)    
         ncols = len(epss)
 
-    figsize = (3*ncols,3*nrows)
+    ratio = 3 / 2 * ncols
+    figsize = (ratio*ncols,ratio*nrows)
     fig, axs = plt.subplots(nrows,ncols,figsize=figsize,sharex=True,sharey=True)
     
     if nrows == 1:
@@ -161,6 +163,7 @@ def plot_fns_ensembles(models_roots, fns_type='spopfnsvit', metrics='val_acc',
                     va='bottom', fontfamily='sans-serif')  # fontsize='medium',              
 
             if eps == 1:
+            #if col_idx == 0:
 
             # -------------------- SINK --------------------                
                 model_type = 'sink' + suffix
@@ -259,7 +262,8 @@ def plot_fns_ensembles(models_roots, fns_type='spopfnsvit', metrics='val_acc',
         plt.show()
     else:
         if not isdir(SAVE_DIR): makedirs(SAVE_DIR)
-        fig_file = f'layers={num_hidden_layers}-heads={num_attention_heads}-hidden={hidden_size}-'            
+        fig_file = models_root.split('/')[1] + '-'
+        fig_file += f'L={num_hidden_layers}-H={num_attention_heads}-D={hidden_size}-'            
         fig_file += '-'.join(model_types_plotted)+'_' + f'ds={dataset_name_short}'
         # if isfile(njoin(SAVE_DIR, fig_file)):
         #     version = len([fname for fname in os.listdir(SAVE_DIR) if fname==fig_file])
@@ -503,7 +507,8 @@ def fns_fix_eps(models_roots, fns_type='spopfns'+MODEL_SUFFIX, metrics='val_acc'
         plt.show()
     else:
         if not isdir(SAVE_DIR): makedirs(SAVE_DIR)
-        fig_file = f'fns_fix_eps-layers={num_hidden_layers}-heads={num_attention_heads}-hidden={hidden_size}-'            
+        fig_file = models_root.split('/')[1] + '-'
+        fig_file += f'fns_fix_eps-L={num_hidden_layers}-H={num_attention_heads}-D={hidden_size}-'            
         fig_file += f'ds={dataset_name_short}'
         # if isfile(njoin(SAVE_DIR, fig_file)):
         #     version = len([fname for fname in os.listdir(SAVE_DIR) if fname==fig_file])

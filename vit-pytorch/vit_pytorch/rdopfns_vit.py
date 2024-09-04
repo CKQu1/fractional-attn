@@ -233,7 +233,7 @@ class FasterOPDMFNSMultiHeadAttention(nn.Module):
             return (attention_output, attention_probs)
 
 
-class OPDMFNSBlock(nn.Module):
+class RDOPFNSBlock(nn.Module):
     """
     A single transformer block.
     """
@@ -284,7 +284,7 @@ class OPDMFNSBlock(nn.Module):
             return (x, attention_probs)              
 
 
-class OPDMFNSEncoder(nn.Module):
+class RDOPFNSEncoder(nn.Module):
     """
     The transformer encoder module.
     """
@@ -294,7 +294,7 @@ class OPDMFNSEncoder(nn.Module):
         # Create a list of transformer blocks
         self.blocks = nn.ModuleList([])
         for _ in range(config["num_hidden_layers"]):
-            block = OPDMFNSBlock(config)
+            block = RDOPFNSBlock(config)
             self.blocks.append(block)
 
     def forward(self, x, output_attentions=False):
@@ -325,7 +325,7 @@ class RDOPFNSViTForClassfication(nn.Module):
         # Create the embedding module
         self.embedding = Embeddings(config)
         # Create the transformer encoder module
-        self.encoder = OPDMFNSEncoder(config)
+        self.encoder = RDOPFNSEncoder(config)
         # Create a linear layer to project the encoder's output to the number of classes
         self.classifier = nn.Linear(self.hidden_size, self.num_classes)
         # Initialize the weights

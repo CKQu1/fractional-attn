@@ -60,7 +60,9 @@ for idx in range(all_xyzs.shape[0]):
     all_radians[idx] = np.vstack([theta, phi]).T
 
 nrows, ncols = 2, 4
-figsize = (3*ncols,3*nrows)
+#figsize = (3*ncols,3*nrows)
+l_ratio = 2.5
+figsize = (l_ratio*ncols,l_ratio*nrows)
 fig, axs = plt.subplots(nrows,ncols,figsize=figsize,
                         sharex=False,sharey=False)        
 axs = np.expand_dims(axs, axis=0) if axs.ndim == 1 else axs   
@@ -228,10 +230,9 @@ for bidx, ds_ii in enumerate(ds_iis):
             eigvals_, eigvecs_ = np.linalg.eigh(K_hat_sym_)
             eigvecs_ = np.diag(D_tilde_**(-0.5)) @ eigvecs_
 
-            # keep initial sampling density
+            ##### keep initial sampling density #####
 
-
-# ----- (e -- f) -----
+            # ----- (e -- f) -----
 
             # eigvals
             eidx = np.argsort(eigvals_)[::-1]
@@ -264,6 +265,8 @@ for bidx, ds_ii in enumerate(ds_iis):
             eidx = np.argsort(eigvals)[::-1]
             eigvals = eigvals[eidx]; eigvecs = eigvecs[:,eidx]
 
+            # ----- (g -- h) -----
+
             # ---------- Eigvecs ----------
             if dist_type == 'Non-uniform':
                 #eidx1, eidx2 = large_sample_size-1, large_sample_size-2
@@ -274,6 +277,8 @@ for bidx, ds_ii in enumerate(ds_iis):
                 ax.scatter(eigvecs[:,eidx1], eigvecs[:,eidx2], c=c_alpha, s=1)
                 #ax.scatter(all_radians[ds_ii][:,0], eigvecs[:,eidx1-1], c=c_alpha, s=1)
 
+                ax.ticklabel_format(axis='both', style='sci', scilimits=(0,0))
+
 # ----- plot settings -----
 
 axs[1,1].legend(frameon=False)
@@ -282,6 +287,8 @@ for bidx, ds_ii in enumerate(ds_iis):
     #axs[1,bidx+2].set_title(dist_types[ds_ii])
 
 ii = 0
+#label_size = 'medium'
+label_size = 15
 for row in range(nrows):
     for col in range(ncols):  
         ax = axs[row,col]
@@ -289,14 +296,16 @@ for row in range(nrows):
             ax.text2D(
                 0.0, 1.0, f'({ascii_lowercase[ii]})', transform=(
                     ax.transAxes + ScaledTranslation(-20/72, +7/72, fig.dpi_scale_trans)),
-                fontsize='medium', va='bottom', fontfamily='sans-serif')    
+                fontsize=label_size, va='bottom', fontfamily='sans-serif')    
         else:
             ax.text(
                 0.0, 1.0, f'({ascii_lowercase[ii]})', transform=(
                     ax.transAxes + ScaledTranslation(-20/72, +7/72, fig.dpi_scale_trans)),
-                fontsize='medium', va='bottom', fontfamily='sans-serif')       
+                fontsize=label_size, va='bottom', fontfamily='sans-serif')       
 
         ii += 1
+
+plt.tight_layout()
 
 FIGS_DIR = njoin(FIGS_DIR, 'schematic')
 if not isdir(FIGS_DIR): makedirs(FIGS_DIR)

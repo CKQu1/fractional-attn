@@ -33,7 +33,9 @@ class ModelEmbeddings(nn.Module):
         super().__init__()
         self.word_embeddings = nn.Embedding(config.vocab_size, config.hidden_size, padding_idx=config.pad_token_id)
         self.position_embeddings = nn.Embedding(config.max_position_embeddings, config.hidden_size)
-        self.token_type_embeddings = nn.Embedding(config.type_vocab_size, config.hidden_size)
+        self.type_vocab_size = config.type_vocab_size
+        if config.type_vocab_size is not None:
+            self.token_type_embeddings = nn.Embedding(config.type_vocab_size, config.hidden_size)
 
         # self.LayerNorm is not snake-cased to stick with TensorFlow model variable name and be able to load
         # any TensorFlow checkpoint file
@@ -66,15 +68,18 @@ class ModelEmbeddings(nn.Module):
         if inputs_embeds is None:
             inputs_embeds = self.word_embeddings(input_ids)
         position_embeddings = self.position_embeddings(position_ids)
-        token_type_embeddings = self.token_type_embeddings(token_type_ids)
+        if self.type_vocab_size is not None:
+            token_type_embeddings = self.token_type_embeddings(token_type_ids)
 
-        ##### \begin{debug} #####
-        # print(f'inputs_embeds: {inputs_embeds.shape}')
-        # print(f'position_embeddings: {position_embeddings.shape}')
-        # print(f'token_type_embeddings: {token_type_embeddings.shape}')
-        ##### \end{debug} #####
+            ##### \begin{debug} #####
+            # print(f'inputs_embeds: {inputs_embeds.shape}')
+            # print(f'position_embeddings: {position_embeddings.shape}')
+            # print(f'token_type_embeddings: {token_type_embeddings.shape}')
+            ##### \end{debug} #####
 
-        embeddings = inputs_embeds + position_embeddings + token_type_embeddings
+            embeddings = inputs_embeds + position_embeddings + token_type_embeddings
+        else:
+            embeddings = inputs_embeds + position_embeddings
         embeddings = self.LayerNorm(embeddings)
         embeddings = self.dropout(embeddings)
         return embeddings

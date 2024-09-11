@@ -76,8 +76,10 @@ if __name__ == '__main__':
     # parser.add_argument('--train_with_ddp', default=False, type=bool, help='to use DDP or not')
     parser.add_argument('--models_root', default='', help='Pretrained models root')
     parser.add_argument('--fns_type', default='spopfns'+MODEL_SUFFIX)
-    parser.add_argument('--N_batch', default=25, type=int)
+    parser.add_argument('--N_batch', default=1, type=int)
     parser.add_argument('--use_mask', type=str2bool, nargs='?', const=True, default=False)
+
+    parser.add_argument('--is_3d', type=str2bool, nargs='?', const=True, default=False)
     parser.add_argument('--wandb_log', default=False, type=bool)
 
     args = parser.parse_args()    
@@ -116,14 +118,22 @@ if __name__ == '__main__':
     DCT_ALL = collect_model_dirs(models_root, suffix=MODEL_SUFFIX)
     model_types = list(DCT_ALL.keys())
 
-    SELECTED_ALPHAS = [1.2,1.6,2.0]
+    #SELECTED_ALPHAS = [1.2,1.6,2.0]
+    SELECTED_ALPHAS = None
+    EXCLUDED_EPSS = 0.5
     for model_type in model_types:
-        if args.fns_type in model_type:
+        if args.fns_type in model_type:            
             df_model = DCT_ALL[model_type].dropna(subset='alpha')
-            # ----- filter alphas -----
-            df_model = df_model[df_model['alpha'].isin(SELECTED_ALPHAS)]
-            # ------------------------
-            df_model.reset_index(drop=True, inplace=True)
+            if SELECTED_ALPHAS is not None:
+                # ----- filter alphas -----
+                df_model = df_model[df_model['alpha'].isin(SELECTED_ALPHAS)]
+                # ------------------------
+                df_model.reset_index(drop=True, inplace=True)
+            if EXCLUDED_EPSS is not None:
+                # ----- filter alphas -----
+                df_model = df_model[df_model['bandwidth'] != EXCLUDED_EPSS]
+                # ------------------------
+                df_model.reset_index(drop=True, inplace=True)
             break
 
     # ----- general settings -----
@@ -134,6 +144,10 @@ if __name__ == '__main__':
     #alphas = sorted(df_model.loc[:,'alpha'].unique())[::-1]  # large to small
     alphas = sorted(df_model.loc[:,'alpha'].unique())  # small to large
     epss = sorted(df_model.loc[:,'bandwidth'].unique())  
+    if 0.5 in epss:
+        epss.remove(0.5)
+
+
 
     model_dirs = []
     for ii in range(df_model.shape[0]):
@@ -160,9 +174,13 @@ if __name__ == '__main__':
 
     figs, axss = [], []
     for _ in range(num_hidden_layers):
-        fig, axs = plt.subplots(nrows,ncols,figsize=figsize,
-                                #sharex=False,sharey=False)
-                                sharex=True,sharey=True)          
+        if args.is_3d:
+            fig, axs = plt.subplots(nrows,ncols,figsize=figsize,
+                                    subplot_kw=dict(projection='3d'),
+                                    sharex=False,sharey=False)   
+        else:
+            fig, axs = plt.subplots(nrows,ncols,figsize=figsize,
+                                    sharex=False,sharey=False)          
         if nrows == 1:
             if ncols > 1:
                 axs = np.expand_dims(axs, axis=0)
@@ -222,14 +240,21 @@ if __name__ == '__main__':
                                             merges_file    = f"{repo_dir}/roberta-tokenizer/merges.txt",
                                             max_length     = max_length)
             else:
-                # Load pretrained BERT model and tokenizer
-                from transformers import BertModel, BertTokenizer
-                
-                pretrained_model_name = 'bert-base-uncased'
-                tokenizer = BertTokenizer.from_pretrained(pretrained_model_name)
-                #pretrained_model = BertModel.from_pretrained(pretrained_model_name)  
+                # ----- Load pretrained BERT model and tokenizer -----
+                # from transformers import BertModel, BertTokenizer                
+                # pretrained_model_name = 'bert-base-uncased'
+                # tokenizer = BertTokenizer.from_pretrained(pretrained_model_name)                
+                # #pretrained_model = BertModel.from_pretrained(pretrained_model_name)                  
+                # max_length = tokenizer.model_max_length - 1
 
-                max_length = tokenizer.model_max_length - 1
+                # ----- Distill Bert -----
+                from transformers import DistilBertConfig, DistilBertModel, AutoTokenizer
+                pretrained_model_name = 'distilbert-base-uncased'
+                distilbertconfig = DistilBertConfig(dim=config['hidden_size'], n_heads=config['num_attention_heads'])
+                #pretrained_model = DistilBertModel(distilbertconfig)
+                tokenizer = AutoTokenizer.from_pretrained('distilbert/distilbert-base-uncased')
+                #max_length = config['max_position_embeddings']
+                max_length = tokenizer.model_max_length - 2
 
             if dataset_name in ['imdb', 'emotion', 'rotten_tomatoes']:
                 def preprocess_function(examples):
@@ -496,7 +521,6 @@ if __name__ == '__main__':
 
                 EDs[hidx, alpidx, mr_ii] += (eigvals.sum())**2/(eigvals**2).sum() / N_batch
                 
-
                 ###### 5. Plot results ######     
 
                 c_hyp = HYP_CMAP(HYP_CNORM(alpha))  # hyperparameter color
@@ -516,9 +540,13 @@ if __name__ == '__main__':
                 #print(f'ax_idx = {ax_idx}')   
                 #print(attn_weights)                
                 #axss[hidx][ax_idx].imshow(attn_weights.detach().numpy(), cmap=cmap_attn, norm=cmap_norm)  # attn_weights or K_tilde                
-                axss[hidx][ax_idx].scatter(eigvecs[:,-1], eigvecs[:,-2], c=c_hyp, s=2)
+                if args.is_3d:
+                    axss[hidx][ax_idx].scatter(eigvecs[:,-1], eigvecs[:,-2], eigvecs[:,-3],
+                                               c=c_hyp, s=2)
+                else:
+                    axss[hidx][ax_idx].scatter(eigvecs[:,-1], eigvecs[:,-2], c=c_hyp, s=2)
 
-                quit()
+                #quit()
 
         #break
     
@@ -545,10 +573,16 @@ if __name__ == '__main__':
             # ----- plot labels -----
 
             # subplot labels
-            axss[hidx][mr_ii].text(
-                0.0, 1.0, f'({ascii_lowercase[mr_ii]})', transform=(
-                    axss[hidx][mr_ii].transAxes + ScaledTranslation(-20/72, +7/72, fig.dpi_scale_trans)),
-                va='bottom', fontfamily='sans-serif')  # fontsize='medium',   
+            if args.is_3d:
+                axss[hidx][mr_ii].text2D(
+                    0.0, 1.0, f'({ascii_lowercase[mr_ii]})', transform=(
+                        axss[hidx][mr_ii].transAxes + ScaledTranslation(-20/72, +7/72, fig.dpi_scale_trans)),
+                    va='bottom', fontfamily='sans-serif')  # fontsize='medium',                   
+            else:
+                axss[hidx][mr_ii].text(
+                    0.0, 1.0, f'({ascii_lowercase[mr_ii]})', transform=(
+                        axss[hidx][mr_ii].transAxes + ScaledTranslation(-20/72, +7/72, fig.dpi_scale_trans)),
+                    va='bottom', fontfamily='sans-serif')  # fontsize='medium',   
 
             # row labels 
             # if mr_ii % ncols == ncols - 1:
@@ -563,6 +597,11 @@ if __name__ == '__main__':
             bandwidth = epss[col]
             axss[hidx][col].set_title(rf'$\varepsilon = {{{bandwidth}}}$')   
 
+        # row labels
+        for row in range(nrows):
+            alpha = alphas[row]
+            axss[hidx][row*ncols].set_ylabel(rf'$\alpha = {{{alpha}}}$')
+
         # axss[hidx][0].set_ylabel('Eigenspectrum')
         # axss[hidx][ncols].set_ylabel('Attn scores')
         # axss[hidx][ncols*2].set_ylabel('Attn weights')
@@ -575,7 +614,8 @@ if __name__ == '__main__':
         SAVE_DIR = njoin(FIGS_DIR, 'pretrained_analysis')
         if not isdir(SAVE_DIR): makedirs(SAVE_DIR)
         layers, heads, hidden = config['num_hidden_layers'], config['num_attention_heads'], int(config['hidden_size'])
-        fig_file = 'dynamics-'
+        fig_file = args.models_root.split('/')[1] + '-'
+        fig_file += 'fsa_decomp-'
         fig_file += f'{model_name}-ds={dataset_name}-L={layers}-H={heads}-D={hidden}-l={hidx}'
         # if isfile(njoin(SAVE_DIR, fig_file)):
         #     version = len([fname for fname in os.listdir(SAVE_DIR) if fname==fig_file])

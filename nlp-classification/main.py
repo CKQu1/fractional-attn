@@ -59,6 +59,15 @@ torchrun --nnodes=1 --nproc_per_node=4 main.py --n_layers=1 --n_attn_heads=2 --m
  --model_root=.droot/debug-mode --train_with_ddp=True
 """
 
+"""
+#--model_root=/project/RDS-FSC-frac_attn-RW/fractional-attn/nlp-classification/.droot/container-test/config_qqv/imdb/ds=imdb-layers=1-heads=1-hidden=32-epochs=20-prj=qqv
+python -i main.py --model_name=opfnsformer --alpha=1.2 --a=0 --bandwidth=0.001 --manifold=sphere --dataset=imdb\
+ --model_root=.droot/debug_submit\
+ --instance=0 --seed=0 --qk_share=True --hidden_size=32 --warmup_steps=0 --grad_accum_step=2\
+ --train_bs=32 --eval_bs=32 --lr_scheduler_type=constant --weight_decay=0\
+ --train_with_ddp=False --n_layers=1 --n_attn_heads=1 --epochs=20 --fix_embed=False --lr=0.0001 --max_len=512
+"""
+
 #torch.autograd.set_detect_anomaly(True)  # delete
 if __name__ == '__main__':
 
@@ -97,6 +106,7 @@ if __name__ == '__main__':
     parser.add_argument('--n_layers', default=1, type=int)
     parser.add_argument('--n_attn_heads', default=2, type=int)
     parser.add_argument('--hidden_size', default=768, type=int)    
+    parser.add_argument('--intermediate_size', default=3072, type=int)
     parser.add_argument('--model_name', default='fnsformer', type=str, help='v3fnsformer | sinkformer | dpformer') 
     parser.add_argument('--fix_embed', type=str2bool, nargs='?', const=True, default=False) 
     parser.add_argument('--instance', default=0, type=int)
@@ -133,6 +143,7 @@ if __name__ == '__main__':
     repo_dir = os.getcwd()  # main dir 
     dev = torch.device(f"cuda:{torch.cuda.device_count()-1}"
                        if torch.cuda.is_available() else "cpu")       
+    #dev= torch.device('cpu')  # for debuggin
     device_name = "GPU" if dev.type != "cpu" else "CPU"
     ddp = torch.distributed.is_available() and args.train_with_ddp
     global_rank = None
@@ -193,13 +204,21 @@ if __name__ == '__main__':
                                         max_length     = max_length)
         else:
             # Load pretrained BERT model and tokenizer
-            from transformers import BertModel, BertTokenizer
-            
-            pretrained_model_name = 'bert-base-uncased'
-            tokenizer = BertTokenizer.from_pretrained(pretrained_model_name)
-            pretrained_model = BertModel.from_pretrained(pretrained_model_name)  
+            # from transformers import BertModel, BertTokenizer            
+            # pretrained_model_name = 'bert-base-uncased'
+            # tokenizer = BertTokenizer.from_pretrained(pretrained_model_name)
+            # pretrained_model = BertModel.from_pretrained(pretrained_model_name)  
 
-            max_length = tokenizer.model_max_length - 1
+            from transformers import DistilBertConfig, DistilBertModel, AutoTokenizer
+            pretrained_model_name = 'distilbert-base-uncased'
+            # Initializing a DistilBERT configuration
+            distilbertconfig = DistilBertConfig(dim=args.hidden_size, n_heads=args.n_attn_heads)
+            # Initializing a model (with random weights) from the configuration
+            pretrained_model = DistilBertModel(distilbertconfig)
+            tokenizer = AutoTokenizer.from_pretrained('distilbert/distilbert-base-uncased')
+
+            #max_length = tokenizer.model_max_length - 1
+            max_length = tokenizer.model_max_length - 2
 
         if args.dataset_name in ['imdb', 'emotion', 'rotten_tomatoes']:
             def preprocess_function(examples):
@@ -318,7 +337,7 @@ if __name__ == '__main__':
         data_collator = None
 
     del tokenized_dataset  # alleviate memory
-
+    
     # ---------------------------------------- 2. Model setup ---------------------------------------- 
 
     #config = ModelConfig.from_json_file(f"{repo_dir}/models/config_simple.json")
@@ -332,7 +351,7 @@ if __name__ == '__main__':
               "hidden_dropout_prob": 0.1,
               "ignore_attention_mask": False,
               "initializer_range": 0.02,
-              "intermediate_size": 3072,
+              "intermediate_size": args.intermediate_size,
               "layer_norm_eps": 1e-05,
             #  "max_position_embeddings": 4098,
               "model_type": "fnsformer",
@@ -354,11 +373,6 @@ if __name__ == '__main__':
               "attention_window": max_length
               }     
 
-    # config["bos_token_id"] = 0    
-    # config["eos_token_id"] = 2
-    # config["pad_token_id"] = 1
-    # config["sep_token_id"] = 3  
-
     if '-classification' not in args.dataset_name:
         # for ii, ele in enumerate(tokenizer.all_special_tokens):
         #     if 'pad' in ele.lower():
@@ -367,26 +381,42 @@ if __name__ == '__main__':
         #     if 'sep' in ele.lower():
         #         config["sep_token_id"] = tokenizer.all_special_ids[ii]
 
-        for ii, ele in enumerate(tokenizer.all_special_tokens):
-            special_token = ''
-            for symbol in ele:
-                if symbol.isalpha():
-                    special_token += symbol.lower()
-            config[f"{special_token}_token_id"] = tokenizer.all_special_ids[ii]
+        # for ii, ele in enumerate(tokenizer.all_special_tokens):
+        #     special_token = ''
+        #     for symbol in ele:
+        #         if symbol.isalpha():
+        #             special_token += symbol.lower()
+        #     config[f"{special_token}_token_id"] = tokenizer.all_special_ids[ii]
+
+        config["bos_token_id"] = 0    
+        config["eos_token_id"] = 2
+        config["pad_token_id"] = 1
+        config["sep_token_id"] = 3  
 
         if not args.fix_embed:
             config["type_vocab_size"] = 1
             #config["vocab_size"] = torch.concat([train_dataset['input_ids'].unique(), eval_dataset['input_ids'].unique()]).unique().shape[0]
-            config["vocab_size"] = 50265
-            #config["max_position_embeddings"] = 4098
-            config["max_position_embeddings"] = max_length
+            #config["vocab_size"] = 50265            
+            config["max_position_embeddings"] = 4098
+            #config["max_position_embeddings"] = max_length
 
+            config["vocab_size"] = tokenizer.vocab_size + 1
         else:
-            config["type_vocab_size"] =  pretrained_model.embeddings.token_type_embeddings.weight.shape[0]
-            config["vocab_size"] = tokenizer.vocab_size        
+            if 'token_type_embeddings.weights' in pretrained_model.state_dict().keys():
+                config["type_vocab_size"] = pretrained_model.embeddings.token_type_embeddings.weight.shape[0]    
+            else:
+                config["type_vocab_size"] = None
             config["max_position_embeddings"] = tokenizer.model_max_length   
+        
+            config["vocab_size"] = tokenizer.vocab_size
+            config["max_position_embeddings"] = pretrained_model.embeddings.position_embeddings.weight.shape[0]
 
     else:
+        config["bos_token_id"] = 0    
+        config["eos_token_id"] = 2
+        config["pad_token_id"] = 1
+        config["sep_token_id"] = 3  
+
         config["type_vocab_size"] = 1
         config["vocab_size"] = len(vocab.vocab)
         #config["max_position_embeddings"] = 4098
@@ -470,7 +500,9 @@ if __name__ == '__main__':
     model = FNSFormerForSequenceClassification(model_config, **attn_setup).to(dev)  
 
     if args.fix_embed:
-        model.transformer.embeddings.load_state_dict(pretrained_model.embeddings.state_dict())
+        model.transformer.embeddings.load_state_dict(pretrained_model.embeddings.state_dict(), strict=False)
+        # pretrained_embeddings = pretrained_model.embeddings.state_dict()               
+        # model.transformer.embeddings.load_state_dict(pretrained_embeddings)
         model.transformer.embeddings.requires_grad_(False)
         del pretrained_model
     
@@ -571,8 +603,8 @@ if __name__ == '__main__':
         training_args.eval_steps    = int(steps_per_train_epoch)        
         #training_args.logging_steps = int(steps_per_train_epoch/3)  # int(steps_per_train_epoch/5)
         training_args.logging_steps = int(steps_per_train_epoch)        
-        training_args.save_steps    = int(steps_per_train_epoch)
-        #training_args.save_steps    = int(steps_per_train_epoch * args.epochs)
+        #training_args.save_steps    = int(steps_per_train_epoch)
+        training_args.save_steps    = int(steps_per_train_epoch * args.epochs)
         
     trainer_kwargs = {'model': model,                      
                       'args': training_args,

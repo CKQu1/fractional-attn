@@ -241,20 +241,22 @@ if __name__ == '__main__':
                                             max_length     = max_length)
             else:
                 # ----- Load pretrained BERT model and tokenizer -----
-                # from transformers import BertModel, BertTokenizer                
-                # pretrained_model_name = 'bert-base-uncased'
-                # tokenizer = BertTokenizer.from_pretrained(pretrained_model_name)                
-                # #pretrained_model = BertModel.from_pretrained(pretrained_model_name)                  
-                # max_length = tokenizer.model_max_length - 1
+                if 'v2-fix-embed' in args.models_root:
+                    from transformers import BertModel, BertTokenizer                
+                    pretrained_model_name = 'bert-base-uncased'
+                    tokenizer = BertTokenizer.from_pretrained(pretrained_model_name)                
+                    #pretrained_model = BertModel.from_pretrained(pretrained_model_name)                  
+                    max_length = tokenizer.model_max_length - 2
 
                 # ----- Distill Bert -----
-                from transformers import DistilBertConfig, DistilBertModel, AutoTokenizer
-                pretrained_model_name = 'distilbert-base-uncased'
-                distilbertconfig = DistilBertConfig(dim=config['hidden_size'], n_heads=config['num_attention_heads'])
-                #pretrained_model = DistilBertModel(distilbertconfig)
-                tokenizer = AutoTokenizer.from_pretrained('distilbert/distilbert-base-uncased')
-                #max_length = config['max_position_embeddings']
-                max_length = tokenizer.model_max_length - 2
+                else:
+                    from transformers import DistilBertConfig, DistilBertModel, AutoTokenizer
+                    pretrained_model_name = 'distilbert-base-uncased'
+                    distilbertconfig = DistilBertConfig(dim=config['hidden_size'], n_heads=config['num_attention_heads'])
+                    #pretrained_model = DistilBertModel(distilbertconfig)
+                    tokenizer = AutoTokenizer.from_pretrained('distilbert/distilbert-base-uncased')
+                    #max_length = config['max_position_embeddings']
+                    max_length = tokenizer.model_max_length - 2
 
             if dataset_name in ['imdb', 'emotion', 'rotten_tomatoes']:
                 def preprocess_function(examples):

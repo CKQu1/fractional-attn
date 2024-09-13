@@ -20,7 +20,7 @@ plt.rc('ytick', labelsize=BIGGER_SIZE)    # fontsize of the tick labels
 plt.rc('legend', fontsize=BIGGER_SIZE)    # legend fontsize
 plt.rc('figure', titlesize=BIGGER_SIZE)  # fontsize of the figure title
 MARKERSIZE = 8
-LWIDTH = 4.5
+LWIDTH = 4
 
 alpha = 1.2
 # color scheme 1

@@ -28,9 +28,12 @@ def plot_vmf_density(fig, axs, axidxs, x, y, z, vertices, mus, kappa):
     #cmap_name = 'viridis'
     cmap_name = 'plasma'
     cmap = get_cmap(cmap_name)
-    axs[axidxs[0],axidxs[1]].remove()
-    axs[axidxs[0],axidxs[1]] = fig.add_subplot(nrows, ncols, axidxs[0] * ncols + axidxs[1] + 1, projection='3d')    
-    ax = axs[axidxs[0],axidxs[1]]   
+    if isinstance(axs,np.ndarray):
+        axs[axidxs[0],axidxs[1]].remove()
+        axs[axidxs[0],axidxs[1]] = fig.add_subplot(nrows, ncols, axidxs[0] * ncols + axidxs[1] + 1, projection='3d')    
+        ax = axs[axidxs[0],axidxs[1]]   
+    else: 
+        ax = axs[axidxs[0]][axidxs[1]]         
 
     vmf = vonmises_fisher(mus[0], kappa)
     pdf_values = vmf.pdf(vertices) * 1/mus.shape[0]

@@ -518,12 +518,12 @@ def fns_fix_eps(models_roots, fns_type='spopfns'+MODEL_SUFFIX, metrics='eval_acc
 
 # compare full-sized models
 def full_ensembles(models_roots, fns_type='spopfns'+MODEL_SUFFIX, metrics='eval_accuracy,eval_loss',
-                  cbar_separate=True, display=False):
+                  cbar_separate=False, display=False):
     global df, df_setting, df_filtered, fig_file, axs
     global model_dirs, subpath, dirnames, model_root_dirs
     global model_combo, model_combos, model_types_plotted, model_types_short
-    global alphas, epss, DCT_ALL, model_info, model_df, run_perf, dataset, df_model
-    global model_types, model_info, epochs, ensembles
+    global alphas, epss, DCT_ALL, model_info, model_df, run_perf, run_perf_all, dataset, df_model
+    global model_types, model_info, epochs, ensembles, instances
 
     BIGGER_SIZE = 10
     plt.rc('font', size=BIGGER_SIZE)          # controls default text sizes
@@ -575,6 +575,7 @@ def full_ensembles(models_roots, fns_type='spopfns'+MODEL_SUFFIX, metrics='eval_
         axs = np.expand_dims(axs, axis=1)     
         
     model_types_plotted = []
+    model_types_instances = {}
     for row_idx, models_root in enumerate(models_roots):
         DCT_ALL = collect_model_dirs(models_root)
         if DCT_ALL == {}:
@@ -603,26 +604,40 @@ def full_ensembles(models_roots, fns_type='spopfns'+MODEL_SUFFIX, metrics='eval_
                 instances = model_info['instances'].item()
                 qk_share = model_info['qk_share'].item()
                 
-                model_instance_path = njoin(model_info['model_dir'].item(), f'model={instances[0]}')
-                if isfile(njoin(model_instance_path, 'run_performance.csv')): 
-                    run_perf = pd.read_csv(njoin(model_instance_path, 'run_performance.csv'))
-                if isfile(njoin(model_instance_path, '_run_performance.csv')): 
-                    run_perf = pd.read_csv(njoin(model_instance_path, '_run_performance.csv'))            
+                run_perf_all = []
+                for instance in instances:
+                    model_instance_path = njoin(model_info['model_dir'].item(), f'model={instance}')
+                    if isfile(njoin(model_instance_path, 'run_performance.csv')): 
+                        run_perf = pd.read_csv(njoin(model_instance_path, 'run_performance.csv'))
+                    if isfile(njoin(model_instance_path, '_run_performance.csv')): 
+                        run_perf = pd.read_csv(njoin(model_instance_path, '_run_performance.csv'))            
 
-                epochs = run_perf.loc[:,'step'].astype(int) // int(run_perf.loc[0,'step'].astype(int))                
-                if 'acc' in metric and run_perf.loc[run_perf.index[-1],metric] <= 1:
-                    run_perf.loc[:,metric] = run_perf.loc[:,metric] * 100
+                    epochs = run_perf.loc[:,'step'].astype(int) // int(run_perf.loc[0,'step'].astype(int))                
+                    if 'acc' in metric and run_perf.loc[run_perf.index[-1],metric] <= 1:
+                        run_perf.loc[:,metric] = run_perf.loc[:,metric] * 100
+
+                    run_perf_all.append(run_perf.loc[:,metric])
+
+                run_perf_all = pd.concat(run_perf_all, axis=1)
+                metric_mean = run_perf_all.mean(1)
+                metric_std = run_perf_all.std(1)
 
                 trans = 1
                 #trans = HYP_TRANS(alpha)
                 if (row_idx,col_idx) == (0,0):
-                    im = ax.plot(epochs, run_perf.loc[:,metric], linestyle=lstyle_model, c=c_hyp, alpha=trans)
+                    im = ax.plot(epochs, metric_mean, linestyle=lstyle_model, c=c_hyp, alpha=trans)
                                         #,marker=model_markers[model_name], markersize=markersize,
-                                        #,label=model_legend)    
+                                        #,label=model_legend)   
+                                            
+                    ax.fill_between(epochs, metric_mean-metric_std, metric_mean+metric_std,
+                                    color=c_hyp, alpha=trans/2)
                 else:
-                    ax.plot(epochs, run_perf.loc[:,metric], linestyle=lstyle_model, c=c_hyp, alpha=trans)
+                    ax.plot(epochs, metric_mean, linestyle=lstyle_model, c=c_hyp, alpha=trans)
                                         #,marker=model_markers[model_name], markersize=markersize,
-                                        #,label=model_legend)                                    
+                                        #,label=model_legend)
+                                         
+                    ax.fill_between(epochs, metric_mean-metric_std, metric_mean+metric_std,
+                                    color=c_hyp, alpha=trans/2)                                                                        
 
             # if row_idx != nrows - 1:
             #     ax.set_xticklabels([])
@@ -650,30 +665,37 @@ def full_ensembles(models_roots, fns_type='spopfns'+MODEL_SUFFIX, metrics='eval_
                     instances = model_info['instances']
                     qk_share = model_info['qk_share']
                     if ensembles > 0:
-                        model_instance_path = njoin(model_info['model_dir'], f'model={instances[0]}')
-                        if isfile(njoin(model_instance_path, 'run_performance.csv')): 
-                            run_perf = pd.read_csv(njoin(model_instance_path, 'run_performance.csv'))
-                        if isfile(njoin(model_instance_path, '_run_performance.csv')): 
-                            run_perf = pd.read_csv(njoin(model_instance_path, '_run_performance.csv'))
 
-                        epochs = run_perf.loc[:,'step'].astype(int) // int(run_perf.loc[0,'step'].astype(int)) 
-                        if 'acc' in metric and run_perf.loc[run_perf.index[-1],metric] <= 1:
-                            run_perf.loc[:,metric] = run_perf.loc[:,metric] * 100
+                        run_perf_all = []
+                        for instance in instances:
+                            model_instance_path = njoin(model_info['model_dir'], f'model={instance}')
+                            if isfile(njoin(model_instance_path, 'run_performance.csv')): 
+                                run_perf = pd.read_csv(njoin(model_instance_path, 'run_performance.csv'))
+                            if isfile(njoin(model_instance_path, '_run_performance.csv')): 
+                                run_perf = pd.read_csv(njoin(model_instance_path, '_run_performance.csv'))
 
+                            epochs = run_perf.loc[:,'step'].astype(int) // int(run_perf.loc[0,'step'].astype(int)) 
+                            if 'acc' in metric and run_perf.loc[run_perf.index[-1],metric] <= 1:
+                                run_perf.loc[:,metric] = run_perf.loc[:,metric] * 100
+                        
+                            run_perf_all.append(run_perf.loc[:,metric])
+                        run_perf_all = pd.concat(run_perf_all, axis=1)
+
+                        metric_mean = run_perf_all.mean(1)
+                        metric_std = run_perf_all.std(1)
                         trans = 1
-                        ax.plot(epochs, run_perf.loc[:,metric], linestyle=lstyle_model, 
+
+                        ax.plot(epochs, metric_mean, linestyle=lstyle_model, 
                                 c=OTHER_COLORS_DICT[model_type], alpha=trans)    
+                                            
+                        ax.fill_between(epochs, metric_mean-metric_std, metric_mean+metric_std,
+                                        color=OTHER_COLORS_DICT[model_type], alpha=trans/2)    
 
                     if model_type not in model_types_plotted:
                         model_types_plotted.append(model_type)
 
             ax.grid()
             #ax.yaxis.grid(True)        
-
-    # legend
-    # for alpha in alphas:
-    #     axs[0,0].plot([], [], c=HYP_CMAP(HYP_CNORM(alpha)), linestyle='solid', 
-    #                 label=rf'$\alpha$ = {alpha}')    
 
     for model_type in model_types_plotted:   
         if 'fns' in model_type:
@@ -685,12 +707,17 @@ def full_ensembles(models_roots, fns_type='spopfns'+MODEL_SUFFIX, metrics='eval_
         axs[0,0].plot([], [], c=color, linestyle=LINESTYLE_DICT[model_type], 
                     label=NAMES_DICT[model_type])
 
+    # legend
+    for alpha in alphas[::-1]:
+        axs[0,0].plot([], [], c=HYP_CMAP(HYP_CNORM(alpha)), linestyle='solid', 
+                      label=rf'$\alpha$ = {alpha}')   
+
     #ncol_legend = 2 if len(model_types_plotted) == 3 else 1
     ncol_legend = 2
     if len(model_types_plotted) >= 2:
         #axs[0,0].legend(loc='best', ncol=ncol_legend, frameon=False)           
         axs[0,0].legend(bbox_to_anchor=(0.85, 1.35),   # bbox_to_anchor=(0.85, 1.35)
-                    loc='best', ncol=ncol_legend, frameon=False)                    
+                        loc='best', ncol=ncol_legend, frameon=False)                     
 
     # Add shared x and y labels     
     total_figs = 0      

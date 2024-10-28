@@ -36,12 +36,13 @@ OTHER_COLORS_DICT = {'sink'+MODEL_SUFFIX: OTHER_COLORS[0], 'dp'+MODEL_SUFFIX: OT
 
 # Ablation study on alphas
 def fns_ensembles(models_roots, fns_type='spopfnsvit', metrics='val_acc',
-                       is_single=False, cbar_separate=True, display=False):
+                  is_single=False, cbar_separate=True, display=False):
     global df, df_setting, df_filtered, fig_file, axs
     global model_dirs, subpath, dirnames, model_root_dirs
     global model_combo, model_combos
     global alphas, epss, DCT_ALL, model_info, model_df, run_perf, dataset, df_model
     global model_types, model_info, epochs, ensembles
+    global axs
 
     models_roots = str2ls(models_roots)
     model_root_dirs = models_roots
@@ -77,7 +78,8 @@ def fns_ensembles(models_roots, fns_type='spopfnsvit', metrics='val_acc',
         nrows = len(model_root_dirs)    
         ncols = len(epss)
 
-    ratio = 3 / 2 * ncols
+    #ratio = 3 / 2 * ncols
+    ratio = 3
     figsize = (ratio*ncols,ratio*nrows)
     fig, axs = plt.subplots(nrows,ncols,figsize=figsize,sharex=True,sharey=True)
     
@@ -122,6 +124,8 @@ def fns_ensembles(models_roots, fns_type='spopfnsvit', metrics='val_acc',
                 if isfile(njoin(model_instance_path, '_run_performance.csv')): 
                     run_perf = pd.read_csv(njoin(model_instance_path, '_run_performance.csv'))
 
+                if 'acc' in metrics[0]:
+                    run_perf.loc[:,metrics[0]] *= 100     
                 epochs = run_perf.loc[:,'iter'].astype(int) // int(model_info['steps_per_epoch'].item())
                 #epochs = run_perf.loc[:,'epoch']
 
@@ -182,6 +186,8 @@ def fns_ensembles(models_roots, fns_type='spopfnsvit', metrics='val_acc',
                         if isfile(njoin(model_instance_path, '_run_performance.csv')): 
                             run_perf = pd.read_csv(njoin(model_instance_path, '_run_performance.csv'))
 
+                        if 'acc' in metrics[0]:
+                            run_perf.loc[:,metrics[0]] *= 100     
                         epochs = run_perf.loc[:,'iter'].astype(int) // int(model_info['steps_per_epoch'])
 
                         trans = 1
@@ -208,6 +214,8 @@ def fns_ensembles(models_roots, fns_type='spopfnsvit', metrics='val_acc',
                         if isfile(njoin(model_instance_path, '_run_performance.csv')): 
                             run_perf = pd.read_csv(njoin(model_instance_path, '_run_performance.csv'))                        
 
+                        if 'acc' in metrics[0]:
+                            run_perf.loc[:,metrics[0]] *= 100     
                         epochs = run_perf.loc[:,'iter'].astype(int) // int(model_info['steps_per_epoch'])
 
                         trans = 1
@@ -246,7 +254,7 @@ def fns_ensembles(models_roots, fns_type='spopfnsvit', metrics='val_acc',
     fig.supylabel(NAMES_DICT[metrics[0]], fontsize='medium')
 
     # Adjust layout
-    #plt.tight_layout(rect=[0, 0, 0.93, 1])  # Leave space for the right label                 
+    plt.tight_layout(rect=[0, 0, 0.93, 1])  # Leave space for the right label                 
 
     dataset_name_short = ''
     if isinstance(dataset,str):

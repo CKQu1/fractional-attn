@@ -64,6 +64,36 @@ class DPAttention(nn.Module):
         outputs = (attn_output,) + self_outputs[1:]
         return outputs
 
+class OPDPAttention(nn.Module):
+    def __init__(self, config, layer_id=0, **kwargs):
+        super().__init__()
+        self.self = OPDPSelfAttention(config, layer_id)          
+        self.output = ModelSelfOutput(config)
+
+    def forward(
+        self,
+        hidden_states,
+        attention_mask=None,
+        layer_head_mask=None,
+        is_index_masked=None,
+        is_index_global_attn=None,
+        is_global_attn=None,
+        output_attentions=False,
+    ):
+
+        self_outputs = self.self(
+            hidden_states,
+            attention_mask=attention_mask,
+            layer_head_mask=layer_head_mask,
+            is_index_masked=is_index_masked,
+            is_index_global_attn=is_index_global_attn,
+            is_global_attn=is_global_attn,
+            output_attentions=output_attentions,
+        )
+        attn_output = self.output(self_outputs[0], hidden_states)
+        outputs = (attn_output,) + self_outputs[1:]
+        return outputs        
+
 # -------------------- FNS-MHA --------------------
 
 class FNSAttention(nn.Module):
@@ -401,6 +431,121 @@ class DPSelfAttention(nn.Module):
         # print('-'*10)
         #quit()
         # ---------- \end{delete} ---------- 
+                            
+        att = F.softmax(att, dim=-1)
+        att = F.dropout(att, p=self.dropout, training=self.training)  # attn dropout
+        attn_output = att @ value_vectors # (B, H, N, N) x (B, H, N, D) -> (B, H, N, D)        
+  
+        attn_output = F.dropout(attn_output, p=self.dropout, training=self.training)  # output dropout
+        #assert attn_output.size() == (batch_size, seq_len, num_heads, head_dim), "Unexpected size"
+        assert attn_output.size() == (batch_size, num_heads, seq_len, head_dim), "Unexpected size"
+        #attn_output = attn_output.transpose(0, 1).reshape(seq_len, batch_size, embed_dim).contiguous()
+        attn_output = attn_output.transpose(1, 2).contiguous().view(batch_size, seq_len, embed_dim)
+        #outputs = (attn_output.transpose(0, 1),) # Seq,B,D
+        outputs = (attn_output,)
+
+        return outputs + (global_attn_probs,) if (is_global_attn and output_attentions) else outputs
+
+
+class OPDPSelfAttention(nn.Module):
+    def __init__(self, config, layer_id):
+        super().__init__()
+        if config.hidden_size % config.num_attention_heads != 0:
+            raise ValueError(
+                f"The hidden size ({config.hidden_size}) is not a multiple of the number of attention "
+                f"heads ({config.num_attention_heads})"
+            )
+        self.num_heads = config.num_attention_heads
+        self.head_dim = int(config.hidden_size / config.num_attention_heads)
+        self.embed_dim = config.hidden_size
+        self.qk_share = config.qk_share
+        self.bias = config.qkv_bias
+
+        #self.query = orthogonal(nn.Linear(config.hidden_size, self.embed_dim, bias=self.bias))
+        if not self.qk_share:
+            self.key = orthogonal(nn.Linear(config.hidden_size, self.embed_dim, bias=self.bias))
+        self.value = nn.Linear(config.hidden_size, self.embed_dim, bias=self.bias)
+
+        self.dropout = config.attention_probs_dropout_prob
+
+        self.layer_id = layer_id
+        attention_window = config.attention_window[self.layer_id]
+        assert (
+            attention_window % 2 == 0
+        ), f"`attention_window` for layer {self.layer_id} has to be an even value. Given {attention_window}"
+        assert (
+            attention_window > 0
+        ), f"`attention_window` for layer {self.layer_id} has to be positive. Given {attention_window}"
+
+    def forward(
+        self,
+        hidden_states,
+        attention_mask=None,
+        layer_head_mask=None,
+        is_index_masked=None,
+        is_index_global_attn=None,
+        is_global_attn=None,
+        output_attentions=False,
+    ):
+        #hidden_states = hidden_states.transpose(0, 1) #(N,B,HD)
+        # attention_mask (B,N)
+        # project hidden states
+
+        qk_share = self.qk_share
+
+        # ------------------------------------------------------------------------------------------
+
+        #query_vectors = self.query(hidden_states)
+        query_vectors = hidden_states
+        value_vectors = self.value(hidden_states)   # (N,B,HD)
+
+        #seq_len, batch_size, embed_dim = hidden_states.size()        
+        batch_size, seq_len, embed_dim = hidden_states.size()
+        num_heads, head_dim = self.num_heads, self.head_dim                
+        assert (
+            embed_dim == self.embed_dim
+        ), f"hidden_states should have embed_dim = {self.embed_dim}, but has {embed_dim}"
+
+        """
+        Embed the queries into a D-sphere via normalization, set the bandwidth as the diamter of an D-sphere
+        """   
+        # (B, N, H, D) = (batch_size, seq_len, num_heads, head_dim)        
+        #query_vectors = F.normalize(query_vectors.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2), p=2, dim=-1)  # (B,N,H,D)
+        query_vectors = query_vectors.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2)                            # (B,N,H,D)        
+        value_vectors = value_vectors.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2)                            # (B,H,N,D)                 
+
+        # pairwise Euclidean distance (H,BN,D) @ (H,D,BN)
+        eps = 1e-7  # for limiting the divergence from acos
+        if not qk_share:
+            key_vectors = self.key(hidden_states)    
+            key_vectors = key_vectors.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2)      # (B,H,N,D)
+            att = query_vectors @ key_vectors.transpose(-2, -1) * (1.0 / math.sqrt(query_vectors.size(-1)))
+        else:   
+            att = query_vectors @ query_vectors.transpose(-2, -1) * (1.0 / math.sqrt(query_vectors.size(-1)))
+
+        # ------------------------------------------------------------------------------------------
+
+        # if attention_mask.dim() == 3:
+        #     attention_mask_expanded = attention_mask.view(batch_size, -1, seq_len, seq_len)
+        # else:  # attention_mask.dim() == 2
+        #     attention_mask_expanded = attention_mask.view(1, 1, seq_len, seq_len).expand(batch_size, num_heads, -1, -1)
+
+        if attention_mask is not None:
+            # # type 1: key_pad_mask
+            # bool_mask = (attention_mask>=0).long()
+            # if not qk_share:
+            #     attention_mask_expanded = bool_mask.unsqueeze(1).unsqueeze(2).expand([-1,self.num_heads,1,-1])
+
+            # # type 2: symmetrical mask
+            # else:
+            #     # bool_mask = (attention_mask>=0).long()
+            #     attention_mask_expanded = (bool_mask.unsqueeze(-1)@bool_mask.unsqueeze(1)).view(batch_size, 1, seq_len, seq_len).expand(-1, num_heads, -1, -1)    
+
+            # type 1: key_pad_mask
+            bool_mask = (attention_mask>=0).long()
+            attention_mask_expanded = bool_mask.unsqueeze(1).unsqueeze(2).expand([-1,self.num_heads,1,-1])
+
+            att = att.masked_fill(attention_mask_expanded==0, -1e9)
                             
         att = F.softmax(att, dim=-1)
         att = F.dropout(att, p=self.dropout, training=self.training)  # attn dropout

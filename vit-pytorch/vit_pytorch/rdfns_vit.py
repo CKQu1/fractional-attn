@@ -196,14 +196,17 @@ class FasterDMFNSMultiHeadAttention(nn.Module):
         d_intrinsic = attention_head_size
 
         query = query.view(batch_size, sequence_length, num_attention_heads, attention_head_size).transpose(1, 2)
-        key = key.view(batch_size, sequence_length, num_attention_heads, attention_head_size).transpose(1, 2)
+        if not self.qk_share:
+            key = key.view(batch_size, sequence_length, num_attention_heads, attention_head_size).transpose(1, 2)
+            # Euclidean dist in R^d
+            g_dist = torch.cdist(query, key, p=2) 
+        else:
+            g_dist = torch.cdist(query, query, p=2)
+
         value = value.view(batch_size, sequence_length, num_attention_heads, attention_head_size).transpose(1, 2)
         # print(f'query shape: {query.shape}')
         # print(f'key shape: {key.shape}')
-        # print(f'value shape: {value.shape}')        
-
-        # Euclidean dist in R^d
-        g_dist = torch.cdist(query, key, p=2)        
+        # print(f'value shape: {value.shape}')               
         
         # Calculate the attention scores
         if alpha < 2:
@@ -280,6 +283,7 @@ class RDFNSBlock(nn.Module):
             self.attention(x, output_attentions=output_attentions)    
         # Skip connection + layernorm
         x = self.layernorm_1(x + attention_output)                
+        #x = x + attention_output
         # Feed-forward network
         mlp_output = self.mlp(x)     
         # Skip connection + layernorm

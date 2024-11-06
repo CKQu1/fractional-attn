@@ -30,7 +30,7 @@ FUDAN_CONDA = 'frac_attn'
 
 # ----- MODELS -----
 
-MODEL_PREFIXES = ['fns', 'opfns', 'spfns', 'spopfns', 'rdfns', 'rdopfns', 'sink', 'dp', 'opdp']
+MODEL_PREFIXES = ['fns', 'opfns', 'spfns', 'spopfns', 'rdfns', 'rdopfns', 'sink', 'opsink', 'dp', 'opdp']
 MODEL_SUFFIX = 'former'
 
 MODEL_NAMES = []
@@ -68,7 +68,10 @@ LINESTYLE_DICT = {'spfns'+MODEL_SUFFIX: 'solid', 'spopfns'+MODEL_SUFFIX: 'solid'
                   'rdfns'+MODEL_SUFFIX: 'solid', 'rdopfns'+MODEL_SUFFIX: 'solid',
                   #'sink'+MODEL_SUFFIX: (0,(5,5)),
                   'sink'+MODEL_SUFFIX: (0,(5,1)),
-                  'dp'+MODEL_SUFFIX: (0,(1,1))}
+                  'opsink'+MODEL_SUFFIX: (0,(5,1)),
+                  'dp'+MODEL_SUFFIX: (0,(1,1)),
+                  'opdp'+MODEL_SUFFIX: (0,(1,1))
+                  }
 
 # NAMES_DICT = {'fnsformer': 'FNS', 
 #               'spfnsformer': rf'FNS ($\mathbb{S}^{{d-1}}$)', 'spopfnsformer': rf'OPFNS ($\mathbb{S}^{{d-1}}$)',               

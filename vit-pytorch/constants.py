@@ -30,7 +30,7 @@ FUDAN_CONDA = 'frac_attn'
 
 # ----- MODELS -----
 
-MODEL_PREFIXES = ['fns', 'opfns', 'spfns', 'spopfns', 'rdfns', 'rdopfns', 'sink', 'dp']
+MODEL_PREFIXES = ['fns', 'opfns', 'spfns', 'spopfns', 'rdfns', 'rdopfns', 'sink', 'opsink', 'dp', 'opdp']
 MODEL_SUFFIX = 'vit'
 
 MODEL_NAMES = []
@@ -58,5 +58,6 @@ def HYP_TRANS(alpha):
 
 LINESTYLE_DICT = {'spfns'+MODEL_SUFFIX: 'solid', 'spopfns'+MODEL_SUFFIX: 'solid',  # (0,(5,1))               
                   'rdfns'+MODEL_SUFFIX: 'solid', 'rdopfns'+MODEL_SUFFIX: 'solid',
-                  'sink'+MODEL_SUFFIX: (0,(5,5)),
-                  'dp'+MODEL_SUFFIX: (0,(1,1))}        
+                  'sink'+MODEL_SUFFIX: (0,(5,5)), 'opsink'+MODEL_SUFFIX: (0,(5,5)),
+                  'dp'+MODEL_SUFFIX: (0,(1,1)), 'opdp'+MODEL_SUFFIX: (0,(1,1))
+                  }        

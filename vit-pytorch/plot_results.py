@@ -538,6 +538,7 @@ def phase_ensembles(models_root, fns_manifold='rd', metrics='val_acc',
     global models_roots, qk_shares, matching_df
     global model_type, qk_share
     global DCT_cur, df_model_cur, other_matching_df
+    global model_labels
 
     assert fns_manifold in ['sphere', 'rd'], f'{fns_manifold} does not exist!'
     manifold_prefix = 'sp' if fns_manifold == 'sphere' else 'rd'
@@ -769,15 +770,25 @@ def phase_ensembles(models_root, fns_manifold='rd', metrics='val_acc',
             ax.grid()
             #ax.yaxis.grid(True)        
 
+    # labels
+    model_labels = []
     for model_type in model_types_plotted:   
+        if 'op' in model_type:
+            model_type = model_type.replace('op', '')
+
         if 'fns' in model_type:
             color = 'k'
         elif 'sink' in model_type:
             color = OTHER_COLORS[0]
         elif 'dp' in model_type:
             color = OTHER_COLORS[1]
-        axs[0,0].plot([], [], c=color, linestyle=LINESTYLE_DICT[model_type], 
-                    label=NAMES_DICT[model_type])
+            
+        model_label = NAMES_DICT[model_type]
+        if model_label not in model_labels:            
+            axs[0,0].plot([], [], c=color, linestyle=LINESTYLE_DICT[model_type], 
+                          label=model_label)
+
+            model_labels.append(model_label)
 
     # legend
     for alpha in alphas[::-1]:
@@ -788,7 +799,7 @@ def phase_ensembles(models_root, fns_manifold='rd', metrics='val_acc',
     ncol_legend = 2
     if len(model_types_plotted) >= 2:
         #axs[0,0].legend(loc='best', ncol=ncol_legend, frameon=False)           
-        axs[0,0].legend(bbox_to_anchor=(0.85, 1.35),   # bbox_to_anchor=(0.85, 1.35)
+        axs[0,0].legend(bbox_to_anchor=(0.95, 1.35),   # bbox_to_anchor=(0.85, 1.35)
                         loc='best', ncol=ncol_legend, frameon=False)                     
 
     # Add shared x and y labels     

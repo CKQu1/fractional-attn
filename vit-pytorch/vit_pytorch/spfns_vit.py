@@ -161,8 +161,13 @@ class FasterDMFNSMultiHeadAttention(nn.Module):
         self.all_head_size = self.num_attention_heads * self.attention_head_size
         # Whether or not to use bias in the query, key, and value projection layers
         self.qkv_bias = config["qkv_bias"]
+        self.qk_share = config['qk_share']
+
         # Create a linear layer to project the query, key, and value
-        self.qkv_projection = nn.Linear(self.hidden_size, self.all_head_size * 3, bias=self.qkv_bias)
+        if not self.qk_share:
+            self.qkv_projection = nn.Linear(self.hidden_size, self.all_head_size * 3, bias=self.qkv_bias)
+        else:
+            self.qv_projection = nn.Linear(self.hidden_size, self.all_head_size * 2, bias=self.qkv_bias)
         self.attn_dropout = nn.Dropout(config["attention_probs_dropout_prob"])
         # Create a linear layer to project the attention output back to the hidden size
         # In most cases, all_head_size and hidden_size are the same
@@ -177,32 +182,47 @@ class FasterDMFNSMultiHeadAttention(nn.Module):
     def forward(self, x, output_attentions=False):
         # Project the query, key, and value
         # (batch_size, sequence_length, hidden_size) -> (batch_size, sequence_length, all_head_size * 3)
-        x = F.normalize(x,p=2,dim=-1)
-        qkv = self.qkv_projection(x)
+        x = F.normalize(x,p=2,dim=-1)        
         # Split the projected query, key, and value into query, key, and value
         # (batch_size, sequence_length, all_head_size * 3) -> (batch_size, sequence_length, all_head_size)
-        query, key, value = torch.chunk(qkv, 3, dim=-1)
+        if not self.qk_share:            
+            # Split the projected query, key, and value into query, key, and value
+            # (batch_size, sequence_length, all_head_size * 3) -> (batch_size, sequence_length, all_head_size)
+            query, key, value = torch.chunk(self.qkv_projection(x), 3, dim=-1)
+        else:            
+            query, value = torch.chunk(self.qv_projection(x), 2, dim=-1)
         # Resize the query, key, and value to (batch_size, num_attention_heads, sequence_length, attention_head_size)
         batch_size, sequence_length, _ = query.size()
         num_attention_heads, attention_head_size = self.num_attention_heads, self.attention_head_size
 
         alpha, bandwidth = self.alpha, self.bandwidth
         a = self.a
-
         sphere_radius = self.sphere_radius
+        qk_share = self.qk_share
+
         d_intrinsic = attention_head_size
 
-        query = F.normalize(query.view(batch_size, sequence_length, num_attention_heads, attention_head_size).transpose(1, 2), p=2, dim=-1)
-        key = F.normalize(key.view(batch_size, sequence_length, num_attention_heads, attention_head_size).transpose(1, 2), p=2, dim=-1)
+        query = F.normalize(query.view(batch_size, sequence_length, num_attention_heads, attention_head_size).transpose(1, 2), p=2, dim=-1)        
         value = value.view(batch_size, sequence_length, num_attention_heads, attention_head_size).transpose(1, 2)
         # print(f'query shape: {query.shape}')
         # print(f'key shape: {key.shape}')
         # print(f'value shape: {value.shape}')        
 
         # geodesic distance on sphere
-        eps = 1e-7  # for limiting the divergence from acos
-        g_dist = torch.acos(torch.clamp(query @ key.transpose(-2, -1), -1+eps, 1-eps)) * sphere_radius
-        
+        # eps = 1e-7  # for limiting the divergence from acos
+        if not self.qk_share:
+            key = F.normalize(key.view(batch_size, sequence_length, num_attention_heads, attention_head_size).transpose(1, 2), p=2, dim=-1)            
+            #g_dist = torch.acos(torch.clamp(query @ key.transpose(-2, -1), -1+eps, 1-eps)) * sphere_radius
+            g_dist = torch.acos_(query @ key.transpose(-2, -1)) * sphere_radius
+        else:
+            # geodesic distance on sphere      
+            # old method    
+            #g_dist = torch.acos(torch.clamp(query @ query.transpose(-2, -1), -1+eps, 1-eps)) * sphere_radius
+            # new method
+            dot = query @ query.transpose(-2, -1)
+            dot = dot.masked_fill_(torch.diag_embed(torch.ones(sequence_length, device=query.device))==1, 1)
+            g_dist = torch.acos_(dot) * sphere_radius           
+
         # Calculate the attention scores
         if alpha < 2:
             attn_score = (1 + g_dist/bandwidth**0.5)**(-d_intrinsic-alpha)

@@ -87,7 +87,7 @@ if __name__ == '__main__':
     parser.add_argument("--wandb_project", default='image-task', type=str)    
 
     parser.add_argument('--instance', default=0, type=int)
-    # parser.add_argument('--seed', default=0, type=int)    
+    parser.add_argument('--seed', default=0, type=int)    
     # parser.add_argument('--debug', default=False, type=bool)  # for debuggin
     # parser.add_argument('--lr_scheduler_type', default='constant', type=str)
     # parser.add_argument('--do_train', default=True, type=bool)
@@ -106,8 +106,7 @@ if __name__ == '__main__':
 
     # Dataset settings
     parser.add_argument('--dataset_name', default='cifar10', type=str)
-    parser.add_argument('--cache_dir', default=njoin(DROOT, 'cache_dir'), type=str)
-    parser.add_argument('--seed', default=42, type=int)    
+    parser.add_argument('--cache_dir', default=njoin(DROOT, 'cache_dir'), type=str)  
 
     # Config settings
     parser.add_argument('--qk_share', type=str2bool, nargs='?', const=True, default=False)
@@ -266,7 +265,7 @@ if __name__ == '__main__':
     # else:
 
     # if not ddp, we are running on a single gpu, and one process
-    seed_offset = 0
+    #seed_offset = 0
     ddp_world_size = 1           
 
     # tokens_per_iter = gradient_accumulation_steps * ddp_world_size * batch_size * block_size
@@ -304,7 +303,8 @@ if __name__ == '__main__':
     #print(f'backend = {backend}')
     print('-'*25 + '\n')           
 
-    torch.manual_seed(1337 + seed_offset)
+    #torch.manual_seed(1337 + seed_offset)
+    torch.manual_seed(1337 + args.seed)
     if torch.cuda.is_available():
         torch.backends.cuda.matmul.allow_tf32 = True # allow tf32 on matmul
         torch.backends.cudnn.allow_tf32 = True # allow tf32 on cudnn

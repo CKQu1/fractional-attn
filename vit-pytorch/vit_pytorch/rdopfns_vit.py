@@ -149,10 +149,11 @@ class FasterOPDMFNSMultiHeadAttention(nn.Module):
         self.all_head_size = self.num_attention_heads * self.attention_head_size
         # Whether or not to use bias in the query, key, and value projection layers
         self.qkv_bias = config["qkv_bias"]
+        self.qk_share = config["qk_share"]
         # Create a linear layer to project the query, key, and value
         #self.qkv_projection = orthogonal(nn.Linear(self.hidden_size, self.all_head_size * 3, bias=self.qkv_bias))
-        self.q_projection = orthogonal(nn.Linear(self.hidden_size, self.all_head_size, bias=self.qkv_bias))
-        self.k_projection = orthogonal(nn.Linear(self.hidden_size, self.all_head_size, bias=self.qkv_bias))
+        if not self.qk_share:
+            self.k_projection = orthogonal(nn.Linear(self.hidden_size, self.all_head_size, bias=self.qkv_bias))
         self.v_projection = nn.Linear(self.hidden_size, self.all_head_size, bias=self.qkv_bias)           
 
         self.attn_dropout = nn.Dropout(config["attention_probs_dropout_prob"])
@@ -175,8 +176,8 @@ class FasterOPDMFNSMultiHeadAttention(nn.Module):
         # (batch_size, sequence_length, all_head_size * 3) -> (batch_size, sequence_length, all_head_size)
         query, key, value = torch.chunk(qkv, 3, dim=-1)
         """
-        query = self.q_projection(x)
-        key = self.k_projection(x)
+
+        query = x
         value = self.v_projection(x)
 
         # Resize the query, key, and value to (batch_size, num_attention_heads, sequence_length, attention_head_size)
@@ -185,18 +186,21 @@ class FasterOPDMFNSMultiHeadAttention(nn.Module):
 
         alpha, bandwidth = self.alpha, self.bandwidth
         a = self.a
-        #sphere_radius = self.sphere_radius
         d_intrinsic = attention_head_size
+        qk_share = self.qk_share
 
-        query = F.normalize(query.view(batch_size, sequence_length, num_attention_heads, attention_head_size).transpose(1, 2), p=2, dim=-1)
-        key = F.normalize(key.view(batch_size, sequence_length, num_attention_heads, attention_head_size).transpose(1, 2), p=2, dim=-1)
+        query = query.view(batch_size, sequence_length, num_attention_heads, attention_head_size).transpose(1, 2)
         value = value.view(batch_size, sequence_length, num_attention_heads, attention_head_size).transpose(1, 2)
-        # print(f'query shape: {query.shape}')
-        # print(f'key shape: {key.shape}')
-        # print(f'value shape: {value.shape}')        
 
-        # Euclidean dist in R^d
-        g_dist = torch.cdist(query, key, p=2) 
+        #eps = 1e-7  # for limiting the divergence from acos
+        if not qk_share:        
+            key = self.k_projection(x)
+            key = key.view(batch_size, sequence_length, num_attention_heads, attention_head_size).transpose(1, 2)                      
+            # geodesic distance in R^d
+            g_dist = torch.cdist(query, key, p=2)
+        else:
+            # geodesic distance oin R^d
+            g_dist = torch.cdist(query, query, p=2)        
         
         # Calculate the attention scores
         if alpha < 2:
@@ -208,7 +212,8 @@ class FasterOPDMFNSMultiHeadAttention(nn.Module):
             # K_tilde = torch.diag_embed(attn_score.sum(-1)**(-a)) @ attn_score @ torch.diag_embed(attn_score.sum(-2)**(-a))
             N_R = attn_score.sum(-1)  # row sum
             N_C = attn_score.sum(-2)  # col sum
-            K_tilde = (N_R**(-a)).unsqueeze(-1) * attn_score * (N_C**(-a)).unsqueeze(-2)            
+            K_tilde = (N_R**(-a)).unsqueeze(-1) * attn_score * (N_C**(-a)).unsqueeze(-2)
+
             attention_probs = F.normalize(K_tilde,p=1,dim=3)  # can do this as the attn weights are always positive
         else:
             attention_probs = F.normalize(attn_score,p=1,dim=3)  # can do this as the attn weights are always positive
@@ -231,6 +236,7 @@ class FasterOPDMFNSMultiHeadAttention(nn.Module):
             return (attention_output, None)
         else:
             return (attention_output, attention_probs)
+
 
 
 class RDOPFNSBlock(nn.Module):

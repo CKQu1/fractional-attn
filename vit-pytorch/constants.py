@@ -37,7 +37,14 @@ MODEL_NAMES = []
 NAMES_DICT = {}
 for MODEL_PREFIX in MODEL_PREFIXES:
     MODEL_NAMES.append(MODEL_PREFIX + MODEL_SUFFIX)
-    NAMES_DICT[MODEL_PREFIX + MODEL_SUFFIX] = MODEL_PREFIX.upper()
+
+    if 'fns' in MODEL_PREFIX.lower():
+        if 'rd' in MODEL_PREFIX.lower():
+            NAMES_DICT[MODEL_PREFIX + MODEL_SUFFIX] = r'FRAC $(\mathbb{{R}}^d)$'
+        else:                    
+            NAMES_DICT[MODEL_PREFIX + MODEL_SUFFIX] = r'FRAC $(\mathcal{{S}}^{{d-1}})$'
+    else:
+        NAMES_DICT[MODEL_PREFIX + MODEL_SUFFIX] = MODEL_PREFIX.upper()
 
 NAMES_DICT.update({'cifar10': 'CIFAR10', 'val_loss': 'Eval Loss',
                    'val_acc': 'Eval Acc.', 'train_loss': 'Train Loss', 'train_acc': 'Train Acc.'}

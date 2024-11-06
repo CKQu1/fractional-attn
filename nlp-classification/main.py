@@ -31,6 +31,17 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 warnings.simplefilter(action='ignore', category=FutureWarning)
 #warnings.filterwarnings("ignore")    
 
+# epoch
+"""
+python -i main.py --n_layers=2 --n_attn_heads=1\
+ --model_name=fnsformer --manifold=sphere --qk_share=False\
+ --alpha=1.5 --bandwidth=0.5 --a=0\
+ --lr_scheduler_type=constant --train_bs=32\
+ --max_len=512 --epochs=1\
+ --divider=1 --warmup_steps=0 --grad_accum_step=1 --dataset_name=imdb\
+ --model_root=.droot/debug-mode
+"""
+
 # quick run (single unit)
 """
 python -i main.py --n_layers=1 --n_attn_heads=2 --model_name=dpformer\
@@ -457,7 +468,8 @@ if __name__ == '__main__':
         # degree index
         config['a'] = attn_setup['a'] = args.a      
 
-    elif model_name == 'sinkformer':
+    #elif model_name == 'sinkformer':
+    elif 'sink' in model_name:
         n_it = args.n_it
         config['n_it'] = attn_setup['n_it'] = n_it
         config['bandwidth'] = attn_setup['bandwidth'] = args.bandwidth
@@ -603,8 +615,8 @@ if __name__ == '__main__':
         training_args.eval_steps    = int(steps_per_train_epoch)        
         #training_args.logging_steps = int(steps_per_train_epoch/3)  # int(steps_per_train_epoch/5)
         training_args.logging_steps = int(steps_per_train_epoch)        
-        #training_args.save_steps    = int(steps_per_train_epoch)
-        training_args.save_steps    = int(steps_per_train_epoch * args.epochs)
+        training_args.save_steps    = int(steps_per_train_epoch)
+        #training_args.save_steps    = int(steps_per_train_epoch * args.epochs)
         
     trainer_kwargs = {'model': model,                      
                       'args': training_args,

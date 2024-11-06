@@ -28,11 +28,20 @@ from torch.optim import AdamW
 
 # single-core
 """
-python -i main.py --dataset_name=pathfinder-classification --model_name=opfnsvit --manifold=sphere --alpha=1.5 --a=0 --epochs=1 --weight_decay=0 --n_layers=2 --n_attn_heads=1 --model_root=.droot/debug-mode 
+python -i main.py --train_bs=32 --dataset_name=cifar10 --model_name=opdpvit --qk_share=True\
+ --epochs=1 --weight_decay=0 --n_layers=2 --n_attn_heads=1 --model_root=.droot/debug-mode 
+
+python -i main.py --train_bs=32 --dataset_name=cifar10 --model_name=fnsvit --manifold=sphere --qk_share=True\
+ --manifold=sphere --alpha=1.5 --a=0 --epochs=1 --weight_decay=0 --n_layers=2 --n_attn_heads=1\
+ --model_root=.droot/debug-mode
 
 python -i main.py --model_name=opfnsvit --manifold=rd --alpha=1.5 --max_iters=100 --eval_interval=5\
  --lr_scheduler_type=binary --max_lr=5e-5 --max_lr=5e-6\
  --eval_iters=200 --weight_decay=0 --n_layers=1 --n_attn_heads=2 --model_root=.droot/single-core  
+
+python -i main.py --hidden_size=3 --model_name=opfnsvit --manifold=sphere --alpha=1.5 --epochs=1\
+ --lr_scheduler_type=binary --max_lr=1e-4\
+ --weight_decay=0 --n_layers=1 --n_attn_heads=1 --model_root=.droot/debug-mode --train_bs=64
 
 python -i main.py --model_name=fnsvit --manifold=sphere --alpha=1.5 --a=0\
  --epochs=2 --weight_decay=0 --n_layers=1 --n_attn_heads=1 --model_root=.droot/debug-mode
@@ -45,7 +54,7 @@ if __name__ == '__main__':
     # training settings 
     #parser.add_argument('--train_with_ddp', default=True, type=bool, help='to use DDP or not')
     parser.add_argument('--max_iters', default=10, type=int)
-    #parser.add_argument('--grad_clip', default=1.0, type=float)
+    #parser.add_argument('--sub', default=1.0, type=float)
     parser.add_argument('--grad_clip', default=0, type=float)
     parser.add_argument('--decay_lr', default=True, type=bool)
     parser.add_argument('--warmup_iters', default=0, type=int)
@@ -90,7 +99,8 @@ if __name__ == '__main__':
     parser.add_argument('--manifold', default='sphere', type=str)
     parser.add_argument('--alpha', default=1, type=float)
     parser.add_argument('--bandwidth', default=1, type=float)  
-    parser.add_argument('--a', default=1, type=float)
+    #parser.add_argument('--a', default=1, type=float)
+    parser.add_argument('--a', default=0, type=float)
     # sinkvit type
     parser.add_argument('--n_it', default=1, type=int)
 
@@ -199,7 +209,7 @@ if __name__ == '__main__':
         # degree index
         config['a'] = attn_setup['a'] = args.a      
 
-    elif model_name == 'sinkvit':
+    elif 'sinkvit' in model_name:
         config['n_it'] = attn_setup['n_it'] = args.n_it
         config['bandwidth'] = attn_setup['bandwidth'] = args.bandwidth
 
@@ -433,6 +443,9 @@ if __name__ == '__main__':
         if model_name == 'dpvit':
             from vit_pytorch.vit import ViTForClassfication
             model = ViTForClassfication(config)
+        if model_name == 'opdpvit':
+            from vit_pytorch.opvit import OPViTForClassfication
+            model = OPViTForClassfication(config)            
         # elif model_name == 'fnsvit':
         #     from vit_pytorch.fns_vit import FNSViTForClassfication
         #     model = FNSViTForClassfication(config)    
@@ -453,7 +466,10 @@ if __name__ == '__main__':
             model = RDOPFNSViTForClassfication(config)               
         elif model_name == 'sinkvit':
             from vit_pytorch.sink_vit import SINKViTForClassfication
-            model = SINKViTForClassfication(config)               
+            model = SINKViTForClassfication(config)      
+        elif model_name == 'opsinkvit':
+            from vit_pytorch.opsink_vit import OPSINKViTForClassfication
+            model = OPSINKViTForClassfication(config)                         
 
     """
     elif init_from == 'resume':

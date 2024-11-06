@@ -621,7 +621,8 @@ def phase_ensembles(models_root, fns_manifold='sphere', metrics='eval_accuracy',
             ax = axs[row_idx, col_idx]
             model_type = manifold_prefix + 'op' + 'fns' + MODEL_SUFFIX if is_orthog else manifold_prefix + 'fns' + MODEL_SUFFIX
             df_model = DCT_ALL[model_type]
-            matching_df = df_model[(df_model['ensembles']>0)&(df_model['qk_share']==qk_share)&(df_model['model_dir'].str.contains(model_type))]
+            matching_df = df_model[(df_model['ensembles']>0)&(df_model['qk_share']==qk_share)&
+                                   (df_model['model_dir'].str.contains(model_type))]
             #print(matching_df)
 
             if matching_df.shape[0] > 0: 
@@ -755,15 +756,25 @@ def phase_ensembles(models_root, fns_manifold='sphere', metrics='eval_accuracy',
             ax.grid()
             #ax.yaxis.grid(True)        
 
+    # labels
+    model_labels = []
     for model_type in model_types_plotted:   
+        if 'op' in model_type:
+            model_type = model_type.replace('op', '')
+
         if 'fns' in model_type:
             color = 'k'
         elif 'sink' in model_type:
             color = OTHER_COLORS[0]
         elif 'dp' in model_type:
             color = OTHER_COLORS[1]
-        axs[0,0].plot([], [], c=color, linestyle=LINESTYLE_DICT[model_type], 
-                    label=NAMES_DICT[model_type])
+            
+        model_label = NAMES_DICT[model_type]
+        if model_label not in model_labels:            
+            axs[0,0].plot([], [], c=color, linestyle=LINESTYLE_DICT[model_type], 
+                          label=model_label)
+
+            model_labels.append(model_label)
 
     # legend
     for alpha in alphas[::-1]:
@@ -774,7 +785,7 @@ def phase_ensembles(models_root, fns_manifold='sphere', metrics='eval_accuracy',
     ncol_legend = 2
     if len(model_types_plotted) >= 2:
         #axs[0,0].legend(loc='best', ncol=ncol_legend, frameon=False)           
-        axs[0,0].legend(bbox_to_anchor=(0.85, 1.35),   # bbox_to_anchor=(0.85, 1.35)
+        axs[0,0].legend(bbox_to_anchor=(0.95, 1.35),   # bbox_to_anchor=(0.85, 1.35)
                         loc='best', ncol=ncol_legend, frameon=False)                     
 
     # Add shared x and y labels     

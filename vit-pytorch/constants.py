@@ -46,8 +46,9 @@ for MODEL_PREFIX in MODEL_PREFIXES:
     else:
         NAMES_DICT[MODEL_PREFIX + MODEL_SUFFIX] = MODEL_PREFIX.upper()
 
-NAMES_DICT.update({'cifar10': 'CIFAR10', 'val_loss': 'Eval Loss',
-                   'val_acc': 'Eval Acc.', 'train_loss': 'Train Loss', 'train_acc': 'Train Acc.'}
+NAMES_DICT.update({'cifar10': 'CIFAR10', 
+                   'val_loss': 'Test Loss', 'val_acc': 'Test Acc.', 
+                   'train_loss': 'Train Loss', 'train_acc': 'Train Acc.'}
                    )               
 
 # color for model hyperparameters

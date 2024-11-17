@@ -300,7 +300,7 @@ class FasterOPDMFNSMultiHeadAttention(nn.Module):
         query = query.view(batch_size, sequence_length, num_attention_heads, attention_head_size).transpose(1, 2)
         value = value.view(batch_size, sequence_length, num_attention_heads, attention_head_size).transpose(1, 2)
 
-        eps = 1e-7  # for limiting the divergence from acos
+        #eps = 1e-7  # for limiting the divergence from acos
         if not self.qk_share:        
             key = self.k_projection(x)
             key = key.view(batch_size, sequence_length, num_attention_heads, attention_head_size).transpose(1, 2)                      

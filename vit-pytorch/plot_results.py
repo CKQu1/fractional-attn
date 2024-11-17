@@ -528,7 +528,377 @@ def fns_fix_eps(models_roots, fns_type='spopfns'+MODEL_SUFFIX, metrics='val_acc'
 
 
 # assumption 1 and 2 possibilities for full-sized models
-def phase_ensembles(models_root, fns_manifold='rd', metrics='val_acc',
+def phase_ensembles(models_root, fns_manifold='rd', metrics='val_acc,val_loss',
+                    cbar_separate=False, display=False):
+    global df, df_setting, df_filtered, fig_file, axs
+    global model_dirs, subpath, dirnames, model_root_dirs
+    global model_combo, model_combos, model_types_plotted, model_types_short
+    global alphas, epss, DCT_ALL, model_info, model_df, run_perf, run_perf_all, dataset, df_model
+    global model_types, model_info, epochs, ensembles, instances
+    global models_roots, qk_shares, matching_df
+    global model_type, qk_share
+    global DCT_cur, df_model_cur, other_matching_df
+    global model_labels
+
+    assert fns_manifold in ['sphere', 'rd'], f'{fns_manifold} does not exist!'
+    manifold_prefix = 'sp' if fns_manifold == 'sphere' else 'rd'
+
+    BIGGER_SIZE = 10
+    plt.rc('font', size=BIGGER_SIZE)          # controls default text sizes
+    plt.rc('axes', titlesize=BIGGER_SIZE)     # fontsize of the axes title
+    plt.rc('axes', labelsize=BIGGER_SIZE)    # fontsize of the x and y labels
+    plt.rc('xtick', labelsize=BIGGER_SIZE)    # fontsize of the tick labels
+    plt.rc('ytick', labelsize=BIGGER_SIZE)    # fontsize of the tick labels
+    plt.rc('legend', fontsize=BIGGER_SIZE-2)    # legend fontsize
+    plt.rc('figure', titlesize=BIGGER_SIZE)  # fontsize of the figure title
+
+    models_roots = []
+    subdir_l1s = [ f.path for f in os.scandir(models_root) if f.is_dir() ]
+    for subdir_l1 in subdir_l1s:
+        subdir_l2s = [ f.path for f in os.scandir(njoin(subdir_l1)) if f.is_dir() and 'config_' in f.path ]
+        for subdir_l2 in subdir_l2s:
+            subdir_l3s = [ f.path for f in os.scandir(subdir_l2) if f.is_dir() ]
+            for subdir_l3 in subdir_l3s:
+                models_roots.append(subdir_l3)
+
+
+    model_root_dirs = models_roots
+    print(model_root_dirs)    
+
+    metrics = str2ls(metrics)    
+    display = str2bool(display)    
+
+    #suffix = fns_type.split('fns')[-1]
+    suffix = MODEL_SUFFIX
+    model_types = []   
+    DCT_ALL = {} 
+    for ii, model_root_dir in enumerate(model_root_dirs):
+        DCT_cur = collect_model_dirs(model_root_dir, suffix=suffix)
+        #print(DCT_ALL)
+        model_types_cur = list(DCT_cur.keys())
+    
+        for model_type in model_types_cur:
+            df_model_cur = DCT_cur[model_type]
+            #if 'fns' in model_type:
+            if model_type not in model_types:
+                model_types.append(model_type)
+                if 'alpha' in df_model_cur.columns:
+                    DCT_ALL[model_type] = df_model_cur.dropna(subset='alpha')
+                else:
+                    DCT_ALL[model_type] = df_model_cur
+            else:                
+                if 'alpha' in df_model_cur.columns:
+                    DCT_ALL[model_type] = DCT_ALL[model_type].append(df_model_cur.dropna(subset='alpha'), ignore_index=True)
+                else:
+                    DCT_ALL[model_type] = DCT_ALL[model_type].append(df_model_cur, ignore_index=True)
+
+    df_model = DCT_ALL[ manifold_prefix + 'opfns' + MODEL_SUFFIX]
+    #df_model.reset_index(drop=True, inplace=True)
+    
+    # ----- general settings -----
+    num_attention_heads, num_hidden_layers, hidden_size = DCT_ALL[list(DCT_ALL.keys())[0]].loc[0,['num_attention_heads', 'num_hidden_layers', 'hidden_size']]
+    dataset = DCT_ALL[list(DCT_ALL.keys())[0]].loc[0,'dataset_name']
+
+    # ----- fns setting -----
+    alphas = sorted(df_model.loc[:,'alpha'].unique())[::-1]  # large to small
+    epss = sorted(df_model.loc[:,'bandwidth'].unique())    
+
+    #alpha = alphas[-1]
+    #eps = epss[0]
+    eps = epss[-1]
+
+    metric = metrics[0]
+    qk_shares = list(df_model.loc[:,'qk_share'].unique())
+    is_orthogs = [False, True]
+    #nrows = len(model_root_dirs)    
+    nrows = len(qk_shares)
+    ncols = len(is_orthogs)
+
+    figsize = (3*ncols,3*nrows)
+    fig, axs = plt.subplots(nrows,ncols,figsize=figsize,sharex=True,sharey=False)  # layout='constrained'
+    
+    if nrows == 1:
+        axs = np.expand_dims(axs, axis=0)
+        if ncols == 1:
+            axs = np.expand_dims(axs, axis=1)
+    elif nrows > 1 and ncols == 1:
+        axs = np.expand_dims(axs, axis=1)                 
+
+    lower_qt, upper_qt = 0.25, 0.75
+
+    model_types_plotted = []
+    model_types_instances = {}
+    #for row_idx, models_root in enumerate(models_roots):    
+    #for row_idx, qk_share in enumerate(qk_shares):        
+    qk_share = False
+    for row_idx, metric in enumerate(metrics):
+        for col_idx, is_orthog in enumerate(is_orthogs):
+
+            ax = axs[row_idx, col_idx]
+            model_type = manifold_prefix + 'op' + 'fns' + MODEL_SUFFIX if is_orthog else manifold_prefix + 'fns' + MODEL_SUFFIX
+            df_model = DCT_ALL[model_type]
+            matching_df = df_model[(df_model['ensembles']>0)&(df_model['qk_share']==qk_share)&
+                                   (df_model['model_dir'].str.contains('layers=2-heads=6'))&
+                                   (df_model['model_dir'].str.contains(model_type))]
+            #print(matching_df)
+
+            if matching_df.shape[0] > 0: 
+                DCT_matching = { model_type: matching_df }
+            else:
+                DCT_matching = {}
+
+            if DCT_matching == {}:
+                continue
+
+            if model_type not in model_types_plotted:
+                model_types_plotted.append(model_type)
+
+            for alpha in alphas:
+            #for alpha in alphas[-1:]:
+                model_df = DCT_matching[model_type].dropna(subset='alpha')
+                model_df.reset_index(drop=True, inplace=True)
+                lstyle_model = LINESTYLE_DICT[model_type]
+
+                # -------------------- FNS --------------------                        
+                c_hyp = HYP_CMAP(HYP_CNORM(alpha))  # hyperparameter color  
+
+                model_info = model_df[(model_df['alpha']==alpha)&(model_df['bandwidth']==eps)&
+                                      (model_df['ensembles']>0)]
+                if len(model_info.index) == 0:
+                    continue
+
+                instances = model_info['instances'].item()
+                qk_share = model_info['qk_share'].item()
+                
+                run_perf_all = []
+                for instance in instances:
+                    model_instance_path = njoin(model_info['model_dir'].item(), f'model={instance}')
+                    if isfile(njoin(model_instance_path, 'run_performance.csv')): 
+                        run_perf = pd.read_csv(njoin(model_instance_path, 'run_performance.csv'))
+                    elif isfile(njoin(model_instance_path, '_run_performance.csv')): 
+                        run_perf = pd.read_csv(njoin(model_instance_path, '_run_performance.csv'))            
+
+                    epochs = run_perf.loc[:,'iter'].astype(int) // int(model_info['steps_per_epoch'])             
+                    if 'acc' in metric and run_perf.loc[run_perf.index[-1],metric] <= 1:
+                        run_perf.loc[:,metric] = run_perf.loc[:,metric] * 100
+
+                    run_perf_all.append(run_perf.loc[:,metric])
+
+                run_perf_all = pd.concat(run_perf_all, axis=1)
+                # metric_mean = run_perf_all.mean(1)
+                # metric_std = run_perf_all.std(1)
+                metric_m = run_perf_all.quantile(0.5,1)
+                metric_l = run_perf_all.quantile(lower_qt,1)
+                metric_u = run_perf_all.quantile(upper_qt,1)
+
+                trans = 1
+                #trans = HYP_TRANS(alpha)
+                if (row_idx,col_idx) == (0,0):
+                    im = ax.plot(epochs, metric_m, linestyle=lstyle_model, c=c_hyp, alpha=trans)
+                                        #,marker=model_markers[model_name], markersize=markersize,
+                                        #,label=model_legend)   
+                                            
+                    ax.fill_between(epochs, metric_l, metric_u,
+                                    color=c_hyp, alpha=trans/2)
+                else:
+                    ax.plot(epochs, metric_m, linestyle=lstyle_model, c=c_hyp, alpha=trans)
+                                        #,marker=model_markers[model_name], markersize=markersize,
+                                        #,label=model_legend)
+                                         
+                    ax.fill_between(epochs, metric_l, metric_u,
+                                    color=c_hyp, alpha=trans/2)                                                                        
+
+            # if row_idx != nrows - 1:
+            #     ax.set_xticklabels([])
+
+            # col labels (bandwidth)
+            # if row_idx == 0:
+            #     ax.set_title(rf'$\varepsilon = {{{eps}}}$')
+            # row labels (Q = K)
+            # if col_idx == ncols - 1:
+            #     title = r'$Q \neq K$' if not qk_share else r'$Q = K$'               
+            #     ax.text(1.2, 0.5, title, transform=(
+            #                     ax.transAxes + ScaledTranslation(-20/72, +7/72, fig.dpi_scale_trans)),
+            #                     va='center', rotation='vertical')  # fontsize='medium',                          
+
+            # -------------------- SINK, DP --------------------                
+            #other_model_types = ['sink' + suffix, 'dp' + suffix]
+            if is_orthog:
+                #other_model_types = ['opsink' + suffix, 'opdp' + suffix]
+                other_model_types = ['opdp' + suffix]
+            else:
+                #other_model_types = ['sink' + suffix, 'dp' + suffix]
+                other_model_types = ['dp' + suffix]
+            for oidx, model_type in enumerate(other_model_types):
+                if model_type in model_types:
+                    model_df = DCT_ALL[model_type]
+                    other_matching_df = model_df[(model_df['ensembles']>0)&(model_df['qk_share']==qk_share)&
+                                                 (model_df['model_dir'].str.contains('layers=2-heads=6'))&
+                                                 (model_df['model_dir'].str.contains(model_type))]                
+                    # print('other_matching_df')  # delete
+                    # print(model_type)
+                    # print(f'qk_share = {qk_share}')
+                    # print(other_matching_df)  # delete
+
+                    lstyle_model = LINESTYLE_DICT[model_type]
+
+                    model_info = other_matching_df.iloc[0,:]
+                    ensembles = model_info['ensembles']
+                    instances = model_info['instances']
+                    qk_share = model_info['qk_share']
+                    if ensembles > 0:
+
+                        run_perf_all = []
+                        for instance in instances:
+                            model_instance_path = njoin(model_info['model_dir'], f'model={instance}')
+                            if isfile(njoin(model_instance_path, 'run_performance.csv')): 
+                                run_perf = pd.read_csv(njoin(model_instance_path, 'run_performance.csv'))
+                            elif isfile(njoin(model_instance_path, '_run_performance.csv')): 
+                                run_perf = pd.read_csv(njoin(model_instance_path, '_run_performance.csv'))
+
+                            epochs = run_perf.loc[:,'iter'].astype(int) // int(model_info['steps_per_epoch'])
+                            if 'acc' in metric and run_perf.loc[run_perf.index[-1],metric] <= 1:
+                                run_perf.loc[:,metric] = run_perf.loc[:,metric] * 100
+                        
+                            run_perf_all.append(run_perf.loc[:,metric])
+                        run_perf_all = pd.concat(run_perf_all, axis=1)
+
+                        metric_m = run_perf_all.quantile(0.5,1)
+                        metric_l = run_perf_all.quantile(lower_qt,1)
+                        metric_u = run_perf_all.quantile(upper_qt,1)
+                        trans = 1
+
+                        ax.plot(epochs, metric_m, linestyle=lstyle_model, 
+                                c=OTHER_COLORS_DICT[model_type], alpha=trans)    
+                                            
+                        ax.fill_between(epochs, metric_l, metric_u,
+                                        color=OTHER_COLORS_DICT[model_type], alpha=trans/2)    
+
+                    if model_type not in model_types_plotted:
+                        model_types_plotted.append(model_type)
+
+            ax.grid()
+            #ax.yaxis.grid(True)        
+
+    # labels
+    model_labels = []
+    for model_type in model_types_plotted:   
+        if 'op' in model_type:
+            model_type = model_type.replace('op', '')
+        if 'fns' in model_type:
+            color = 'k'
+        elif 'sink' in model_type:
+            color = OTHER_COLORS[0]
+        elif 'dp' in model_type:
+            color = OTHER_COLORS[1]
+            
+        model_label = NAMES_DICT[model_type]
+        if model_label not in model_labels:            
+            axs[0,0].plot([], [], c=color, linestyle=LINESTYLE_DICT[model_type], 
+                          label=model_label)
+
+            model_labels.append(model_label)
+
+    # legend
+    for alpha in alphas[::-1]:
+        axs[0,0].plot([], [], c=HYP_CMAP(HYP_CNORM(alpha)), linestyle='solid', 
+                      label=rf'$\alpha$ = {alpha}')   
+
+    #ncol_legend = 2 if len(model_types_plotted) == 3 else 1
+    ncol_legend = 2
+    if len(model_types_plotted) >= 2:
+        #axs[0,0].legend(loc='best', ncol=ncol_legend, frameon=False)           
+        axs[0,0].legend(bbox_to_anchor=(0.95, 1.35),   # bbox_to_anchor=(0.85, 1.35)
+                        loc='best', ncol=ncol_legend, frameon=False)                     
+
+    # Add shared x and y labels     
+    total_figs = 0      
+    #fig.supxlabel('Epochs')  # , fontsize='medium'
+    #fig.supylabel(NAMES_DICT[metrics[0]], fontsize='medium')
+    for row_idx in range(len(qk_shares)):
+        for col_idx, is_orthog in enumerate(is_orthogs):  
+            ax = axs[row_idx, col_idx]
+            #ax.set_ylabel(NAMES_DICT[metric])
+            if row_idx == 0:
+                #ax.set_title(NAMES_DICT[metric])
+                ax_title = r'$W \in O(d)$' if is_orthogs[col_idx] else r'$W \notin O(d)$'
+                ax.set_title(ax_title)
+
+            # subplot labels
+            ax.text(
+                0.0, 1.0, f'({ascii_lowercase[total_figs]})', transform=(
+                    ax.transAxes + ScaledTranslation(-20/72, +7/72, fig.dpi_scale_trans)),
+                va='bottom')  # , fontfamily='sans-serif', fontsize='medium',     
+
+            # if row_idx != 0:
+            #     ax.sharey(axs[0, col_idx])
+
+            total_figs += 1
+            axs[row_idx,col_idx].sharey(axs[row_idx, 0])
+            axs[-1,col_idx].set_xlabel('Epochs')
+        axs[row_idx, 0].set_ylabel(NAMES_DICT[metrics[row_idx]])
+
+    axs[0,0].set_xlim([50,310])
+    # axs[0,0].set_ylim([50,75])
+    # axs[1,0].set_ylim([0.7,1.4])
+    axs[0,0].set_ylim([55,75])
+    axs[1,0].set_ylim([0.7,1.2])
+
+    # Adjust layout
+    plt.tight_layout(rect=[0, 0, 0.93, 1])  # Leave space for the right label                 
+
+    dataset_name_short = ''
+    if isinstance(dataset,str):
+        if '_' in dataset:
+            for s in dataset.split('_'):
+                dataset_name_short += s[0]
+        else:
+            dataset_name_short += dataset
+
+    model_types_short = [model_type.replace(MODEL_SUFFIX,'') for model_type in model_types_plotted]
+
+    from constants import FIGS_DIR
+    SAVE_DIR = njoin(FIGS_DIR, 'vit-task')
+    if display:
+        plt.show()
+    else:
+        if not isdir(SAVE_DIR): makedirs(SAVE_DIR)
+        fig_file = models_root.split('/')[1] + '-'
+        #fig_file += f'layers={num_hidden_layers}-heads={num_attention_heads}-hidden={hidden_size}-'            
+        fig_file += f'layers={num_hidden_layers}-hidden={hidden_size}-'
+        fig_file += '_'.join(model_types_short)+ '-' + metrics[0] + '-' + f'ds={dataset_name_short}'
+        # if isfile(njoin(SAVE_DIR, fig_file)):
+        #     version = len([fname for fname in os.listdir(SAVE_DIR) if fname==fig_file])
+        #     fig_file += f'-v{version}'
+        fig_file += '.pdf'
+        plt.savefig(njoin(SAVE_DIR, fig_file))            
+        print(f'Figure saved in {njoin(SAVE_DIR, fig_file)}')
+
+    # separate colorbar
+    if cbar_separate:    
+        """
+        #fig.subplots_adjust(right=0.8)
+        fig = plt.figure()
+        cbar_ax = fig.add_axes([0.85, 0.20, 0.03, 0.75])
+        cbar_ticks = list(np.arange(1,2.01,0.2))
+        cbar = fig.colorbar(im, cax=cbar_ax, ticks=cbar_ticks)
+        cbar.ax.set_yticklabels(cbar_ticks)
+        cbar.ax.tick_params(axis='y', labelsize=tick_size)
+        """
+        
+        fig = plt.figure()
+        cbar_ax = fig.add_axes([0.85, 0.20, 0.03, 0.75])
+        cbar_ticks = list(np.linspace(1,2,6))
+        
+        cbar = mpl.colorbar.ColorbarBase(cbar_ax, norm=HYP_CNORM, cmap=HYP_CM)
+        cbar.ax.set_yticklabels(cbar_ticks)
+        cbar.ax.tick_params(axis='y', labelsize=16.5)
+
+        plt.savefig(njoin(SAVE_DIR,"alpha_colorbar.pdf"), bbox_inches='tight')  
+
+
+# assumption 1 and 2 possibilities for full-sized models
+def phase_ensembles_v2(models_root, fns_manifold='rd', metrics='val_acc',
                     cbar_separate=False, display=False):
     global df, df_setting, df_filtered, fig_file, axs
     global model_dirs, subpath, dirnames, model_root_dirs
@@ -624,6 +994,8 @@ def phase_ensembles(models_root, fns_manifold='rd', metrics='val_acc',
     elif nrows > 1 and ncols == 1:
         axs = np.expand_dims(axs, axis=1)                 
 
+    lower_qt, upper_qt = 0.1, 0.9
+
     model_types_plotted = []
     model_types_instances = {}
     #for row_idx, models_root in enumerate(models_roots):    
@@ -684,8 +1056,8 @@ def phase_ensembles(models_root, fns_manifold='rd', metrics='val_acc',
                 # metric_mean = run_perf_all.mean(1)
                 # metric_std = run_perf_all.std(1)
                 metric_m = run_perf_all.quantile(0.5,1)
-                metric_l = run_perf_all.quantile(0.25,1)
-                metric_u = run_perf_all.quantile(0.75,1)
+                metric_l = run_perf_all.quantile(lower_qt,1)
+                metric_u = run_perf_all.quantile(upper_qt,1)
 
                 trans = 1
                 #trans = HYP_TRANS(alpha)
@@ -728,7 +1100,13 @@ def phase_ensembles(models_root, fns_manifold='rd', metrics='val_acc',
             for oidx, model_type in enumerate(other_model_types):
                 if model_type in model_types:
                     model_df = DCT_ALL[model_type]
-                    other_matching_df = model_df[(model_df['ensembles']>0)&(model_df['qk_share']==qk_share)&(model_df['model_dir'].str.contains(model_type))]                
+                    other_matching_df = model_df[(model_df['ensembles']>0)&(model_df['qk_share']==qk_share)&
+                                                 (model_df['model_dir'].str.contains('layers=2-heads=6'))&
+                                                 (model_df['model_dir'].str.contains(model_type))]                
+                    # print('other_matching_df')  # delete
+                    # print(model_type)
+                    # print(f'qk_share = {qk_share}')
+                    # print(other_matching_df)  # delete
 
                     lstyle_model = LINESTYLE_DICT[model_type]
 
@@ -754,8 +1132,8 @@ def phase_ensembles(models_root, fns_manifold='rd', metrics='val_acc',
                         run_perf_all = pd.concat(run_perf_all, axis=1)
 
                         metric_m = run_perf_all.quantile(0.5,1)
-                        metric_l = run_perf_all.quantile(0.25,1)
-                        metric_u = run_perf_all.quantile(0.75,1)
+                        metric_l = run_perf_all.quantile(lower_qt,1)
+                        metric_u = run_perf_all.quantile(upper_qt,1)
                         trans = 1
 
                         ax.plot(epochs, metric_m, linestyle=lstyle_model, 
@@ -828,7 +1206,8 @@ def phase_ensembles(models_root, fns_manifold='rd', metrics='val_acc',
 
             axs[-1,col_idx].set_xlabel('Epochs')
 
-    axs[0,0].set_ylim([50,75])
+    #axs[0,0].set_ylim([50,75])
+    axs[0,0].set_ylim([50,90])
 
     # Adjust layout
     plt.tight_layout(rect=[0, 0, 0.93, 1])  # Leave space for the right label                 

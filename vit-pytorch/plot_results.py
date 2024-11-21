@@ -313,6 +313,7 @@ def fns_fix_eps(models_roots, fns_type='spopfns'+MODEL_SUFFIX, metrics='val_acc'
     global alphas, epss, DCT_ALL, model_info, model_df, run_perf, dataset, df_model
     global model_types, model_info, epochs, ensembles
     global other_final_epoch_metrics
+    global fns_final_epoch_metrics
 
     models_roots = str2ls(models_roots)
     model_root_dirs = models_roots
@@ -343,7 +344,7 @@ def fns_fix_eps(models_roots, fns_type='spopfns'+MODEL_SUFFIX, metrics='val_acc'
     nrows, ncols = len(models_roots), 2
 
     figsize = (3*ncols,3*nrows)
-    fig, axs = plt.subplots(nrows,ncols,figsize=figsize,sharex=True,sharey=True)  # layout='constrained'
+    fig, axs = plt.subplots(nrows,ncols,figsize=figsize,sharex=True,sharey=False)  # layout='constrained'
     
     if nrows == 1:
         axs = np.expand_dims(axs, axis=0)
@@ -355,8 +356,9 @@ def fns_fix_eps(models_roots, fns_type='spopfns'+MODEL_SUFFIX, metrics='val_acc'
     total_figs = 0
     model_types_plotted = []
     for row_idx, models_root in enumerate(models_roots):
-        fns_final_epoch_metrics = np.zeros([2, len(epss), len(alphas)])
-        fns_final_epoch_metrics[:] = np.nan
+
+        fns_final_epoch_metrics = np.zeros([df_model['ensembles'].max(), 2, len(epss), len(alphas)])
+        fns_final_epoch_metrics[:] = np.nan              
         other_final_epoch_metrics = {}        
 
         DCT_ALL = collect_model_dirs(models_root)
@@ -381,21 +383,24 @@ def fns_fix_eps(models_roots, fns_type='spopfns'+MODEL_SUFFIX, metrics='val_acc'
                     continue
 
                 instances = model_info['instances'].item()
-                qk_share = model_info['qk_share'].item()
+                qk_share = model_info['qk_share'].item()          
                 
-                model_instance_path = njoin(model_info['model_dir'].item(), f'model={instances[0]}')
-                if isfile(njoin(model_instance_path, 'run_performance.csv')): 
-                    run_perf = pd.read_csv(njoin(model_instance_path, 'run_performance.csv'))
-                if isfile(njoin(model_instance_path, '_run_performance.csv')): 
-                    run_perf = pd.read_csv(njoin(model_instance_path, '_run_performance.csv'))
+                for ii, instance in enumerate(instances):
+                    model_instance_path = njoin(model_info['model_dir'].item(), f'model={instance}')
+                    if isfile(njoin(model_instance_path, 'run_performance.csv')): 
+                        run_perf = pd.read_csv(njoin(model_instance_path, 'run_performance.csv'))
+                    elif isfile(njoin(model_instance_path, '_run_performance.csv')): 
+                        run_perf = pd.read_csv(njoin(model_instance_path, '_run_performance.csv'))
+                    if 'acc' in metrics[0]:
+                        run_perf.loc[:,metrics[0]] = run_perf.loc[:,metrics[0]] * 100  
 
-                epochs = run_perf.loc[:,'iter'].astype(int) // int(model_info['steps_per_epoch'])             
+                    epochs = run_perf.loc[:,'iter'].astype(int) // int(model_info['steps_per_epoch'])             
 
-                fns_final_epoch_metrics[0, eps_idx, alp_idx] = run_perf.loc[run_perf.index[-1],metrics[0]]                                            
-                if 'acc' in metrics[0]:
-                    fns_final_epoch_metrics[1, eps_idx, alp_idx] = run_perf.loc[:,metrics[0]].max()  
-                else:
-                    fns_final_epoch_metrics[1, eps_idx, alp_idx] = run_perf.loc[:,metrics[0]].min()
+                    fns_final_epoch_metrics[ii, 0, eps_idx, alp_idx] = run_perf.loc[run_perf.index[-1],metrics[0]]                                            
+                    if 'acc' in metrics[0]:
+                        fns_final_epoch_metrics[ii, 1, eps_idx, alp_idx] = run_perf.loc[:,metrics[0]].max()  
+                    else:
+                        fns_final_epoch_metrics[ii, 1, eps_idx, alp_idx] = run_perf.loc[:,metrics[0]].min()
 
             if eps_idx == 0:                
             # -------------------- SINK --------------------                
@@ -446,12 +451,17 @@ def fns_fix_eps(models_roots, fns_type='spopfns'+MODEL_SUFFIX, metrics='val_acc'
                 
                     if model_type not in model_types_plotted:
                         model_types_plotted.append(model_type)
-
-        for col_idx in range(fns_final_epoch_metrics.shape[0]):
+        perc_l, perc_u = 25, 75
+        for col_idx in range(fns_final_epoch_metrics.shape[1]):
             ax = axs[row_idx, col_idx]
             for eps_idx, eps in tqdm(enumerate(epss)):
-                ax.plot(alphas, fns_final_epoch_metrics[col_idx,eps_idx,:], label = rf'$\varepsilon$ = {eps}',
+                ax.plot(alphas, np.nanmedian(fns_final_epoch_metrics[:,col_idx,eps_idx,:],axis=0), 
+                        label = rf'$\varepsilon$ = {eps}',
                         linestyle=f'--', marker=markers[eps_idx],markersize=2)
+                                        
+                ax.fill_between(alphas, np.nanpercentile(fns_final_epoch_metrics[:,col_idx,eps_idx,:], 25, axis=0), 
+                                np.percentile(fns_final_epoch_metrics[:,col_idx,eps_idx,:], 75, axis=0),
+                                alpha=0.5)        
 
             if include_others:
                 for model_type in other_final_epoch_metrics.keys():

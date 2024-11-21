@@ -22,7 +22,7 @@ from torch.distributed import init_process_group, destroy_process_group
 from constants import *
 from mutils import njoin, create_model_dir, convert_train_history, structural_model_root
 from mutils import str2bool, str2ls
-from data_utils import prepare_data
+from data_utils import prepare_cifar10_data, prepare_mnist_data
 
 from torch.optim import AdamW
 
@@ -32,7 +32,7 @@ python -i main.py --train_bs=32 --dataset_name=cifar10 --model_name=opdpvit --qk
  --epochs=1 --weight_decay=0 --n_layers=2 --n_attn_heads=1 --model_root=.droot/debug-mode 
 
 python -i main.py --train_bs=32 --dataset_name=cifar10 --model_name=fnsvit --manifold=sphere --qk_share=True\
- --manifold=sphere --alpha=1.5 --a=0 --epochs=1 --weight_decay=0 --n_layers=2 --n_attn_heads=1\
+ --alpha=1.5 --a=0 --epochs=1 --weight_decay=0 --n_layers=2 --n_attn_heads=1\
  --model_root=.droot/debug-mode
 
 python -i main.py --model_name=opfnsvit --manifold=rd --alpha=1.5 --max_iters=100 --eval_interval=5\
@@ -68,7 +68,7 @@ if __name__ == '__main__':
     parser.add_argument('--beta1', default=0.9, type=float)
     parser.add_argument('--beta2', default=0.95, type=float)       
 
-    parser.add_argument('--lr_scheduler_type', default='cosine', type=str, help='cosine | binary') 
+    parser.add_argument('--lr_scheduler_type', default='constant', type=str, help='constant | cosine | binary') 
     
     # log settings
     parser.add_argument('--epochs', default=None)
@@ -304,7 +304,8 @@ if __name__ == '__main__':
     print('-'*25 + '\n')           
 
     #torch.manual_seed(1337 + seed_offset)
-    torch.manual_seed(1337 + args.seed)
+    #torch.manual_seed(1337 + args.seed)
+    torch.manual_seed(args.seed)
     if torch.cuda.is_available():
         torch.backends.cuda.matmul.allow_tf32 = True # allow tf32 on matmul
         torch.backends.cudnn.allow_tf32 = True # allow tf32 on cudnn
@@ -319,7 +320,7 @@ if __name__ == '__main__':
     # poor man's data loader
     if dataset_name == 'cifar10':
         #data_dir = njoin(DROOT,'DATA','cifar-10-batches-py')
-        trainloader, testloader, _ = prepare_data(batch_size=batch_size, num_workers=ddp_world_size)    
+        trainloader, testloader, _ = prepare_cifar10_data(batch_size=batch_size, num_workers=ddp_world_size)    
 
         if trainloader.dataset[0][0].ndim == 2:
             config['image_size'] = trainloader.dataset[0][0].shape[0]
@@ -329,6 +330,19 @@ if __name__ == '__main__':
             config['num_channels'] = trainloader.dataset[0][0].shape[0]
 
         config['num_classes'] = len(trainloader.dataset.classes)        
+
+    elif dataset_name == 'mnist':
+        #data_dir = njoin(DROOT,'DATA','cifar-10-batches-py')
+        trainloader, testloader = prepare_mnist_data(batch_size=batch_size, num_workers=ddp_world_size)    
+
+        if trainloader.dataset[0][0].ndim == 2:
+            config['image_size'] = trainloader.dataset[0][0].shape[0]
+            config['num_channels'] = 1
+        else:
+            config['image_size'] = trainloader.dataset[0][0].shape[1]
+            config['num_channels'] = trainloader.dataset[0][0].shape[0]
+
+        config['num_classes'] = len(trainloader.dataset.classes)          
 
     elif dataset_name in ['pathfinder-classification', 'pathx-classification']:  # 'lra-cifar-classification'
         from lra_dataloading import Datasets
@@ -578,7 +592,7 @@ if __name__ == '__main__':
         epoch_val_loss = 0
         for batch in testloader:    
 
-            if args.dataset_name == 'cifar10':
+            if args.dataset_name in ['cifar10', 'mnist']:
                 data, label = batch
             else:
                 data, label, _ = batch
@@ -641,7 +655,7 @@ if __name__ == '__main__':
         #for data, label in trainloader:
         for batch in tqdm(trainloader):
 
-            if args.dataset_name == 'cifar10':
+            if args.dataset_name in ['cifar10', 'mnist']:
                 data, label = batch
             else:
                 data, label, _ = batch

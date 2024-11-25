@@ -31,7 +31,7 @@ from torch.optim import AdamW
 python -i main.py --train_bs=32 --dataset_name=cifar10 --model_name=opdpvit --qk_share=True\
  --epochs=1 --weight_decay=0 --n_layers=2 --n_attn_heads=1 --model_root=.droot/debug-mode 
 
-python -i main.py --train_bs=32 --dataset_name=cifar10 --model_name=fnsvit --manifold=sphere --qk_share=True\
+python -i main.py --train_bs=32 --lr=5e-5 --dataset_name=mnist --model_name=opfnsvit --manifold=sphere --qk_share=True\
  --alpha=1.5 --a=0 --epochs=1 --weight_decay=0 --n_layers=2 --n_attn_heads=1\
  --model_root=.droot/debug-mode
 
@@ -46,6 +46,8 @@ python -i main.py --hidden_size=3 --model_name=opfnsvit --manifold=sphere --alph
 python -i main.py --model_name=fnsvit --manifold=sphere --alpha=1.5 --a=0\
  --epochs=2 --weight_decay=0 --n_layers=1 --n_attn_heads=1 --model_root=.droot/debug-mode
 """
+
+#def train_vit(args):
 
 if __name__ == '__main__':
 
@@ -124,8 +126,14 @@ if __name__ == '__main__':
     parser.add_argument('--qkv_bias', type=str2bool, nargs='?', const=True, default=False)
     parser.add_argument('--use_faster_attn', default=True, type=bool)    
 
+    parser.add_argument('--detect_anomaly', type=str2bool, nargs='?', const=True, default=False)
 
-    args = parser.parse_args()    
+    args = parser.parse_args()      
+
+    #train_vit(args)
+
+    # if args.detect_anomaly is True:
+    #     torch.autograd.set_detect_anomaly(True)
 
     # assertions
     model_name = args.model_name.lower()
@@ -652,6 +660,10 @@ if __name__ == '__main__':
         epoch_loss = 0
         epoch_accuracy = 0
 
+        if epoch == 16:  # delete
+            if args.detect_anomaly is True:
+                torch.autograd.set_detect_anomaly(True)            
+
         #for data, label in trainloader:
         for batch in tqdm(trainloader):
 
@@ -747,4 +759,4 @@ if __name__ == '__main__':
         df = pd.DataFrame(metrics_ls, columns=metric_cols)
         df.to_csv(njoin(out_dir, 'run_performance.csv'))
 
-    print(f'All data saved under {out_dir}')        
+    print(f'All data saved under {out_dir}')           

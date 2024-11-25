@@ -313,7 +313,7 @@ def fns_fix_eps(models_roots, fns_type='spopfns'+MODEL_SUFFIX, metrics='val_acc'
     global alphas, epss, DCT_ALL, model_info, model_df, run_perf, dataset, df_model
     global model_types, model_info, epochs, ensembles
     global other_final_epoch_metrics
-    global fns_final_epoch_metrics
+    global fns_final_epoch_metrics, eps_idx, alp_idx, ii
 
     models_roots = str2ls(models_roots)
     model_root_dirs = models_roots
@@ -342,7 +342,6 @@ def fns_fix_eps(models_roots, fns_type='spopfns'+MODEL_SUFFIX, metrics='val_acc'
     epss = sorted(df_model.loc[:,'bandwidth'].unique())    
 
     nrows, ncols = len(models_roots), 2
-
     figsize = (3*ncols,3*nrows)
     fig, axs = plt.subplots(nrows,ncols,figsize=figsize,sharex=True,sharey=False)  # layout='constrained'
     
@@ -357,7 +356,7 @@ def fns_fix_eps(models_roots, fns_type='spopfns'+MODEL_SUFFIX, metrics='val_acc'
     model_types_plotted = []
     for row_idx, models_root in enumerate(models_roots):
 
-        fns_final_epoch_metrics = np.zeros([df_model['ensembles'].max(), 2, len(epss), len(alphas)])
+        fns_final_epoch_metrics = np.zeros([df_model['ensembles'].min(), 2, len(epss), len(alphas)])
         fns_final_epoch_metrics[:] = np.nan              
         other_final_epoch_metrics = {}        
 
@@ -385,22 +384,28 @@ def fns_fix_eps(models_roots, fns_type='spopfns'+MODEL_SUFFIX, metrics='val_acc'
                 instances = model_info['instances'].item()
                 qk_share = model_info['qk_share'].item()          
                 
-                for ii, instance in enumerate(instances):
+                for ii, instance in enumerate(instances[:fns_final_epoch_metrics.shape[0]]):
                     model_instance_path = njoin(model_info['model_dir'].item(), f'model={instance}')
                     if isfile(njoin(model_instance_path, 'run_performance.csv')): 
                         run_perf = pd.read_csv(njoin(model_instance_path, 'run_performance.csv'))
+                        file_exists = True
                     elif isfile(njoin(model_instance_path, '_run_performance.csv')): 
                         run_perf = pd.read_csv(njoin(model_instance_path, '_run_performance.csv'))
-                    if 'acc' in metrics[0]:
-                        run_perf.loc[:,metrics[0]] = run_perf.loc[:,metrics[0]] * 100  
-
-                    epochs = run_perf.loc[:,'iter'].astype(int) // int(model_info['steps_per_epoch'])             
-
-                    fns_final_epoch_metrics[ii, 0, eps_idx, alp_idx] = run_perf.loc[run_perf.index[-1],metrics[0]]                                            
-                    if 'acc' in metrics[0]:
-                        fns_final_epoch_metrics[ii, 1, eps_idx, alp_idx] = run_perf.loc[:,metrics[0]].max()  
+                        file_exists = True
                     else:
-                        fns_final_epoch_metrics[ii, 1, eps_idx, alp_idx] = run_perf.loc[:,metrics[0]].min()
+                        file_exists = False
+
+                    if file_exists:
+                        if 'acc' in metrics[0]:
+                            run_perf.loc[:,metrics[0]] = run_perf.loc[:,metrics[0]] * 100  
+
+                        epochs = run_perf.loc[:,'iter'].astype(int) // int(model_info['steps_per_epoch'])             
+
+                        fns_final_epoch_metrics[ii, 0, eps_idx, alp_idx] = run_perf.loc[run_perf.index[-1],metrics[0]]                                            
+                        if 'acc' in metrics[0]:
+                            fns_final_epoch_metrics[ii, 1, eps_idx, alp_idx] = run_perf.loc[:,metrics[0]].max()  
+                        else:
+                            fns_final_epoch_metrics[ii, 1, eps_idx, alp_idx] = run_perf.loc[:,metrics[0]].min()
 
             if eps_idx == 0:                
             # -------------------- SINK --------------------                
@@ -486,6 +491,8 @@ def fns_fix_eps(models_roots, fns_type='spopfns'+MODEL_SUFFIX, metrics='val_acc'
 
             ax.grid()
             #ax.yaxis.grid(True)
+            ax.set_ylim([92,95])
+            ax.set_xticks(alphas)
 
             total_figs += 1
 
@@ -498,6 +505,8 @@ def fns_fix_eps(models_roots, fns_type='spopfns'+MODEL_SUFFIX, metrics='val_acc'
     #         color = OTHER_COLORS[1]
     #     axs[0,0].plot([], [], c=color, linestyle=LINESTYLE_DICT[model_type], 
     #                 label=NAMES_DICT[model_type])                  
+
+    #axs[0,0].set_ylim([80,90]); axs[1,0].set_ylim([80,90])
 
     ncol_legend = 2 if len(epss) > 1 else 1
     axs[0,0].legend(bbox_to_anchor=(0.85, 1.4),

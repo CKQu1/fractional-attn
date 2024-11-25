@@ -174,6 +174,10 @@ def collect_model_dirs(models_root, **kwargs):
                             run_perf = pd.read_csv(njoin(fpath, 'run_performance.csv'), index_col=False)                         
                             for metric in metrics:
                                 metrics_dict[metric].append(run_perf.loc[run_perf.index[-1],metric])
+                        elif isfile(njoin(fpath, '_run_performance.csv')):
+                            run_perf = pd.read_csv(njoin(fpath, '_run_performance.csv'), index_col=False)                         
+                            for metric in metrics:
+                                metrics_dict[metric].append(run_perf.loc[run_perf.index[-1],metric])                                
                         else:
                             for metric in metrics:
                                 metrics_dict[metric].append(None)                            

@@ -2,13 +2,12 @@ import argparse
 from prenlp.tokenizer import NLTKMosesTokenizer
 from torch.utils.data import DataLoader
 
-from data_utils import create_examples
+from models.model_utils import create_longformer_mask
+from utils.data_utils import create_examples
 from tokenization import Tokenizer, PretrainedTokenizer
-from trainer import Trainer
+#from trainer import Trainer
 
 TOKENIZER_CLASSES = {'nltk_moses': NLTKMosesTokenizer}
-
-######################################################
 
 import json
 import os
@@ -28,19 +27,40 @@ import torch
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.distributed import init_process_group, destroy_process_group
 
-#from model import GPTConfig, GPT
-
 from constants import *
-from mutils import njoin, create_model_dir, convert_train_history, structural_model_root
-from mutils import str2bool, str2ls
+from utils.mutils import njoin, create_model_dir, convert_train_history, structural_model_root
+from utils.mutils import str2bool, str2ls
 
 #from torch.optim import AdamW
 from torch.optim import Adam
 
+# fix-embed
+
+"""
+python -i main.py --train_bs=32 --dataset_name=imdb --fix_embed=True --pretrained_model_name=glove\
+ --hidden=300 --model_name=dpformer --qk_share=False\
+ --epochs=1 --weight_decay=0 --n_layers=1 --n_attn_heads=1 --model_root=.droot/debug-mode
+"""
+
+"""
+python -i main.py --train_bs=32 --dataset_name=imdb --fix_embed=True --pretrained_model_name=glove --max_len=1024\
+ --hidden=16 --model_name=fnsformer --manifold=rd --is_op=True --alpha=1.2 --bandwidth=1 --a=0  --qk_share=True\
+ --max_lr=0.0001 --lr_scheduler_type=constant --epochs=5 --weight_decay=0\
+ --n_layers=1 --n_attn_heads=1 --seed=0\
+ --model_root=.droot/debug-mode-v3
+"""
+
+"""
+python -i main.py --train_bs=32 --dataset_name=imdb --fix_embed=True --hidden=16\
+ --model_name=fnsformer --manifold=rd --alpha=1.2 --bandwidth=1 --qk_share=False\
+ --epochs=1 --weight_decay=0 --n_layers=1 --n_attn_heads=1 --model_root=.droot/debug-mode
+"""
+
 # single-core
 """
-python -i main.py --train_bs=32 --dataset_name=cifar10 --model_name=opdpvit --qk_share=True\
- --epochs=1 --weight_decay=0 --n_layers=2 --n_attn_heads=1 --model_root=.droot/debug-mode 
+python -i main.py --train_bs=32 --dataset_name=imdb\
+  --model_name=fnsformer --manifold=sphere --alpha=1.2 --bandwidth=1 --qk_share=False\
+ --epochs=1 --weight_decay=0 --n_layers=1 --n_attn_heads=1 --model_root=.droot/debug-mode 
 """
 
 if __name__ == '__main__':
@@ -60,6 +80,7 @@ if __name__ == '__main__':
     parser.add_argument('--min_lr', default=1e-5, type=float, help='min learning rate')
     parser.add_argument('--train_bs', default=2, type=int)
     parser.add_argument('--max_len',    default=512,  type=int,   help='the maximum size of the input sequence')
+    parser.add_argument('--train_mask_type', default=None, type=str)
 
     #parser.add_argument('--eval_bs', default=10, type=int)
     #parser.add_argument('--weight_decay', default=0.01, type=float)
@@ -67,7 +88,7 @@ if __name__ == '__main__':
     parser.add_argument('--beta1', default=0.9, type=float)
     parser.add_argument('--beta2', default=0.95, type=float)       
 
-    parser.add_argument('--lr_scheduler_type', default='cosine', type=str, help='cosine | binary | constant') 
+    parser.add_argument('--lr_scheduler_type', default='constant', type=str, help='cosine | binary | constant') 
     
     # log settings
     parser.add_argument('--epochs', default=None)
@@ -82,7 +103,6 @@ if __name__ == '__main__':
     parser.add_argument("--save_model_every", default=0, type=int)
     parser.add_argument("--exp_name", default='image-task', type=str)
 
-    parser.add_argument('--instance', default=0, type=int)
     parser.add_argument('--seed', default=0, type=int)    
     # parser.add_argument('--lr_scheduler_type', default='constant', type=str)
 
@@ -97,12 +117,13 @@ if __name__ == '__main__':
 
     # Model settings
     parser.add_argument('--model_name', default='spfnsvit', type=str)  
-    # fnsvit type
+    # fns type
     parser.add_argument('--manifold', default='sphere', type=str)
     parser.add_argument('--alpha', default=1, type=float)
     parser.add_argument('--bandwidth', default=1, type=float)  
     parser.add_argument('--a', default=0, type=float)
-    # sinkvit type
+    parser.add_argument('--is_rescale_dist', type=str2bool, nargs='?', const=True, default=False) 
+    # sink type
     parser.add_argument('--n_it', default=3, type=int)
 
     # Config settings    
@@ -121,12 +142,15 @@ if __name__ == '__main__':
     parser.add_argument('--qk_share', type=str2bool, nargs='?', const=True, default=False)
     parser.add_argument('--is_op', type=str2bool, nargs='?', const=True, default=False)
 
+    parser.add_argument('--fix_embed', type=str2bool, nargs='?', const=True, default=False) 
+    parser.add_argument('--pretrained_model_name', default='glove', type=str, help='distilbert-base-uncased | albert-base-v2 | glove')
+
     args = parser.parse_args()    
 
     # assertions
     model_name = args.model_name.lower()
     if 'fns' in model_name:
-        assert args.manifold in ['sphere', 'rd'], 'FNS manifold: sphere or rd'   
+        assert args.manifold in ['sphere', 'rd', 'v2_rd'], 'FNS manifold: sphere or rd'   
         assert 1 <= args.alpha <= 2, 'FNS alpha must be between [1,2]'
         assert args.a in [0,0.5,1], 'Normalization index must be 0 or 0.5 or 1'   
 
@@ -137,11 +161,9 @@ if __name__ == '__main__':
     eval_iters = args.eval_iters
     eval_only = args.eval_only # if True, script exits right after the first eval
     always_save_checkpoint = args.always_save_checkpoint # if True, always save a checkpoint after each eval
-
     # data
     dataset_name = args.dataset_name
     batch_size = args.train_bs # if gradient_accumulation_steps > 1, this is the micro-batch size     
-
     # adamw optimizer
     learning_rate = args.max_lr  # max learning rate
     max_iters = args.max_iters # total number of training iterations
@@ -154,9 +176,9 @@ if __name__ == '__main__':
     warmup_iters = args.warmup_iters # how many steps to warm up for
     lr_decay_iters = max_iters # should be ~= max_iters per Chinchilla
     min_lr = args.min_lr # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
-
     # system
     device = f'cuda' if torch.cuda.is_available() else "cpu"
+    #device = 'cpu'  # for debugging
     device_name = torch.cuda.get_device_name(0) if 'cuda' in device else platform.processor()
     # -----------------------------------------------------------------------------        
 
@@ -170,17 +192,90 @@ if __name__ == '__main__':
     
     # poor man's data loader
     if dataset_name == 'imdb':
-        # Load tokenizer
-        if args.tokenizer_name == 'sentencepiece':
-            tokenizer = PretrainedTokenizer(pretrained_model=args.pretrained_model, vocab_file=args.vocab_file)
+        if not args.fix_embed:
+            # Load tokenizer
+            if args.tokenizer_name == 'sentencepiece':
+                tokenizer = PretrainedTokenizer(pretrained_model=args.pretrained_model, vocab_file=args.vocab_file)
+            else:
+                tokenizer = TOKENIZER_CLASSES[args.tokenizer]()
+                tokenizer = Tokenizer(tokenizer=tokenizer, vocab_file =args.vocab_file)      
+
         else:
-            tokenizer = TOKENIZER_CLASSES[args.tokenizer]()
-            tokenizer = Tokenizer(tokenizer=tokenizer, vocab_file =args.vocab_file)
+            if args.pretrained_model_name == 'distilbert-base-uncased':
+                from transformers import AutoTokenizer, DistilBertModel
+                #tokenizer = AutoTokenizer.from_pretrained(f'distilbert/{args.pretrained_model_name}')
+                tokenizer = AutoTokenizer.from_pretrained(f'distilbert/distilbert-base-uncased')
+                pretrained_model = DistilBertModel.from_pretrained("distilbert-base-uncased")
+                vocab_size, pretrained_model_hidden =\
+                     pretrained_model.embeddings.word_embeddings.weight.shape
+                pretrained_seq_len, _ = pretrained_model.embeddings.position_embeddings.weight.shape
+
+                assert args.max_len == pretrained_seq_len - 1, f'args.max_len does not match {pretrained_seq_len}!'
+
+            elif args.pretrained_model_name == 'albert-base-v2':
+                from transformers import AlbertTokenizer, AlbertModel
+                tokenizer = AlbertTokenizer.from_pretrained('albert-base-v2')
+                pretrained_model = AlbertModel.from_pretrained("albert-base-v2")                
+                vocab_size, pretrained_model_hidden =\
+                     pretrained_model.embeddings.word_embeddings.weight.shape
+                pretrained_seq_len, _ = pretrained_model.embeddings.position_embeddings.weight.shape
+
+                assert args.max_len == pretrained_seq_len - 1, f'args.max_len does not match {pretrained_seq_len}!'
+
+            elif args.pretrained_model_name == 'gpt2':
+                from transformers import AutoModelForCausalLM, AutoTokenizer
+                tokenizer = AutoTokenizer.from_pretrained("gpt2")
+                pretrained_model = AutoModelForCausalLM.from_pretrained("gpt2")                                
+                vocab_size, pretrained_model_hidden =\
+                     pretrained_model.transformer.wte.weight.shape
+                pretrained_seq_len, _ = pretrained_model.transformer.wpe.weight.shape
+
+                assert args.max_len == pretrained_seq_len - 1, f'args.max_len does not match {pretrained_seq_len}!'
+
+            elif args.pretrained_model_name == 'glove':
+
+                from torchtext.data.utils import get_tokenizer
+                from torchtext.vocab import GloVe
+                from constants import GLOVE_DIMS
+                
+                if args.hidden in GLOVE_DIMS:
+                    print(f'Pretrained dimension {args.hidden} deployed! \n')
+
+                    # tokenizer = PretrainedTokenizer(pretrained_model=args.pretrained_model, 
+                    #                                 vocab_file=njoin(DROOT, 'GLOVE', f'vocab_npa_d={args.hidden}.npy'))
+                    tokenizer = get_tokenizer("basic_english")
+                    glove = GloVe(name='6B', dim=args.hidden)
+                    glove_dim = args.hidden
+                else:
+                    assert args.hidden < max(GLOVE_DIMS), 'Maximal glove dim is 300!'
+                    print(f'Reduced dimension {args.hidden} deployed! \n')
+
+                    # for glove_dim in GLOVE_DIMS:
+                    #     if glove_dim >= args.hidden:
+                    #         break
+                    glove_dim = 300
+                    tokenizer = get_tokenizer("basic_english")                    
+                    glove = GloVe(name='6B', dim=glove_dim)
+                vocab_size = len(glove.stoi)    
+
+            #max_length = tokenizer.model_max_length - 1
+            #max_length = tokenizer.model_max_length - 2
+            #args.max_len = tokenizer.model_max_length - 2
+            #args.max_len = tokenizer.model_max_length - 1
+
+            # def preprocess_function(examples):
+            #     return tokenizer(examples['text'], padding='max_length', truncation=True, max_length=max_length)
+
         # Build DataLoader
-        train_dataset = create_examples(args, tokenizer, mode='train')
-        test_dataset = create_examples(args, tokenizer, mode='test')
+        if args.fix_embed and args.pretrained_model_name == 'glove':
+            from utils.data_utils import glove_create_examples
+            train_dataset = glove_create_examples(args, glove_dim, tokenizer, mode='train')
+            test_dataset = glove_create_examples(args, glove_dim, tokenizer, mode='test')            
+        else:
+            train_dataset = create_examples(args, tokenizer, mode='train')
+            test_dataset = create_examples(args, tokenizer, mode='test')
         train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-        test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)        
+        test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)  
 
     train_size = len(train_loader.dataset)
     eval_size = len(test_loader.dataset)                      
@@ -191,8 +286,7 @@ if __name__ == '__main__':
         epochs = int(epochs)
         max_iters = steps_per_epoch * epochs    
         eval_interval = steps_per_epoch
-        log_interval = steps_per_epoch  # for mfu
-    
+        log_interval = steps_per_epoch  # for mfu    
     else:
         max_iters = args.max_iters
         eval_interval = args.eval_interval
@@ -217,6 +311,13 @@ if __name__ == '__main__':
     # init a new model from scratch
     print(f'Initializing a new {model_name} from scratch \n')
 
+    if not (args.fix_embed and args.pretrained_model_name == 'glove'):
+        vocab_size = tokenizer.vocab_size
+    if (args.fix_embed and args.pretrained_model_name == 'glove'):
+        pad_token_id = 0  
+    else: 
+        pad_token_id = tokenizer.pad_token_id
+
     # These are not hard constraints, but are used to prevent misconfigurations
     assert args.hidden % args.n_attn_heads == 0    
     config = {
@@ -227,18 +328,84 @@ if __name__ == '__main__':
         "d_model": args.hidden,
         "d_ff": args.ffn_hidden, 
         "p_drop": args.dropout,  
-        "vocab_size": tokenizer.vocab_size, 
+        "vocab_size": vocab_size, 
         "seq_len": args.max_len,
-        "pad_id": tokenizer.pad_token_id,
+        "pad_id": pad_token_id,
         "qkv_bias": args.qkv_bias,
         "qk_share": args.qk_share,     
-        "is_op":    args.is_op        
+        "is_op":    args.is_op,
+        "fix_embed": args.fix_embed,
+        "type_vocab_size": None        
     }
+    config['device'] = device
+
+    config['train_mask_type'] = train_mask_type = args.train_mask_type
+    if train_mask_type is not None:
+        assert train_mask_type in ['longformer'], 'train_mask_type does not exist!'     
+        if train_mask_type == 'longformer':             
+            global_token_indices = [0,1]
+            config['train_mask'] = create_longformer_mask(args.max_len, args.max_len//8, 
+                                                          global_token_indices).bool().to(device) 
 
     attn_setup = {'qk_share': args.qk_share, 'qkv_bias': args.qkv_bias, 'is_op': args.is_op,
-                  'instance': args.instance,
+                  'fix_embed': args.fix_embed, 
                   'dataset_name': args.dataset_name}        
-    
+
+    if args.fix_embed:
+        from models.model_utils import load_pretrained_model, load_embeddings
+
+        # config['layer_norm_eps'] = pretrained_model.embeddings.LayerNorm.eps
+        # config['hidden_dropout_prob'] = pretrained_model.embeddings.dropout.p
+        config['pretrained_model_name'] = args.pretrained_model_name
+        if config['pretrained_model_name'] == 'glove':
+            config['sinusoidal_pos_embds'] = True
+        elif config['pretrained_model_name'] in ['distilbert-base-uncased', 'albert-base-v2', 'gpt2']:
+            config['sinusoidal_pos_embds'] = False
+
+        attn_setup['pretrained_model_name'] = args.pretrained_model_name
+
+        if args.pretrained_model_name in ['distilbert-base-uncased', 'albert-base-v2']:
+            #pretrained_model = load_pretrained_model(config)
+            if args.hidden == pretrained_model_hidden:
+                pretrained_word_embeddings =\
+                    pretrained_model.embeddings.word_embeddings.detach().numpy()
+                pretrained_position_embeddigs =\
+                    pretrained_model.embeddings.position_embeddings.detach().numpy()
+            else:           
+                # PCA
+                from sklearn.decomposition import PCA  
+                pca = PCA(n_components=args.hidden, random_state=args.seed) 
+                pretrained_word_embeddings =\
+                     pca.fit_transform(pretrained_model.embeddings.word_embeddings.weight.detach().numpy())    
+                pretrained_position_embeddings =\
+                    pca.fit_transform(pretrained_model.embeddings.position_embeddings.weight.detach().numpy())                  
+        elif args.pretrained_model_name == 'gpt2':
+            if args.hidden == pretrained_model_hidden:
+                pretrained_word_embeddings =\
+                    pretrained_model.transformer.wte.weight.detach().numpy()
+                pretrained_position_embeddigs =\
+                    pretrained_model.transformer.wpe.weight.detach().numpy()
+            else:           
+                # PCA
+                from sklearn.decomposition import PCA  
+                pca = PCA(n_components=args.hidden, random_state=args.seed) 
+                pretrained_word_embeddings =\
+                     pca.fit_transform(pretrained_model.transformer.wte.weight.detach().numpy())    
+                pretrained_position_embeddings =\
+                    pca.fit_transform(pretrained_model.transformer.wte.weight.detach().numpy())             
+        elif args.pretrained_model_name == 'glove':      
+            if args.hidden in GLOVE_DIMS:                 
+                pretrained_word_embeddings = glove.vectors
+            else:
+                # t-SNE
+                # from sklearn.manifold import TSNE  # use t-SNE by default due to nonlinearity
+                # tsne = TSNE(n_components=args.hidden, perplexity=30, random_state=args.seed)
+                # pretrained_word_embeddings = tsne.fit_transform(glove.vectors.numpy())                
+                # PCA
+                from sklearn.decomposition import PCA  
+                pca = PCA(n_components=args.hidden, random_state=args.seed)
+                pretrained_word_embeddings = pca.fit_transform(glove.vectors.numpy())                
+                
     if 'fns' in model_name:
         attn_setup['manifold'] = args.manifold
         config['alpha'] = attn_setup['alpha'] = args.alpha      
@@ -254,7 +421,7 @@ if __name__ == '__main__':
                     config['d_intrinsic'] = attn_setup['d_intrinsic'] = args.hidden//args.n_attn_heads
                     config['sphere_radius'] = ((np.pi**(1/config['d_intrinsic']))/np.pi)                                   
             elif args.alpha >= 2:
-                config['sphere_radius'] = attn_setup['d_intrinsic'] = 1                 
+                config['sphere_radius'] = attn_setup['sphere_radius'] = 1                 
         
             # mask for distance
             config['mask_val'] = attn_setup['mask_val'] = config['sphere_radius'] * np.pi
@@ -262,11 +429,27 @@ if __name__ == '__main__':
 
             model_name = 'sp' + model_name
 
-        elif args.manifold == 'rd':
-            if args.alpha < 2:
-                config['d_intrinsic'] = attn_setup['d_intrinsic'] = args.hidden//args.n_attn_heads  # head_dim                
+        elif 'rd' in args.manifold:                            
 
-            model_name = 'rd' + model_name
+            model_name = args.manifold + model_name
+            config['is_rescale_dist'] = args.is_rescale_dist
+            if args.alpha < 2:
+                if 'v2_' in args.manifold:
+                    config['d_intrinsic'] = attn_setup['d_intrinsic'] = 1
+                else:
+                    # head_dim
+                    config['d_intrinsic'] = attn_setup['d_intrinsic'] = args.hidden//args.n_attn_heads  
+
+            # if config['is_rescale_dist'] and config['alpha'] < 2:
+            #     from mutils import fdm_kernel
+            #     from scipy.optimize import brentq
+            #     def kernel_difference(x):
+            #         return fdm_kernel(x, config['alpha'], config['d_intrinsic'], 
+            #         bandwidth=config['bandwidth'], is_rescaled_dist=config['is_rescale_dist']) -\
+            #              fdm_kernel(x, 2, config['d_intrinsic'], bandwidth=config['bandwidth'], is_rescaled_dist=config['is_rescale_dist'])                
+            #     config['intersection'] = intersection = brentq(kernel_difference, 1, 1e9)
+
+            #     print(f'Intersection = {intersection} \n')
 
         # degree index
         config['a'] = attn_setup['a'] = args.a      
@@ -274,19 +457,19 @@ if __name__ == '__main__':
     elif 'sink' in model_name:
         config['n_it'] = attn_setup['n_it'] = args.n_it
         #config['bandwidth'] = attn_setup['bandwidth'] = args.bandwidth
-
-    if model_name == 'rdfnsformer':
-        from v2_models.rdfnsformer import RDFNSformer
-        model = RDFNSformer(config)         
+    
+    if model_name in ['rdfnsformer', 'v2_rdfnsformer']:
+        from models.rdfnsformer import RDFNSformer
+        model = RDFNSformer(config)               
     elif model_name == 'spfnsformer':
-        from v2_models.spfnsformer import SPFNSformer
+        from models.spfnsformer import SPFNSformer
         model = SPFNSformer(config)                                      
     elif model_name == 'sinkformer':
-        from v2_models.sinkformer import SINKformer
+        from models.sinkformer import SINKformer
         model = SINKformer(config)
     elif model_name == 'dpformer':
-        from v2_models.dpformer import DPformer
-        model = DPformer(config)                   
+        from models.dpformer import DPformer
+        model = DPformer(config)   
 
     def count_parameters(model):
         return sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -297,8 +480,22 @@ if __name__ == '__main__':
         if hasattr(layer, 'reset_parameters'):
             layer.reset_parameters()
 
-    model = torch.nn.DataParallel(model)
+    #model = torch.nn.DataParallel(model)
     model.to(device)
+    if args.fix_embed:
+        if config['pretrained_model_name'] == 'glove':
+            if not torch.is_tensor(pretrained_word_embeddings):
+                pretrained_word_embeddings = torch.tensor(pretrained_word_embeddings)
+            model.embedding = nn.Embedding.from_pretrained(nn.Parameter(pretrained_word_embeddings).to(device), freeze=True)      
+        elif config['pretrained_model_name'] in ['distilbert-base-uncased', 'albert-base-v2', 'gpt2']:
+            if not torch.is_tensor(pretrained_word_embeddings):
+                pretrained_word_embeddings = torch.tensor(pretrained_word_embeddings)
+            model.embedding =\
+                 nn.Embedding.from_pretrained(nn.Parameter(pretrained_word_embeddings).to(device), freeze=True)      
+            if not torch.is_tensor(pretrained_position_embeddings):
+                pretrained_position_embeddings = torch.tensor(pretrained_position_embeddings)                 
+            model.pos_embedding =\
+                nn.Embedding.from_pretrained(nn.Parameter(pretrained_position_embeddings).to(device), freeze=True)
 
     model_name = 'op' + model_name if args.is_op else model_name
     attn_setup['model_name'] = model_name   
@@ -315,6 +512,8 @@ if __name__ == '__main__':
     os.makedirs(out_dir, exist_ok=True)  # makedir of out_dir
 
     # save config
+    if config['train_mask_type'] is not None:
+        del config['train_mask']
     with open(njoin(out_dir,"config.json"), "w") as ofile: 
         json.dump(config, ofile)   
     # save attn_setup
@@ -351,32 +550,6 @@ if __name__ == '__main__':
     #optimizer = AdamW(model.parameters(), lr=learning_rate, betas=(beta1,beta2), weight_decay=args.weight_decay)    
 
     # helps estimate an arbitrarily accurate loss over either split using many batches
-    """
-    @torch.no_grad()
-    def estimate_loss():
-        out_loss = {}
-        out_acc = {}
-        model.eval()
-        for split in ['train', 'val']:
-            losses = torch.zeros(eval_iters)
-            accs = torch.zeros(eval_iters)
-            for k in range(eval_iters):
-                X, Y = get_batch(split)
-                #X, Y, _ = get_batch(split)
-                with ctx:
-                    #logits, loss = model(X, Y)
-                    logits, _ = model(X)
-                    loss = loss_fn(logits, Y)
-                    predictions = torch.argmax(logits, dim=1)
-                    correct = torch.sum(predictions == Y).item() / len(Y)
-                losses[k] = loss.item()
-                accs[k] = correct
-            out_loss[split] = losses.mean()
-            out_acc[split] = accs.mean()
-        model.train()
-        return out_loss, out_acc
-    """
-
     @torch.no_grad()
     def fb_estimate_val():
         model.eval()
@@ -435,13 +608,14 @@ if __name__ == '__main__':
     train_n_batches, train_n_samples = len(train_loader), len(train_loader.dataset)    
 
     prev_lr = None
-    for epoch in range(epochs):    
-    #for epoch in tqdm(range(epochs)):
-        print('epoch: ', epoch)
+    #for epoch in range(epochs):    
+    for epoch in tqdm(range(epochs)):
+        #print('epoch: ', epoch)
         epoch_loss = 0
         epoch_accuracy = 0
 
-        for batch in tqdm(train_loader):
+        #for batch in tqdm(train_loader):
+        for batch in train_loader:
 
             inputs, labels = batch
             
@@ -464,7 +638,8 @@ if __name__ == '__main__':
                 #     lr = learning_rate
                 # else:
                 #     lr = min_lr        
-                if epoch + 1 < 15:
+                #if epoch + 1 < 15:
+                if epoch + 1 < epochs * 3/4:
                     lr = learning_rate
                 else:
                     lr = min_lr
@@ -500,14 +675,16 @@ if __name__ == '__main__':
 
         #if epoch_val_loss < best_val_loss or always_save_checkpoint:
         if always_save_checkpoint:
-            best_val_loss = epoch_val_loss
-            if iter_num > 0:
+            #best_val_loss = epoch_val_loss
+            #if iter_num > 0:
+            if epoch == epochs - 1:
                 checkpoint = {
                     'model': raw_model.state_dict(),
                     'optimizer': optimizer.state_dict(),
                     #'model_args': model_args,
                     'iter_num': iter_num,
-                    'best_val_loss': best_val_loss,
+                    #'best_val_loss': best_val_loss,
+                    'epoch_val_loss': epoch_val_loss,
                     'config': config,
                 }
                 print(f"saving checkpoint to {out_dir}")
@@ -527,71 +704,15 @@ if __name__ == '__main__':
     df = pd.DataFrame(metrics_ls, columns=metric_cols)
     df.to_csv(njoin(out_dir, 'run_performance.csv'))
 
-    print(f'All data saved under {out_dir}')        
-
-    # -----------------------------------------------
-
-    def train(self, epoch):
-        t = time.time()
-        if epoch == 12:
-            for g in self.optimizer.param_groups:
-                g['lr'] /= 10
-        losses, accs = 0, 0
-        n_batches, n_samples = len(self.train_loader), len(self.train_loader.dataset)
-        
-        self.model.train()
-        attention_weights_cpu = []
-
-        for i, batch in enumerate(self.train_loader):
-            inputs, labels = map(lambda x: x.to(self.device), batch)
-            # |inputs| : (batch_size, seq_len), |labels| : (batch_size)
-
-            outputs, attention_weights = self.model(inputs)
-            
-            loss = self.criterion(outputs, labels)
-            losses += loss.item()
-            acc = (outputs.argmax(dim=-1) == labels).sum()
-            accs += acc.item()
-            
-            self.optimizer.zero_grad()
-            loss.backward()
-            self.optimizer.step()
-
-            if i % (n_batches//5) == 0 and i != 0:
-                print('Iteration {} ({}/{})\tLoss: {:.4f} Acc: {:4f}%'.format(
-                    i, i, n_batches, losses/i, accs/(i*self.args.batch_size)*100.))
-        print(time.time() - t)
-        losses_b = losses/n_batches
-        acc_ns = accs/n_samples * 100.
-        print('Train Epoch: {}\t>\tLoss: {:.4f} / Acc: {:.1f}%'.format(epoch, losses_b, acc_ns))
-        return losses_b, acc_ns, attention_weights_cpu
-
-    def validate(self, epoch):
-        losses, accs = 0, 0
-        n_batches, n_samples = len(self.test_loader), len(self.test_loader.dataset)
-        
-        self.model.eval()
-        with torch.no_grad():
-            for i, batch in enumerate(self.test_loader):
-                inputs, labels = map(lambda x: x.to(self.device), batch)
-                # |inputs| : (batch_size, seq_len), |labels| : (batch_size)
-
-                outputs, attention_weights = self.model(inputs)
-                # |outputs| : (batch_size, 2), |attention_weights| : [(batch_size, n_attn_heads, seq_len, seq_len)] * n_layers
-                
-                loss = self.criterion(outputs, labels)
-                losses += loss.item()
-                acc = (outputs.argmax(dim=-1) == labels).sum()
-                accs += acc.item()
-
-        losses_b = losses / n_batches
-        acc_ns = accs / n_samples * 100.
-        print('Train Epoch: {}\t>\tLoss: {:.4f} / Acc: {:.1f}%'.format(epoch, losses_b, acc_ns))
-        return losses_b, acc_ns
-
-    def save(self, epoch, model_prefix='model', root='.model'):
-        path = Path(root) / (model_prefix + '.ep%d' % epoch)
-        if not path.parent.exists():
-            path.parent.mkdir()
-        
-        torch.save(self.model, path)    
+    print(f'All data saved under {out_dir}')       
+    # delete
+    if args.fix_embed:
+        if args.pretrained_model_name in ['distilbert-base-uncased', 'albert-base-v2', 'gpt2']:
+            is_match_word = torch.equal(model.embedding.weight, pretrained_word_embeddings.to(device))
+            is_match_position = torch.equal(model.pos_embedding.weight, pretrained_position_embeddings.to(device))
+            message = 'Embeddings params DO NOT match!' if not (is_match_word and is_match_position) else 'Embeddings params match!'
+            print(message)    
+        elif args.pretrained_model_name == 'glove':
+            is_match = torch.equal(model.embedding.weight, pretrained_word_embeddings.to(device))
+            message = 'Embeddings params DO NOT match!' if not is_match else 'Embeddings params match!'
+            print(message)            

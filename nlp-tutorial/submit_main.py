@@ -5,7 +5,7 @@ from os import makedirs
 from os.path import isdir, isfile
 from time import sleep
 from constants import DROOT, CLUSTER
-from mutils import njoin, get_instance, structural_model_root, str2bool
+from utils.mutils import njoin, get_instance, structural_model_root, str2bool
 #from qsub_parser import *
 from qsub_parser import job_setup, qsub, add_common_kwargs
 
@@ -66,14 +66,14 @@ if __name__ == '__main__':
 
                         kwargss = []
 
-                        # for alpha in [1.2, 2]:
-                        #     for bandwidth in [1]:
-                        #         for manifold in ['rd']: 
-                        #         #for manifold in ['rd', 'sphere']:
-                        #             kwargss.append({'model_name':'fnsformer','alpha':alpha,'a': 0,'bandwidth':bandwidth,'manifold':manifold,
-                        #                             'is_op': is_op})
+                        for alpha in [1.2, 2]:
+                            for bandwidth in [1]:
+                                for manifold in ['rd']: 
+                                #for manifold in ['rd', 'sphere']:
+                                    kwargss.append({'model_name':'fnsformer','alpha':alpha,'a': 0,'bandwidth':bandwidth,'manifold':manifold,
+                                                    'is_op': is_op})
 
-                        # kwargss.append({'model_name':'dpformer','is_op': is_op})
+                        kwargss.append({'model_name':'dpformer','is_op': is_op})
 
                         for n_it in [3]:
                             kwargss.append({'model_name':'sinkformer','n_it':n_it,'is_op': is_op})
@@ -153,5 +153,5 @@ if __name__ == '__main__':
                         nstack=nstack,
                         cluster=CLUSTER)
         
-        for i in range(len(commands)):
-            qsub(f'{commands[i]} {script_names[i]}', pbs_array_trues[i], path=job_path, **kwargs_qsubs[i])          
+        # for i in range(len(commands)):
+        #     qsub(f'{commands[i]} {script_names[i]}', pbs_array_trues[i], path=job_path, **kwargs_qsubs[i])          

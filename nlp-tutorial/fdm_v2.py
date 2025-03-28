@@ -1,0 +1,560 @@
+import argparse
+import json
+import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
+import numpy as np
+import os
+import pandas as pd
+import torch
+from torch.nn import functional as F  
+from tqdm import tqdm
+from os import makedirs
+from os.path import isdir
+
+from constants import HYP_CMAP, HYP_CNORM, FIGS_DIR, MODEL_SUFFIX
+from utils.mutils import njoin, str2bool, collect_model_dirs, AttrDict, load_model_files, dist_to_score
+from utils.mutils import dijkstra_matrix, fdm_kernel
+from models.rdfnsformer import RDFNSformer
+from models.dpformer import DPformer
+
+from torch.utils.data import DataLoader
+from torchtext.data.utils import get_tokenizer
+from torchtext.vocab import GloVe
+from utils.data_utils import glove_create_examples
+
+from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
+
+from matplotlib.transforms import ScaledTranslation
+from string import ascii_lowercase
+
+# ----- Global Variables -----
+MARKERSIZE = 4
+BIGGER_SIZE = 10
+plt.rc('font', size=BIGGER_SIZE)          # controls default text sizes
+plt.rc('axes', titlesize=BIGGER_SIZE)     # fontsize of the axes title
+plt.rc('axes', labelsize=BIGGER_SIZE)    # fontsize of the x and y labels
+plt.rc('xtick', labelsize=BIGGER_SIZE)    # fontsize of the tick labels
+plt.rc('ytick', labelsize=BIGGER_SIZE)    # fontsize of the tick labels
+plt.rc('legend', fontsize=BIGGER_SIZE-2)    # legend fontsize
+plt.rc('figure', titlesize=BIGGER_SIZE)  # fontsize of the figure title
+
+def count_trailing_zeros(tensor):
+    # Reverse the tensor and find the first non-zero element
+    reversed_tensor = torch.flip(tensor, dims=[0])
+    nonzero_indices = torch.nonzero(reversed_tensor, as_tuple=True)[0]
+    
+    if len(nonzero_indices) == 0:  # All elements are zero
+        return len(tensor)
+    else:  # Count zeros from the end
+        return nonzero_indices[0].item()
+
+if __name__ == '__main__':
+
+    # Training options
+    parser = argparse.ArgumentParser(description='nlp-tutorial/fdm.py arguments')    
+    # parser.add_argument('--train_with_ddp', default=False, type=bool, help='to use DDP or not')
+    parser.add_argument('--models_root', default='', help='Pretrained models root')
+    parser.add_argument('--fns_type', default='oprdfnsformer')  # 'spopfns'+MODEL_SUFFIX
+    parser.add_argument('--is_use_mask', type=str2bool, nargs='?', const=True, default=False)
+
+    parser.add_argument('--is_3d', type=str2bool, nargs='?', const=True, default=False)
+    parser.add_argument('--wandb_log', default=False, type=bool)
+
+    args = parser.parse_args()   
+
+    # ----- set up -----
+
+    # Get model setting from dir
+    models_root = args.models_root.replace('\\','')
+    dirnames = sorted([dirname for dirname in os.listdir(models_root) if 'former' in dirname])  
+
+    # select based on bandwidth    
+    DCT_ALL = collect_model_dirs(models_root, suffix=MODEL_SUFFIX)
+    model_types = list(DCT_ALL.keys())
+    dp_types = [model_type for model_type in model_types if 'dp' in model_type]
+
+    #SELECTED_ALPHAS = None
+    SELECTED_ALPHAS = [1.2,2.0]
+    #EXCLUDED_EPSS = None
+    EXCLUDED_EPSS = [100, 10, 0.1, 0.01, 0.001]
+    for model_type in model_types:
+        if args.fns_type in model_type:            
+            df_model = DCT_ALL[model_type].dropna(subset='alpha')
+            if SELECTED_ALPHAS is not None:
+                # ----- filter alphas -----
+                df_model = df_model[df_model['alpha'].isin(SELECTED_ALPHAS)]
+                # ------------------------
+                df_model.reset_index(drop=True, inplace=True)
+            if EXCLUDED_EPSS is not None:
+                # ----- filter alphas -----
+                df_model = df_model[~df_model['bandwidth'].isin(EXCLUDED_EPSS)]
+                # ------------------------
+                df_model.reset_index(drop=True, inplace=True)
+            break
+
+    # ----- general settings -----
+    # num_attention_heads, num_hidden_layers, hidden_size = df_modedm_l.loc[0,['num_attention_heads', 'num_hidden_layers', 'hidden_size']]
+    # dataset = df_model.loc[0,'dataset_name']
+
+    # ----- fns setting -----
+    alphas = sorted(df_model.loc[:,'alpha'].unique())  # small to large
+    epss = sorted(df_model.loc[:,'bandwidth'].unique())  
+
+    #quit()  # delete
+
+    #nrows, ncols = 1, config['n_layers']
+    #nrows, ncols = len(epss), len(alphas)
+    nrows, ncols = 5, len(alphas)
+    figsize = (3*ncols,3*nrows)
+    fig, axs = plt.subplots(nrows,ncols,figsize=figsize,
+                            sharex=False,sharey=False)  
+    if nrows == 1:
+       axs = np.expand_dims(axs, axis=0) if ncols > 1 else np.expand_dims(axs, axis=[0,1])
+
+    # Create figure and GridSpec layout
+    # fig = plt.figure(figsize=(12, 6))  
+    # gs = gridspec.GridSpec(2, 3, width_ratios=[1, 1, 2])  # 3 columns, last one is wider
+    # # Create 2×2 subfigures (small ones)
+    # ax1 = fig.add_subplot(gs[0, 0])  # Top-left
+    # ax2 = fig.add_subplot(gs[0, 1])  # Top-right
+    # ax3 = fig.add_subplot(gs[1, 0])  # Bottom-left
+    # ax4 = fig.add_subplot(gs[1, 1])  # Bottom-right
+    # axs = np.array([[ax1, ax2], [ax3, ax4]])
+    # # Create large subfigure (taking up 2 rows)
+    # ax5 = fig.add_subplot(gs[:, 2])  # Spans both rows (large plot)
+
+    adjusted_bandwidth = 0.1
+
+    total_figs = 0        
+    for row in range(nrows):
+        for col in range(ncols):
+            axs[row,col].text(
+        0.0, 1.0, f'({ascii_lowercase[total_figs]})', transform=(
+            axs[row,col].transAxes + ScaledTranslation(-20/72, +7/72, fig.dpi_scale_trans)),
+        va='bottom')
+            total_figs += 1
+
+    for eps_idx, eps in enumerate(epss):
+
+        model_dirs = []
+        for ii in range(df_model.shape[0]):
+            ensembles = df_model.loc[ii,'ensembles']            
+            if ensembles > 0 and df_model.loc[ii,'bandwidth'] == eps:
+                seed = str(sorted(df_model.loc[ii,'seeds'])[-1])
+                model_dirs.append(njoin(df_model.loc[ii,'model_dir'], f'model={seed}'))
+
+                #attn_setup, config, _, _ = load_model_files(model_dir)
+        print(f'Bandwidth: {eps}, seed selected: {seed}')
+
+        models = []  # delete
+        model_dirs = sorted(model_dirs)
+        for model_idx, model_dir in enumerate(model_dirs):
+
+            # ----- load pretrained_model -----    
+            attn_setup, config, run_performance, train_setting = load_model_files(model_dir)
+
+            fix_embed = attn_setup['fix_embed']
+            pretrained_model_name = config['pretrained_model_name'] if fix_embed else False
+
+            config['dataset_name'] = attn_setup['dataset_name']
+            config['max_len'] = config['seq_len']
+            manifold = attn_setup['manifold']
+            # if 'is_rescale_dist' not in config.keys():
+            #     # maybe add prompt
+            #     config['is_rescale_dist'] = args.is_rescale_dist  # manual setup            
+
+            main_args = AttrDict(config)
+
+            model = RDFNSformer(config, is_return_dist=True)     
+            checkpoint = njoin(model_dir, 'ckpt.pt')
+            ckpt = torch.load(checkpoint)
+            model.load_state_dict(ckpt['model'])
+            model.eval()
+            models.append(model)  # delete
+
+            # load dataset
+            if model_idx == 0:                
+                #batch_size = int(train_setting.loc[0,'batch_size'])
+                batch_size = 1    
+                if fix_embed:            
+                    if pretrained_model_name == 'glove':
+                        from constants import GLOVE_DIMS
+                        for glove_dim in GLOVE_DIMS:
+                            if glove_dim >= config['hidden']:
+                                break                
+                        tokenizer = get_tokenizer("basic_english")
+                        glove = GloVe(name='6B', dim=glove_dim)
+                        vocab_size = len(glove.stoi)   
+                        train_dataset = glove_create_examples(main_args, glove_dim, tokenizer, mode='train')
+                        test_dataset = glove_create_examples(main_args, glove_dim, tokenizer, mode='test')  
+
+                    elif pretrained_model_name == 'distilbert-base-uncased':
+                        from transformers import AutoTokenizer, DistilBertModel
+                        from utils.data_utils import create_examples
+                        #tokenizer = AutoTokenizer.from_pretrained(f'distilbert/{args.pretrained_model_name}')
+                        tokenizer = AutoTokenizer.from_pretrained(f'distilbert/distilbert-base-uncased')
+                        pretrained_model = DistilBertModel.from_pretrained("distilbert-base-uncased")
+                        vocab_size, pretrained_model_hidden =\
+                            pretrained_model.embeddings.word_embeddings.weight.shape
+                        pretrained_seq_len, _ = pretrained_model.embeddings.position_embeddings.weight.shape
+
+                        train_dataset = create_examples(main_args, tokenizer, mode='train')
+                        test_dataset = create_examples(main_args, tokenizer, mode='test')
+
+                    elif pretrained_model_name == 'albert-base-v2':
+                        from transformers import AlbertTokenizer, AlbertModel
+                        from utils.data_utils import create_examples
+                        tokenizer = AlbertTokenizer.from_pretrained('albert-base-v2')
+                        pretrained_model = AlbertModel.from_pretrained("albert-base-v2")                
+                        vocab_size, pretrained_model_hidden =\
+                            pretrained_model.embeddings.word_embeddings.weight.shape
+                        pretrained_seq_len, _ = pretrained_model.embeddings.position_embeddings.weight.shape
+
+                        train_dataset = create_examples(main_args, tokenizer, mode='train')
+                        test_dataset = create_examples(main_args, tokenizer, mode='test')    
+
+                else:
+                    from tokenization import Tokenizer, PretrainedTokenizer
+                    from utils.data_utils import create_examples
+                    tokenizer = PretrainedTokenizer(pretrained_model='wiki.model', vocab_file='wiki.vocab')
+
+                    train_dataset = create_examples(main_args, tokenizer, mode='train')
+                    test_dataset = create_examples(main_args, tokenizer, mode='test')                    
+
+                train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+                test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)  
+
+                # record length of sequences
+                X_lens = []
+                for ii in tqdm(range(len(train_dataset))):
+                    X, Y = train_dataset[ii]
+                    X_lens.append(config['max_len'] - count_trailing_zeros(X) )
+                max_len_idxs = np.where(np.array(X_lens) == config['max_len'])[0]
+                idx = 0
+                X, Y = train_dataset[max_len_idxs[idx]]
+                #X, Y = train_dataset[idx]
+                X_len = config['max_len'] - count_trailing_zeros(X)
+                print(f'Data sequence length: {X_len}')
+
+            # ----- fdm -----
+            alpha, bandwidth, a = attn_setup['alpha'], attn_setup['bandwidth'], attn_setup['a']
+            d_intrinsic = attn_setup['d_intrinsic'] if alpha < 2 else None
+
+            outputs, attention_weights, g_dists = model(X[None])       
+             
+
+            attention_scores = []            
+            for lidx, g_dist in enumerate(g_dists):
+
+                #if model_idx == 0:
+
+                # ----------------------------------------
+
+                pad_id = 0
+                positions = torch.arange(X[None].size(1), device=X[None].device, dtype=X[None].dtype).repeat(X[None].size(0), 1) + 1
+                position_pad_mask = X[None].eq(pad_id)
+                positions.masked_fill_(position_pad_mask, 0)
+
+                embeddings = model.embedding(X[None]) + model.pos_embedding(positions)
+
+                # PCA            
+                n_components = 2
+                pca = PCA(n_components=n_components, random_state=int(seed))
+                #pca.fit(W_word.detach().numpy())
+                # pca_results = pca.fit_transform(W_word.detach().numpy())
+                # data = StandardScaler().fit_transform(embeddings.detach().numpy()) # Normalise        
+                data = embeddings.detach().numpy() # No normalise
+                pca_results = pca.fit_transform(data[0])
+                x, y = pca_results.T                    
+                                                                            
+                # plot based on PCs
+                # rad = 3.5
+                # center = [x.mean(), y.mean()]
+                # far_xy_idxs = []
+                # for ii in range(len(x)):
+                #     if (x[ii] - center[0])**2 + (y[ii] - center[1])**2 >= rad**2:
+                #         far_xy_idxs.append(ii)
+                # close_xy_idxs = np.array(list(set(list(range(X_len))) - set(far_xy_idxs)))
+                # far_xy_idxs = np.array(far_xy_idxs)
+
+                # plot based on actual embeddings
+                if fix_embed:
+                    if pretrained_model_name == 'glove':
+                        rad = 6.1  # glove                        
+                    elif pretrained_model_name == 'distilbert-base-uncased':
+                        rad = 1  # distil-bert-uncased
+                    elif pretrained_model_name == 'albert-base-v2':
+                        rad = 0.5  # albert-base-v2
+
+                    # text
+                    if pretrained_model_name == 'glove':
+                        txts = [glove.itos[X[ii]] for ii in range(len(X))]
+                    elif pretrained_model_name in ['distilbert-base-uncased', 'albert-base-v2']:
+                        txts = tokenizer.decode(X)
+
+                else:
+                    rad = 5.95
+
+                    txts = tokenizer.convert_ids_to_tokens(list(X[None][0].detach().numpy()))
+
+                center = data[0].mean(0)
+                far_xy_idxs, close_xy_idxs = [], []
+                for ii, embd_coordinates in enumerate(data[0]):
+                    if ((embd_coordinates - center)**2).sum() >= rad**2:
+                        far_xy_idxs.append(ii)
+                    else:
+                        close_xy_idxs.append(ii)
+                close_xy_idxs = np.array(close_xy_idxs)
+                far_xy_idxs = np.array(far_xy_idxs)                    
+
+                # ----------------------------------------
+
+                if args.is_use_mask:
+                    g_dist = g_dist[:,:,:X_len,:X_len]
+                else:
+                    g_dist = g_dist[:,:,:,:]
+                    X_len = config['max_len']                
+                # print('g_dist')
+                # print(g_dist)  # delete
+                if 'v2_' not in manifold:
+                    attn_score = dist_to_score(g_dist, alpha, bandwidth, d_intrinsic=d_intrinsic)
+                else:
+                    attn_score = dist_to_score(g_dist, alpha, bandwidth, d_intrinsic=1)
+                #attn_score = dist_to_score(g_dist, alpha, adjusted_bandwidth, d_intrinsic=d_intrinsic)
+                attention_scores.append(attn_score)
+
+                # determine furthest distance and coordinates in embedding space
+                max_g_dist = g_dist.max().item()
+                m = g_dist.view(1, -1).argmax(1)
+                max_g_dist_indices = torch.cat(((m // X_len).view(-1, 1), (m % X_len).view(-1, 1)), dim=1)[0]          
+
+                if a > 0:            
+                    N_R = attn_score.sum(-1)  # row sum
+                    N_C = attn_score.sum(-2)  # col su                
+                    K_tilde = (N_R**(-a)).unsqueeze(-1) * attn_score * (N_C**(-a)).unsqueeze(-2)       
+                else:
+                    K_tilde = attn_score
+
+                K_tilde = K_tilde[0,0]
+                D_tilde = K_tilde.sum(-1)
+
+                attention_weight = F.normalize(K_tilde,p=1,dim=-1)  # can do this as the attn weights are always positive
+
+                min_attn_w, max_attn_w = attention_weight.min(), attention_weight.max()
+                median_attn_w = torch.median(attention_weight).item()
+
+                # Dijkstra to determine the shortest path between tokens furthest apart
+                shortest_distance, shortest_path = dijkstra_matrix(-np.log(attention_weight.detach().numpy()), 
+                                                                   max_g_dist_indices[0].item(), 
+                                                                   max_g_dist_indices[1].item())
+
+                print(f'alpha: {alpha}')
+                print(f'g_dist min: {g_dist.min()}, g_dist max: {g_dist.max()}')
+                print(f'attn_score min: {attn_score[0,0].min()}, max: {attn_score[0,0].max()}')
+                print(f'attention_weight min: {min_attn_w}, max: {max_attn_w}, median: {median_attn_w}')
+                print('\n')
+                print(f'most likely path: {shortest_path}')        
+                print(f'probability: {np.exp(-shortest_distance)}')    
+
+                # ----- compute spectrum of MC -----
+                K_hat = torch.diag(D_tilde**(-0.5)) @ K_tilde @ torch.diag(D_tilde**(-0.5))
+                K_hat_sym = 0.5*(K_hat + K_hat.T)
+                eigvals, eigvecs = torch.linalg.eigh(K_hat_sym)    
+                eigvecs = torch.diag(D_tilde**(-0.5)) @ eigvecs
+
+                eigvals = eigvals.detach().numpy()
+                eigvecs = eigvecs.detach().numpy()      
+                # order based on eigvals from large to small
+                ii = np.argsort(eigvals)
+                eigvals = eigvals[ii]
+                eigvecs = eigvecs[:,ii]          
+                # ----------------------------------
+
+                #attn_output = attention_weight @ value_vectors  
+
+                ###### 5. Plot results ######     
+
+                c_hyp = HYP_CMAP(HYP_CNORM(alpha))  # hyperparameter color
+                colors = ['k', c_hyp]                
+
+                if pretrained_model_name == 'glove':
+                    #thresh = 5e-17
+                    thresh = 5e-17
+                else:
+                    thresh = 1e-16
+                #thresh = 1e-5
+                #scale = 5e-4
+                scale = 0.25
+                # for idx in range(len(shortest_path[:-1])):
+                #     i, j = shortest_path[idx:idx+2]
+                #     axs[0,alphas.index(alpha)].plot([x[i], x[j]], [y[i], y[j]], 
+                #             c='grey', alpha=0.6, linewidth=10*scale * attention_weight[i,j].item(), 
+                #             linestyle='--')                       
+
+                # for i in range(X_len):
+                #     for j in range(X_len):
+                for i in far_xy_idxs:
+                    for j in far_xy_idxs:                
+                        # attention score
+                        # if attn_score[0,0,i,j] > thresh and i!=j:
+                        #     axs[0,alphas.index(alpha)].plot([x[i], x[j]], [y[i], y[j]], 
+                        #             c=c_hyp, linewidth=scale * attn_score[0,0,i,j].item(), 
+                        #             linestyle='-')
+                        #             #zorder=1)              
+
+                        # 1 / [1 - log(attention_weights)]
+                        if attention_weight[i,j] > thresh and i!=j and [i,j] :
+                            axs[0,alphas.index(alpha)].plot([x[i], x[j]], [y[i], y[j]], 
+                                    c=c_hyp, linewidth=scale * 1/(0.2-np.log(1 + attention_weight[i,j].item())), 
+                                    linestyle='-')  # linewidth=scale * attention_weight[i,j].item(),
+                                    #zorder=1)                                                           
+
+                # diffusion map embeddings
+                axs[1,alphas.index(alpha)].scatter(eigvecs[far_xy_idxs,-1], eigvecs[far_xy_idxs,-2], c=c_hyp, s=1.5)
+
+                # PCA embeddings                
+                axs[0,alphas.index(alpha)].scatter(x[far_xy_idxs], y[far_xy_idxs], 
+                                                    c='k', marker='.', alpha=1, s=1)     
+                # Furtherest tokens in PCA space
+                axs[0,alphas.index(alpha)].scatter(x[max_g_dist_indices[0]], y[max_g_dist_indices[0]], 
+                                                    c='r', marker='x', alpha=0.75, s=4)   
+                axs[0,alphas.index(alpha)].scatter(x[max_g_dist_indices[1]], y[max_g_dist_indices[1]], 
+                                                    c='r', marker='x', alpha=0.75, s=4)  
+                # Furtherest tokens in diffusion map space
+                axs[1,alphas.index(alpha)].scatter(eigvecs[max_g_dist_indices[0],-1], eigvecs[max_g_dist_indices[0],-2], 
+                                                    c='r', marker='x', alpha=0.75, s=4)   
+                axs[1,alphas.index(alpha)].scatter(eigvecs[max_g_dist_indices[1],-1], eigvecs[max_g_dist_indices[1],-2], 
+                                                    c='r', marker='x', alpha=0.75, s=4)                  
+
+                # plot most probable path between distant tokens
+                for idx in shortest_path[1:-1]:
+                    if idx not in far_xy_idxs:
+                        axs[0,alphas.index(alpha)].scatter(x[idx], y[idx], 
+                                                         c='green', marker='o', alpha=1, s=1.5)
+
+                        # axs[alphas.index(alpha), 1].scatter(eigvecs[idx,-1], eigvecs[idx,-2], 
+                        #                                  c='green', marker='o', alpha=1, s=1.5)
+
+                scale2 = 2 * scale
+                for ii in range(len(shortest_path)-1):
+                    i, j = shortest_path[ii], shortest_path[ii+1]
+                    axs[0,alphas.index(alpha)].plot([x[i], x[j]], [y[i], y[j]], 
+                                                     alpha=0.75,
+                                                     c='grey', linewidth=scale2 * 1/(0.2-np.log(1 + attention_weight[i,j].item())), 
+                                                     linestyle=':')
+                    # axs[alphas.index(alpha), 1].plot([eigvecs[i,-1], eigvecs[j,-1]], [eigvecs[i,-2], eigvecs[j,-2]],
+                    #          alpha=0.75, c='grey', linestyle='--')
+
+                # attention weights vs distance
+                markers = ['.', '^', 's']
+                linestyles = ['-', '--', '-.']
+                trans = [1, 0.75,0.5]
+                #q_rows = [0,1,2]
+                q_rows = [0, 100, 400]
+                if alphas.index(alpha) == 0:
+                    if len(dp_types) > 0:
+                        df_model_other = DCT_ALL[dp_types[0]]
+                        model_dir_other = njoin(df_model.loc[ii,'model_dir'], f'model={seed}')
+
+                        attn_setup_other, config_other, run_performance_other, train_setting_other =\
+                            load_model_files(model_dir_other)
+
+                        config_other['dataset_name'] = attn_setup_other['dataset_name']
+                        config_other['max_len'] = config_other['seq_len']
+
+                        model_other = DPformer(config_other, is_return_dist=True)     
+                        checkpoint_other = njoin(model_dir_other, 'ckpt.pt')
+                        ckpt_other = torch.load(checkpoint_other)
+                        model_other.load_state_dict(ckpt_other['model'])
+                        model_other.eval()    
+                        outputs_other, attention_weights_other, g_dists_other = model_other(X[None])   
+                        g_dist_other = g_dists_other[0]              
+                        attention_weight_other = attention_weights_other[0]
+
+                        for q_ii, q_row in enumerate(q_rows):
+                            axs[2,alphas.index(alpha)].scatter(g_dist_other[0,0,q_row,:].detach().flatten().numpy(), 
+                                                            attention_weight_other[0,0,q_row,:].detach().flatten().numpy(), 
+                                                            c='k', s=2, marker=markers[q_ii],
+                                                            alpha=trans[q_ii])
+
+                # attention weights
+                for q_ii, q_row in enumerate(q_rows):
+                    axs[2,alphas.index(alpha)].scatter(g_dist[0,0,q_row,:].detach().flatten().numpy(), 
+                                                    attention_weight[q_row,:].detach().flatten().numpy(), 
+                                                    c=c_hyp, s=2, marker=markers[q_ii],
+                                                    alpha=trans[q_ii])
+
+                dists = np.arange(1, g_dist.max().item(), 1)
+                if 'v2_rd' not in args.fns_type:
+                    d_intrinsic_kernel = config['d_intrinsic']
+                else:
+                    d_intrinsic_kernel = 1
+                kernel_values = fdm_kernel(dists, alpha, d_intrinsic_kernel, 
+                                           bandwidth=config['bandwidth'], 
+                                           is_rescaled_dist=False)  # already rescaled in forward prop
+                                           #is_rescaled_dist=config['is_rescale_dist'])
+                axs[2,alphas.index(alpha)].plot(dists, kernel_values, c=c_hyp)
+
+                # index vs distance
+                for q_ii, q_row in enumerate(q_rows[:1]):            
+                    axs[3,alphas.index(alpha)].plot(list(range(1,config['max_len']+1)), 
+                                                    g_dist[0,0,q_row,:].detach().flatten().numpy(),                                                      
+                                                    c=c_hyp, linestyle=linestyles[q_ii],
+                                                    linewidth=1,
+                                                    alpha=trans[q_ii])   
+
+                # distance histogram
+                axs[4,alphas.index(alpha)].hist(g_dist[0,0,:,:].detach().flatten().numpy(), 750,
+                                                color=c_hyp)
+
+                axs[2,alphas.index(alpha)].set_xscale('log')
+                axs[2,alphas.index(alpha)].set_yscale('log')
+
+                # label text                
+                for ii, idx in enumerate(far_xy_idxs):
+                    txt = txts[ii]
+                    axs[0,alphas.index(alpha)].annotate(txt, (x[idx], y[idx]), 
+                                                         size=5.5, zorder=3)
+                    axs[1,alphas.index(alpha)].annotate(txt, (eigvecs[idx,-1], eigvecs[idx,-2]), 
+                                                         size=5.5, zorder=3)
+
+                # label rows
+                axs[0,alphas.index(alpha)].set_title(rf'$\alpha$ = {alpha}', fontsize=10)    
+                axs[0,alphas.index(alpha)].set_xlabel(rf'PC$_1$',fontsize=8)
+                axs[0,alphas.index(alpha)].set_ylabel(rf'PC$_2$',fontsize=8)
+                axs[1,alphas.index(alpha)].set_xlabel(rf'DM$_1$',fontsize=8)
+                axs[1,alphas.index(alpha)].set_ylabel(rf'DM$_2$',fontsize=8)
+                axs[2,alphas.index(alpha)].set_xlabel(rf'Distance',fontsize=8)
+                axs[2,alphas.index(alpha)].set_ylabel(rf'Attn Weights',fontsize=8)   
+                axs[3,alphas.index(alpha)].set_xlabel(rf'Index',fontsize=8)
+                axs[3,alphas.index(alpha)].set_ylabel(rf'Distance',fontsize=8)                     
+                axs[4,alphas.index(alpha)].set_xlabel(rf'Distance',fontsize=8)
+                axs[4,alphas.index(alpha)].set_ylabel(rf'Histogram',fontsize=8)                                
+
+        # axs[0,0].set_title('Embedding PCs')
+        # axs[0,1].set_title('Diffusion map')
+        axs[0,1].text(1.1, 0.5, 'Embedding PCs', transform=axs[0,1].transAxes,
+        rotation=90, va='center', ha='center', fontsize=10)
+        axs[1,1].text(1.1, 0.5, 'Diffusion map', transform=axs[1,1].transAxes,
+        rotation=90, va='center', ha='center', fontsize=10)        
+        # axs[2,1].text(1.1, 0.5, 'Attention weights', transform=axs[1,1].transAxes,
+        # rotation=90, va='center', ha='center', fontsize=10)           
+
+        # legends
+        axs[0,0].plot([], [], alpha=0.75, c='grey',linestyle=':', label='Shortest path')
+        axs[0,0].plot([], [], alpha=1, c='k',linestyle='-', label='Attention weights')
+        axs[0,0].legend(frameon=False, fontsize=6.5, loc="upper left", bbox_to_anchor=(-0.05, 1.3))        
+
+        if 'L-hidden' in args.models_root.split('/')[1]:
+            SAVE_DIR = njoin(FIGS_DIR, 'pretrained_analysis', args.models_root.split('/')[1])
+        else:
+            SAVE_DIR = njoin(FIGS_DIR, 'pretrained_analysis', args.models_root.split('/')[1], 
+                            args.models_root.split('/')[2])
+        if not isdir(SAVE_DIR): makedirs(SAVE_DIR)    
+
+        if not isdir(SAVE_DIR): makedirs(SAVE_DIR)   
+        fig_file = f'fdm-{args.fns_type}-eps={eps}-pretrained_embd={pretrained_model_name}.pdf'
+        plt.tight_layout()
+        plt.savefig(njoin(SAVE_DIR, fig_file))            
+        print(f'Figure saved in {njoin(SAVE_DIR, fig_file)}')    

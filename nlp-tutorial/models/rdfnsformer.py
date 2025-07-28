@@ -16,9 +16,20 @@ class FNSSelfAttention(nn.Module):
         self.bandwidth = config['bandwidth']
         self.a = config['a']    
         self.is_rescale_dist = config['is_rescale_dist']
-        self.is_return_dist = is_return_dist
+        self.qk_share = config['qk_share']
 
+        self.is_return_dist = is_return_dist
         self.device = config['device']
+
+        if self.is_rescale_dist:
+            if self.alpha >= 2:
+                self.dist_scale = (self.head_dim)**0.5
+            else:
+                #self.dist_scale = (self.head_dim)**(1/self.alpha)
+                #self.dist_scale = self.head_dim**0.5 / (self.head_dim**(1/self.head_dim) - 1)
+                self.dist_scale = self.head_dim**0.5 / (2**(1/self.head_dim) - 1)
+
+            # self.dist_scale = self.head_dim
 
         # dependence on d for non-local kernel (rd), otherwise v2_rd   
         if self.alpha < 2: 
@@ -44,14 +55,15 @@ class FNSSelfAttention(nn.Module):
     def forward(self, q, k, v, attn_mask):
         # |q| : (batch_size, n_heads, q_len, d_k), |k| : (batch_size, n_heads, k_len, d_k), |v| : (batch_size, n_heads, v_len, d_v)
         # |attn_mask| : (batch_size, n_heads, seq_len(=q_len), seq_len(=k_len))
-        
+        #with torch.autograd.set_detect_anomaly(True):
         alpha, bandwidth, a = self.alpha, self.bandwidth, self.a
         batch_size, n_heads, q_len, head_dim = q.size()
         if self.alpha < 2: 
             d_intrinsic = self.d_intrinsic
 
         if self.is_rescale_dist:            
-            g_dist = torch.cdist(q, k, p=2) / (self.head_dim)**0.5            
+            #g_dist = torch.cdist(q, k, p=2) / (self.head_dim)**0.5
+            g_dist = torch.cdist(q, k, p=2) / self.dist_scale            
             #g_dist = torch.cdist(q, k, p=2) / (2 * self.head_dim)**0.5
             #g_dist = torch.cdist(self.layernorm_q(q), self.layernorm_k(k), p=2)
             # if self.alpha < 2:                
@@ -59,10 +71,27 @@ class FNSSelfAttention(nn.Module):
         else:            
             g_dist = torch.cdist(q, k, p=2)
 
-        if alpha < 2:                        
+        if isinstance(bandwidth, str):
+            if bandwidth.lower() == 'median':
+                bandwidth_lb = 1e-3
+                bandwidth = torch.median((g_dist**alpha).reshape((g_dist.shape[0], g_dist.shape[1], -1)), dim=-1).values.detach()
+                #bandwidth = torch.max(bandwidth[:,:,None,None],0.01*torch.ones_like(g_dist))
+                bandwidth = torch.max(bandwidth[:,:,None,None], bandwidth_lb*torch.ones_like(g_dist))
+            elif bandwidth.lower() == 'mean':
+                bandwidth_lb = 1e-3
+                bandwidth = torch.mean((g_dist).reshape((g_dist.shape[0], g_dist.shape[1], -1)), dim=-1).detach()**2
+                #bandwidth = torch.max(bandwidth[:,:,None,None],0.01*torch.ones_like(g_dist))
+                bandwidth = torch.max(bandwidth[:,:,None,None], bandwidth_lb*torch.ones_like(g_dist))
+                # print(f'bandwidth shape: {bandwidth.shape}')
+                # quit()
+            
+        if alpha < 2:                      
             attn_score = (1 + g_dist / bandwidth**0.5)**(-d_intrinsic-alpha)
         else:             
             attn_score = torch.exp(-(g_dist / bandwidth**0.5)**(alpha/(alpha-1)))    
+
+        if self.qk_share:  # Q = K
+            attn_score = attn_score.masked_fill(torch.diag_embed(torch.ones(q_len, device=q.device))==1, 0)
 
         # distance based
         if self.dist_threshold is not None and not self.training:            
@@ -177,6 +206,7 @@ class OPFNSAttention(nn.Module):
             self.WQ = orthogonal(nn.Linear(d_model, d_model, bias=self.qkv_bias))
 
         self.WV = nn.Linear(d_model, d_model, bias=self.qkv_bias)
+        #self.WV = orthogonal(nn.Linear(d_model, d_model, bias=self.qkv_bias))
         self.fns_attn = FNSSelfAttention(config, is_return_dist)
         self.linear = nn.Linear(n_heads * head_dim, d_model)
         
@@ -229,6 +259,10 @@ class EncoderLayer(nn.Module):
         self.p_drop = p_drop = config['p_drop']
         self.d_ff = d_ff = config['d_ff']        
 
+        self.is_resnet_scale = config['is_resnet_scale']
+        if self.is_resnet_scale:
+            self.n_layers = config['n_layers']
+
         if not config['is_op']:
             self.mha = FNSAttention(config, is_return_dist)
         else:
@@ -255,7 +289,10 @@ class EncoderLayer(nn.Module):
             attn_outputs, attn_weights, g_dist = self.mha(inputs, inputs, inputs, attn_mask)
 
         attn_outputs = self.dropout1(attn_outputs)
-        attn_outputs = self.layernorm1(inputs + attn_outputs)
+        if self.is_resnet_scale:  
+            attn_outputs = self.layernorm1(inputs + attn_outputs/(self.n_layers)**0.5)
+        else:
+            attn_outputs = self.layernorm1(inputs + attn_outputs)
         # |attn_outputs| : (batch_size, seq_len(=q_len), d_model)
         # |attn_weights| : (batch_size, n_heads, q_len, k_len)
 
@@ -274,6 +311,8 @@ class RDFNSformer(nn.Module):
     def __init__(self, config, is_return_dist=False):
         super(RDFNSformer, self).__init__()
 
+        self.alpha = config['alpha']
+
         self.vocab_size = config['vocab_size']
         self.seq_len = config['seq_len']
         self.d_model = config['d_model']
@@ -284,6 +323,7 @@ class RDFNSformer(nn.Module):
         self.pad_id = config['pad_id']
         self.fix_embed = config['fix_embed']
         self.max_len = config['seq_len']
+        self.num_classes = config['num_classes']
         if self.fix_embed:
             self.pretrained_model_name = config['pretrained_model_name']
 
@@ -293,7 +333,8 @@ class RDFNSformer(nn.Module):
         if not self.fix_embed:
             self.sinusoid_table = self.get_sinusoid_table(self.seq_len+1, self.d_model) # (seq_len+1, d_model)
             self.embedding = nn.Embedding(self.vocab_size, self.d_model)
-            self.pos_embedding = nn.Embedding.from_pretrained(self.sinusoid_table, freeze=True)
+            self.pos_embedding = nn.Embedding(self.vocab_size, self.d_model)
+            #self.pos_embedding = nn.Embedding.from_pretrained(self.sinusoid_table, freeze=True)
         elif (self.fix_embed and config['pretrained_model_name'] == 'glove'):
             self.sinusoid_table = self.get_sinusoid_table(self.seq_len+1, self.d_model) # (seq_len+1, d_model)
             self.pos_embedding = nn.Embedding.from_pretrained(self.sinusoid_table, freeze=True)                                             
@@ -311,8 +352,16 @@ class RDFNSformer(nn.Module):
         self.layers = nn.ModuleList([EncoderLayer(config, self.is_return_dist) for _ in range(self.n_layers)])
 
         # layers to classify
-        self.linear = nn.Linear(self.d_model, 2)
+        self.linear = nn.Linear(self.d_model, self.num_classes)
         self.softmax = nn.Softmax(dim=-1)
+
+    # mainly for embedding
+    def init_weights(self):
+        # Xavier
+        nn.init.xavier_uniform_(self.embedding.weight)
+        nn.init.xavier_uniform_(self.pos_embedding.weight)
+        # Normal init
+        #nn.init.normal_(self.embedding.weight, mean=0.0, std=self.d_model**0.5)
 
     # def __init__(self, config):
     #     super(RDFNSformer, self).__init__()

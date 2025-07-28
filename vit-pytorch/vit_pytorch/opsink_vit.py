@@ -124,6 +124,9 @@ class FasterSINKMultiHeadAttention(nn.Module):
         # Create a linear layer to project the query, key, and value
         if not self.qk_share:
             self.k_projection = orthogonal(nn.Linear(self.hidden_size, self.all_head_size, bias=self.qkv_bias))
+        else:
+            if self.num_attention_heads > 1:
+                self.q_projection = orthogonal(nn.Linear(self.hidden_size, self.all_head_size, bias=self.qkv_bias))
         self.v_projection = nn.Linear(self.hidden_size, self.all_head_size, bias=self.qkv_bias)           
 
         self.attn_dropout = nn.Dropout(config["attention_probs_dropout_prob"])
@@ -139,14 +142,17 @@ class FasterSINKMultiHeadAttention(nn.Module):
     def forward(self, x, output_attentions=False):
         # Project the query, key, and value
         # (batch_size, sequence_length, hidden_size) -> (batch_size, sequence_length, all_head_size * 3)
+        # Resize the query, key, and value to (batch_size, num_attention_heads, sequence_length, attention_head_size)
+        batch_size, sequence_length, _ = x.size()
+        num_attention_heads, attention_head_size = self.num_attention_heads, self.attention_head_size
+
         qk_share = self.qk_share
 
-        query = x
+        if not self.qk_share or (self.qk_share and self.num_attention_heads == 1):            
+            query = x
+        else:
+            query = self.q_projection(x)
         value = self.v_projection(x)
-
-        # Resize the query, key, and value to (batch_size, num_attention_heads, sequence_length, attention_head_size)
-        batch_size, sequence_length, _ = query.size()
-        num_attention_heads, attention_head_size = self.num_attention_heads, self.attention_head_size
 
         query = query.view(batch_size, sequence_length, num_attention_heads, attention_head_size).transpose(1, 2)
         value = value.view(batch_size, sequence_length, num_attention_heads, attention_head_size).transpose(1, 2)  

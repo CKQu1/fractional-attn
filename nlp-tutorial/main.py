@@ -29,12 +29,21 @@ from torch.distributed import init_process_group, destroy_process_group
 
 from constants import *
 from utils.mutils import njoin, create_model_dir, convert_train_history, structural_model_root
-from utils.mutils import str2bool, str2ls
+from utils.mutils import str2bool, str2ls, str_or_float
 
 #from torch.optim import AdamW
 from torch.optim import Adam
 
-# fix-embed
+"""
+s = 'model_name=fnsformer,alpha=1.2,a=0,bandwidth=1,manifold=v2_rd,is_op=True,dataset=emotion,model_root=/project/RDS-FSC-frac_attn-RW/fractional-attn/nlp-tutorial/.droot/1L-hidden=32-max_len=512-rescaled/config_qqv/emotion/layers=1-heads=1-qqv,seed=0,qk_share=True,is_rescale_dist=True,weight_decay=0,max_lr=0.001,min_lr=0.0002,max_len=512,n_layers=1,n_attn_heads=1,epochs=25,fix_embed=False,lr_scheduler_type=binary,train_bs=16,hidden=32'
+ss = '--' + ' --'.join(s.split(','))
+
+##### trained-embed #####
+python -i main.py --model_name=fnsformer --alpha=1 --a=0 --bandwidth=1 --manifold=rd --is_op=True\
+ --dataset=imdb --model_root=/project/RDS-FSC-frac_attn-RW/fractional-attn/nlp-tutorial/.droot/debug-mode --seed=0\
+ --qk_share=False --is_rescale_dist=True --weight_decay=0 --max_lr=0.001 --min_lr=0.0002\
+ --max_len=512 --n_layers=1 --n_attn_heads=1 --epochs=25 --fix_embed=False --lr_scheduler_type=binary --train_bs=16 --hidden=32
+"""
 
 """
 python -i main.py --train_bs=32 --dataset_name=imdb --fix_embed=True --pretrained_model_name=glove\
@@ -85,8 +94,8 @@ if __name__ == '__main__':
     #parser.add_argument('--eval_bs', default=10, type=int)
     #parser.add_argument('--weight_decay', default=0.01, type=float)
     parser.add_argument('--weight_decay', default=0, type=float)
-    parser.add_argument('--beta1', default=0.9, type=float)
-    parser.add_argument('--beta2', default=0.95, type=float)       
+    parser.add_argument('--beta1', default=0.9, type=float) 
+    parser.add_argument('--beta2', default=0.999, type=float)  # 0.95       
 
     parser.add_argument('--lr_scheduler_type', default='constant', type=str, help='cosine | binary | constant') 
     
@@ -104,7 +113,6 @@ if __name__ == '__main__':
     parser.add_argument("--exp_name", default='image-task', type=str)
 
     parser.add_argument('--seed', default=0, type=int)    
-    # parser.add_argument('--lr_scheduler_type', default='constant', type=str)
 
     # Tokenizer
     parser.add_argument('--vocab_file',          default='wiki.vocab',     type=str, help='vocabulary path')
@@ -117,10 +125,11 @@ if __name__ == '__main__':
 
     # Model settings
     parser.add_argument('--model_name', default='spfnsvit', type=str)  
+    parser.add_argument('--is_resnet_scale', type=str2bool, nargs='?', const=True, default=False)
     # fns type
     parser.add_argument('--manifold', default='sphere', type=str)
     parser.add_argument('--alpha', default=1, type=float)
-    parser.add_argument('--bandwidth', default=1, type=float)  
+    parser.add_argument('--bandwidth', default=1)  # type=float  
     parser.add_argument('--a', default=0, type=float)
     parser.add_argument('--is_rescale_dist', type=str2bool, nargs='?', const=True, default=False) 
     # sink type
@@ -189,7 +198,8 @@ if __name__ == '__main__':
     ##### SET SEED #####
     torch.manual_seed(args.seed)   
     device_type = 'cuda' if 'cuda' in device else 'cpu' # for later use in torch.autocast
-    
+        
+    args.bandwidth = float(args.bandwidth) if args.bandwidth.replace('.','').isnumeric() else args.bandwidth
     # poor man's data loader
     if dataset_name == 'imdb':
         if not args.fix_embed:
@@ -277,9 +287,23 @@ if __name__ == '__main__':
         train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
         test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)  
 
-    train_size = len(train_loader.dataset)
-    eval_size = len(test_loader.dataset)                      
-    steps_per_epoch = len(train_loader)
+        train_size = len(train_loader.dataset)
+        eval_size = len(test_loader.dataset)                      
+        steps_per_epoch = len(train_loader)        
+    else:
+        assert not args.fix_embed, f'fix_embed cannot be done for dataset {args.dataset_name}'
+        from transformers import AutoTokenizer
+        from utils.data_utils import get_datasets, datasets_create_examples
+
+        # Load a tokenizer (Example: BERT)
+        tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+        tokenized_train_dataset, tokenized_test_dataset = get_datasets(args, tokenizer)        
+        train_loader, test_loader = datasets_create_examples(args, 
+                                                             tokenized_train_dataset, 
+                                                             tokenized_test_dataset)        
+        train_size = len(tokenized_train_dataset)
+        eval_size = len(tokenized_test_dataset)  
+        steps_per_epoch = len(train_loader)
 
     epochs = args.epochs
     if epochs is not None:  
@@ -291,22 +315,7 @@ if __name__ == '__main__':
         max_iters = args.max_iters
         eval_interval = args.eval_interval
         log_interval = args.log_interval
-        eval_iters = args.eval_iters  
-
-    def get_batch(split):
-        if split == 'train':
-            data = train_loader
-        else:
-            data = test_loader
-        ix = torch.randint(len(data), (batch_size,))
-        x = torch.stack([data.dataset[i][0] for i in ix])
-        y = torch.tensor([data.dataset[i][1] for i in ix])
-        if device_type == 'cuda':
-            # pin arrays x,y, which allows us to move them to GPU asynchronously (non_blocking=True)
-            x, y = x.pin_memory().to(device, non_blocking=True), y.pin_memory().to(device, non_blocking=True)
-        else:
-            x, y = x.to(device), y.to(device)
-        return x, y        
+        eval_iters = args.eval_iters       
 
     # init a new model from scratch
     print(f'Initializing a new {model_name} from scratch \n')
@@ -321,6 +330,7 @@ if __name__ == '__main__':
     # These are not hard constraints, but are used to prevent misconfigurations
     assert args.hidden % args.n_attn_heads == 0    
     config = {
+        "is_resnet_scale": args.is_resnet_scale,
         "hidden": args.hidden,
         "n_layers": args.n_layers,
         "n_heads": args.n_attn_heads,
@@ -346,6 +356,12 @@ if __name__ == '__main__':
             global_token_indices = [0,1]
             config['train_mask'] = create_longformer_mask(args.max_len, args.max_len//8, 
                                                           global_token_indices).bool().to(device) 
+
+    # dataset
+    if args.dataset_name == 'imdb':
+        config['num_classes'] = 2
+    else:
+        config['num_classes'] = len(tokenized_train_dataset['label'].unique())
 
     attn_setup = {'qk_share': args.qk_share, 'qkv_bias': args.qkv_bias, 'is_op': args.is_op,
                   'fix_embed': args.fix_embed, 
@@ -412,22 +428,25 @@ if __name__ == '__main__':
         config['bandwidth'] = attn_setup['bandwidth'] = args.bandwidth          
         if args.manifold == 'sphere':
 
+            model_name = 'sp' + model_name
+            config['is_rescale_dist'] = args.is_rescale_dist
             if args.alpha < 2:
-                if args.n_attn_heads == 1:
-                    config['d_intrinsic'] = attn_setup['d_intrinsic'] = args.hidden//args.n_attn_heads - 1
-                    config['sphere_radius'] = ((np.pi**(1/config['d_intrinsic'])-1)/np.pi)   
-                    #config.sphere_radius = 1   
+                if 'v2_' in args.manifold:  
+                    config['d_intrinsic'] = attn_setup['d_intrinsic']
                 else:
-                    config['d_intrinsic'] = attn_setup['d_intrinsic'] = args.hidden//args.n_attn_heads
-                    config['sphere_radius'] = ((np.pi**(1/config['d_intrinsic']))/np.pi)                                   
-            elif args.alpha >= 2:
-                config['sphere_radius'] = attn_setup['sphere_radius'] = 1                 
+                    if args.n_attn_heads == 1:
+                        config['d_intrinsic'] = attn_setup['d_intrinsic'] = args.hidden//args.n_attn_heads - 1
+                        #config['sphere_radius'] = ((np.pi**(1/config['d_intrinsic'])-1)/np.pi)   
+                        #config.sphere_radius = 1   
+                    else:
+                        config['d_intrinsic'] = attn_setup['d_intrinsic'] = args.hidden//args.n_attn_heads
+                        #config['sphere_radius'] = ((np.pi**(1/config['d_intrinsic']))/np.pi)                                   
+            #elif args.alpha >= 2:
+            config['sphere_radius'] = attn_setup['sphere_radius'] = 1                 
         
             # mask for distance
             config['mask_val'] = attn_setup['mask_val'] = config['sphere_radius'] * np.pi
             attn_setup['sphere_radius'] = config['sphere_radius']   
-
-            model_name = 'sp' + model_name
 
         elif 'rd' in args.manifold:                            
 
@@ -546,7 +565,8 @@ if __name__ == '__main__':
 
     # optimizer
     #optimizer = model.configure_optimizers(weight_decay, learning_rate, (beta1, beta2), device_type)    
-    optimizer = Adam(model.parameters(), lr=learning_rate)  # sinkformer
+    #optimizer = Adam(model.parameters(), lr=learning_rate)  # sinkformer
+    optimizer = Adam(model.parameters(), lr=learning_rate, betas=(beta1,beta2), weight_decay=args.weight_decay)
     #optimizer = AdamW(model.parameters(), lr=learning_rate, betas=(beta1,beta2), weight_decay=args.weight_decay)    
 
     # helps estimate an arbitrarily accurate loss over either split using many batches
@@ -588,7 +608,7 @@ if __name__ == '__main__':
         return min_lr + coeff * (learning_rate - min_lr)    
     
     # training loop
-    X, Y = get_batch('train') # fetch the very first batch
+    #X, Y = get_batch('train') # fetch the very first batch
     #X, Y, IX = get_batch('train')
     #IXs = IX
     t0 = time.time()

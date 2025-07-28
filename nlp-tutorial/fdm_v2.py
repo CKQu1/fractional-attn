@@ -1,11 +1,13 @@
 import argparse
 import json
+import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import numpy as np
 import os
 import pandas as pd
 import torch
+from time import time
 from torch.nn import functional as F  
 from tqdm import tqdm
 from os import makedirs
@@ -27,6 +29,8 @@ from sklearn.preprocessing import StandardScaler
 
 from matplotlib.transforms import ScaledTranslation
 from string import ascii_lowercase
+
+matplotlib.use("Agg")
 
 # ----- Global Variables -----
 MARKERSIZE = 4
@@ -56,13 +60,14 @@ if __name__ == '__main__':
     # parser.add_argument('--train_with_ddp', default=False, type=bool, help='to use DDP or not')
     parser.add_argument('--models_root', default='', help='Pretrained models root')
     parser.add_argument('--fns_type', default='oprdfnsformer')  # 'spopfns'+MODEL_SUFFIX
-    parser.add_argument('--is_use_mask', type=str2bool, nargs='?', const=True, default=False)
+    parser.add_argument('--is_include_pad_mask', type=str2bool, nargs='?', const=True, default=False)
 
     parser.add_argument('--is_3d', type=str2bool, nargs='?', const=True, default=False)
     parser.add_argument('--wandb_log', default=False, type=bool)
 
     args = parser.parse_args()   
 
+    t0 = time()
     # ----- set up -----
 
     # Get model setting from dir
@@ -75,9 +80,12 @@ if __name__ == '__main__':
     dp_types = [model_type for model_type in model_types if 'dp' in model_type]
 
     #SELECTED_ALPHAS = None
-    SELECTED_ALPHAS = [1.2,2.0]
+    #SELECTED_ALPHAS = [1.2,2.0]
+    #SELECTED_ALPHAS = [1,2]
+    SELECTED_ALPHAS = [1.2, 1.6, 2]
     #EXCLUDED_EPSS = None
-    EXCLUDED_EPSS = [100, 10, 0.1, 0.01, 0.001]
+    #EXCLUDED_EPSS = [100, 10, 0.1, 0.01, 0.001]
+    SELECTED_EPSS = [1]
     for model_type in model_types:
         if args.fns_type in model_type:            
             df_model = DCT_ALL[model_type].dropna(subset='alpha')
@@ -86,9 +94,11 @@ if __name__ == '__main__':
                 df_model = df_model[df_model['alpha'].isin(SELECTED_ALPHAS)]
                 # ------------------------
                 df_model.reset_index(drop=True, inplace=True)
-            if EXCLUDED_EPSS is not None:
-                # ----- filter alphas -----
-                df_model = df_model[~df_model['bandwidth'].isin(EXCLUDED_EPSS)]
+            #if EXCLUDED_EPSS is not None:
+            if SELECTED_EPSS is not None:
+                # ----- filter bandwidth -----
+                #df_model = df_model[~df_model['bandwidth'].isin(EXCLUDED_EPSS)]
+                df_model = df_model[df_model['bandwidth'].isin(SELECTED_EPSS)]
                 # ------------------------
                 df_model.reset_index(drop=True, inplace=True)
             break
@@ -101,14 +111,17 @@ if __name__ == '__main__':
     alphas = sorted(df_model.loc[:,'alpha'].unique())  # small to large
     epss = sorted(df_model.loc[:,'bandwidth'].unique())  
 
-    #quit()  # delete
-
     #nrows, ncols = 1, config['n_layers']
     #nrows, ncols = len(epss), len(alphas)
-    nrows, ncols = 5, len(alphas)
+    if 'config_qqv' in args.models_root:
+        nrows, ncols = 7, len(alphas)
+    else:
+        nrows, ncols = 3, len(alphas)
+
     figsize = (3*ncols,3*nrows)
     fig, axs = plt.subplots(nrows,ncols,figsize=figsize,
                             sharex=False,sharey=False)  
+
     if nrows == 1:
        axs = np.expand_dims(axs, axis=0) if ncols > 1 else np.expand_dims(axs, axis=[0,1])
 
@@ -135,6 +148,9 @@ if __name__ == '__main__':
         va='bottom')
             total_figs += 1
 
+    t1 = time()
+    #print(f'Time 1: {t1 - t0}s')
+
     for eps_idx, eps in enumerate(epss):
 
         model_dirs = []
@@ -149,6 +165,7 @@ if __name__ == '__main__':
 
         models = []  # delete
         model_dirs = sorted(model_dirs)
+        g_distss, attn_scoress, attention_weightss = [], [], []
         for model_idx, model_dir in enumerate(model_dirs):
 
             # ----- load pretrained_model -----    
@@ -158,6 +175,8 @@ if __name__ == '__main__':
             pretrained_model_name = config['pretrained_model_name'] if fix_embed else False
 
             config['dataset_name'] = attn_setup['dataset_name']
+            if config['dataset_name'] == 'imdb' and 'num_classes' not in config.keys():
+                config['num_classes'] = 2
             config['max_len'] = config['seq_len']
             manifold = attn_setup['manifold']
             # if 'is_rescale_dist' not in config.keys():
@@ -186,8 +205,6 @@ if __name__ == '__main__':
                         tokenizer = get_tokenizer("basic_english")
                         glove = GloVe(name='6B', dim=glove_dim)
                         vocab_size = len(glove.stoi)   
-                        train_dataset = glove_create_examples(main_args, glove_dim, tokenizer, mode='train')
-                        test_dataset = glove_create_examples(main_args, glove_dim, tokenizer, mode='test')  
 
                     elif pretrained_model_name == 'distilbert-base-uncased':
                         from transformers import AutoTokenizer, DistilBertModel
@@ -199,9 +216,6 @@ if __name__ == '__main__':
                             pretrained_model.embeddings.word_embeddings.weight.shape
                         pretrained_seq_len, _ = pretrained_model.embeddings.position_embeddings.weight.shape
 
-                        train_dataset = create_examples(main_args, tokenizer, mode='train')
-                        test_dataset = create_examples(main_args, tokenizer, mode='test')
-
                     elif pretrained_model_name == 'albert-base-v2':
                         from transformers import AlbertTokenizer, AlbertModel
                         from utils.data_utils import create_examples
@@ -211,19 +225,45 @@ if __name__ == '__main__':
                             pretrained_model.embeddings.word_embeddings.weight.shape
                         pretrained_seq_len, _ = pretrained_model.embeddings.position_embeddings.weight.shape
 
+                    if config['dataset_name'] != 'imdb':
+                        from transformers import AutoTokenizer
+                        from utils.data_utils import get_datasets, datasets_create_examples
+                        # Load a tokenizer (Example: BERT)
+                        tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+                        main_args.train_bs = batch_size
+                        tokenized_train_dataset, tokenized_test_dataset = get_datasets(main_args, tokenizer)    
+                        train_loader, test_loader = datasets_create_examples(main_args, 
+                                                                            tokenized_train_dataset, 
+                                                                            tokenized_test_dataset)  
+
+                    else:
                         train_dataset = create_examples(main_args, tokenizer, mode='train')
                         test_dataset = create_examples(main_args, tokenizer, mode='test')    
 
                 else:
-                    from tokenization import Tokenizer, PretrainedTokenizer
-                    from utils.data_utils import create_examples
-                    tokenizer = PretrainedTokenizer(pretrained_model='wiki.model', vocab_file='wiki.vocab')
+                    if config['dataset_name'] != 'imdb':
+                        from transformers import AutoTokenizer
+                        from utils.data_utils import get_datasets, datasets_create_examples
+                        # Load a tokenizer (Example: BERT)
+                        tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+                        main_args.train_bs = batch_size
+                        tokenized_train_dataset, tokenized_test_dataset = get_datasets(main_args, tokenizer)        
+                        train_loader, test_loader = datasets_create_examples(main_args, 
+                                                                            tokenized_train_dataset, 
+                                                                            tokenized_test_dataset)  
 
-                    train_dataset = create_examples(main_args, tokenizer, mode='train')
-                    test_dataset = create_examples(main_args, tokenizer, mode='test')                    
+                    else:
+                        from tokenization import Tokenizer, PretrainedTokenizer
+                        from utils.data_utils import create_examples
+                        tokenizer = PretrainedTokenizer(pretrained_model='wiki.model', vocab_file='wiki.vocab')
+                        train_dataset = create_examples(main_args, tokenizer, mode='train')
+                        test_dataset = create_examples(main_args, tokenizer, mode='test')                    
 
                 train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
                 test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)  
+
+                t2 = time()
+                #print(f'Time 2: {t2 - t1}s')
 
                 # record length of sequences
                 X_lens = []
@@ -243,11 +283,11 @@ if __name__ == '__main__':
 
             outputs, attention_weights, g_dists = model(X[None])       
              
+            t3 = time()
+            #print(f'Time 3: {t3 - t2}s')
 
             attention_scores = []            
             for lidx, g_dist in enumerate(g_dists):
-
-                #if model_idx == 0:
 
                 # ----------------------------------------
 
@@ -263,10 +303,22 @@ if __name__ == '__main__':
                 pca = PCA(n_components=n_components, random_state=int(seed))
                 #pca.fit(W_word.detach().numpy())
                 # pca_results = pca.fit_transform(W_word.detach().numpy())
-                # data = StandardScaler().fit_transform(embeddings.detach().numpy()) # Normalise        
+                # data = StandardScaler().fit_transform(embeddings.detach().numpy()) # Normalise    
+
                 data = embeddings.detach().numpy() # No normalise
-                pca_results = pca.fit_transform(data[0])
-                x, y = pca_results.T                    
+                ##### Q = K case #####
+                if not config['qk_share']:
+                    #Q = model.layers[0].mha.fns_attn.WQ(data[0])
+                    Q = data[0]
+                    pca_results = pca.fit_transform(Q)
+                    Q_x, Q_y = pca_results.T  
+
+                    K = model.layers[0].mha.WK(torch.tensor(data[0])).detach()
+                    pca_results = pca.fit_transform(K)
+                    K_x, K_y = pca_results.T  
+                else:       
+                    pca_results = pca.fit_transform(data[0])
+                    x, y = pca_results.T                    
                                                                             
                 # plot based on PCs
                 # rad = 3.5
@@ -310,7 +362,7 @@ if __name__ == '__main__':
 
                 # ----------------------------------------
 
-                if args.is_use_mask:
+                if args.is_include_pad_mask:
                     g_dist = g_dist[:,:,:X_len,:X_len]
                 else:
                     g_dist = g_dist[:,:,:,:]
@@ -329,9 +381,10 @@ if __name__ == '__main__':
                 m = g_dist.view(1, -1).argmax(1)
                 max_g_dist_indices = torch.cat(((m // X_len).view(-1, 1), (m % X_len).view(-1, 1)), dim=1)[0]          
 
+
                 if a > 0:            
                     N_R = attn_score.sum(-1)  # row sum
-                    N_C = attn_score.sum(-2)  # col su                
+                    N_C = attn_score.sum(-2)  # col sum                
                     K_tilde = (N_R**(-a)).unsqueeze(-1) * attn_score * (N_C**(-a)).unsqueeze(-2)       
                 else:
                     K_tilde = attn_score
@@ -358,17 +411,38 @@ if __name__ == '__main__':
                 print(f'probability: {np.exp(-shortest_distance)}')    
 
                 # ----- compute spectrum of MC -----
-                K_hat = torch.diag(D_tilde**(-0.5)) @ K_tilde @ torch.diag(D_tilde**(-0.5))
-                K_hat_sym = 0.5*(K_hat + K_hat.T)
-                eigvals, eigvecs = torch.linalg.eigh(K_hat_sym)    
-                eigvecs = torch.diag(D_tilde**(-0.5)) @ eigvecs
+                ##### Q = K case #####
+                if config['qk_share']:
+                    K_hat = torch.diag(D_tilde**(-0.5)) @ K_tilde @ torch.diag(D_tilde**(-0.5))
+                    K_hat_sym = 0.5*(K_hat + K_hat.T)
+                    eigvals, eigvecs = torch.linalg.eigh(K_hat_sym)    
+                    eigvecs = torch.diag(D_tilde**(-0.5)) @ eigvecs
 
-                eigvals = eigvals.detach().numpy()
-                eigvecs = eigvecs.detach().numpy()      
-                # order based on eigvals from large to small
-                ii = np.argsort(eigvals)
-                eigvals = eigvals[ii]
-                eigvecs = eigvecs[:,ii]          
+                    eigvals = eigvals.detach().numpy()
+                    eigvecs = eigvecs.detach().numpy()      
+                    # order based on eigvals from large to small
+                    ii = np.argsort(eigvals)
+                    eigvals = eigvals[ii]
+                    eigvecs = eigvecs[:,ii]         
+                ##### Q != K case #####
+                else:
+                    # frequency (need to tune later)
+                    #q = 1/3
+                    q = 1/4*((attn_score[0,0] - attn_score[0,0].T).abs().max().item())  # q
+                    # Magnetic transform
+                    K_S = (attn_score[0,0] + attn_score[0,0].T).detach()/2  # symmetrized
+                    K_A = -(attn_score[0,0] - attn_score[0,0].T).detach()   # anti-symmetrized
+                    D = torch.diag(K_S.sum(-1))
+                    D_inv = torch.diag(1/K_S.sum(-1))
+                    arg = 2j*np.pi*q*K_A.numpy()
+                    H_q = (D_inv**(0.5)).to(torch.complex64) @ (K_S * torch.exp(torch.tensor(arg, dtype=torch.complex64))) @ (D_inv**(0.5)).to(torch.complex64)
+                    H_q = 0.5 * (H_q + H_q.mH)
+                    H_q = H_q.real
+                    #H_q = scipy.linalg.fractional_matrix_power(m, T)  # here T is a terminal time component 
+                    #assert (H_q.numel()==(H_q==H_q.T).sum()), 'H_q is asymmetric'
+
+                    eigvals, eigvecs = torch.linalg.eigh(H_q)
+
                 # ----------------------------------
 
                 #attn_output = attention_weight @ value_vectors  
@@ -384,177 +458,254 @@ if __name__ == '__main__':
                 else:
                     thresh = 1e-16
                 #thresh = 1e-5
-                #scale = 5e-4
-                scale = 0.25
-                # for idx in range(len(shortest_path[:-1])):
-                #     i, j = shortest_path[idx:idx+2]
-                #     axs[0,alphas.index(alpha)].plot([x[i], x[j]], [y[i], y[j]], 
-                #             c='grey', alpha=0.6, linewidth=10*scale * attention_weight[i,j].item(), 
-                #             linestyle='--')                       
-
-                # for i in range(X_len):
-                #     for j in range(X_len):
-                for i in far_xy_idxs:
-                    for j in far_xy_idxs:                
-                        # attention score
-                        # if attn_score[0,0,i,j] > thresh and i!=j:
-                        #     axs[0,alphas.index(alpha)].plot([x[i], x[j]], [y[i], y[j]], 
-                        #             c=c_hyp, linewidth=scale * attn_score[0,0,i,j].item(), 
-                        #             linestyle='-')
-                        #             #zorder=1)              
-
-                        # 1 / [1 - log(attention_weights)]
-                        if attention_weight[i,j] > thresh and i!=j and [i,j] :
-                            axs[0,alphas.index(alpha)].plot([x[i], x[j]], [y[i], y[j]], 
-                                    c=c_hyp, linewidth=scale * 1/(0.2-np.log(1 + attention_weight[i,j].item())), 
-                                    linestyle='-')  # linewidth=scale * attention_weight[i,j].item(),
-                                    #zorder=1)                                                           
+                scale = 5e-4
+                #scale = 0.25                                                        
 
                 # diffusion map embeddings
-                axs[1,alphas.index(alpha)].scatter(eigvecs[far_xy_idxs,-1], eigvecs[far_xy_idxs,-2], c=c_hyp, s=1.5)
+                #axs[1,alphas.index(alpha)].scatter(eigvecs[far_xy_idxs,-1], eigvecs[far_xy_idxs,-2], c=c_hyp, s=1.5)
 
-                # PCA embeddings                
-                axs[0,alphas.index(alpha)].scatter(x[far_xy_idxs], y[far_xy_idxs], 
-                                                    c='k', marker='.', alpha=1, s=1)     
-                # Furtherest tokens in PCA space
-                axs[0,alphas.index(alpha)].scatter(x[max_g_dist_indices[0]], y[max_g_dist_indices[0]], 
-                                                    c='r', marker='x', alpha=0.75, s=4)   
-                axs[0,alphas.index(alpha)].scatter(x[max_g_dist_indices[1]], y[max_g_dist_indices[1]], 
-                                                    c='r', marker='x', alpha=0.75, s=4)  
-                # Furtherest tokens in diffusion map space
-                axs[1,alphas.index(alpha)].scatter(eigvecs[max_g_dist_indices[0],-1], eigvecs[max_g_dist_indices[0],-2], 
-                                                    c='r', marker='x', alpha=0.75, s=4)   
-                axs[1,alphas.index(alpha)].scatter(eigvecs[max_g_dist_indices[1],-1], eigvecs[max_g_dist_indices[1],-2], 
-                                                    c='r', marker='x', alpha=0.75, s=4)                  
+                N_plot_tokens = 15
 
-                # plot most probable path between distant tokens
-                for idx in shortest_path[1:-1]:
-                    if idx not in far_xy_idxs:
-                        axs[0,alphas.index(alpha)].scatter(x[idx], y[idx], 
-                                                         c='green', marker='o', alpha=1, s=1.5)
+                # PCA embeddings         
+                if not config['qk_share']:
+                    axs[0,alphas.index(alpha)].scatter(Q_x[:N_plot_tokens], Q_y[:N_plot_tokens], 
+                                                       label='Queries', lw=.5, c='#dd1c77', edgecolors="k", s=20, zorder=2)   
+                 
+                    axs[0,alphas.index(alpha)].scatter(K_x[:N_plot_tokens], K_y[:N_plot_tokens], 
+                                                       label='Keys', lw=.5, c='#a8ddb5', edgecolors="k", s=20, zorder=2)   
 
-                        # axs[alphas.index(alpha), 1].scatter(eigvecs[idx,-1], eigvecs[idx,-2], 
-                        #                                  c='green', marker='o', alpha=1, s=1.5)
 
-                scale2 = 2 * scale
-                for ii in range(len(shortest_path)-1):
-                    i, j = shortest_path[ii], shortest_path[ii+1]
-                    axs[0,alphas.index(alpha)].plot([x[i], x[j]], [y[i], y[j]], 
-                                                     alpha=0.75,
-                                                     c='grey', linewidth=scale2 * 1/(0.2-np.log(1 + attention_weight[i,j].item())), 
-                                                     linestyle=':')
-                    # axs[alphas.index(alpha), 1].plot([eigvecs[i,-1], eigvecs[j,-1]], [eigvecs[i,-2], eigvecs[j,-2]],
-                    #          alpha=0.75, c='grey', linestyle='--')
+                    # for i in range(X_len):
+                    #     for j in range(X_len):             
+                    for i in range(N_plot_tokens):
+                        for j in range(N_plot_tokens):  
+                            if attention_weight[i,j] > thresh and i!=j and [i,j] :
+                                axs[0,alphas.index(alpha)].plot([Q_x[i], K_x[j]], [Q_y[i], K_y[j]], 
+                                        c=c_hyp, linewidth=scale * attention_weight[i,j].item(), #linewidth=scale * 1/(0.2-np.log(1 + attention_weight[i,j].item())), 
+                                        linestyle='-')  # linewidth=scale * attention_weight[i,j].item(),
+                                        #zorder=1)   
 
-                # attention weights vs distance
-                markers = ['.', '^', 's']
-                linestyles = ['-', '--', '-.']
-                trans = [1, 0.75,0.5]
-                #q_rows = [0,1,2]
-                q_rows = [0, 100, 400]
-                if alphas.index(alpha) == 0:
-                    if len(dp_types) > 0:
-                        df_model_other = DCT_ALL[dp_types[0]]
-                        model_dir_other = njoin(df_model.loc[ii,'model_dir'], f'model={seed}')
+                    # asymmetric diffusion map embeddings
+                    axs[1,alphas.index(alpha)].scatter(eigvecs[:N_plot_tokens,-1], eigvecs[:N_plot_tokens,-2], 
+                                                       c=c_hyp, marker='x', alpha=0.75, s=4)    
+                    
+                    # label text                
+                    for ii, idx in enumerate(range(N_plot_tokens)):
+                        txt = txts[ii]
+                        axs[1,alphas.index(alpha)].annotate(txt, (eigvecs[idx,-1], eigvecs[idx,-2]), 
+                                                            size=5.5, zorder=3)
+                    
+                    # eigenvalues of magnetic transform H_q
+                    axs[2,alphas.index(alpha)].scatter(np.arange(1,len(eigvals)+1), eigvals.numpy()[::-1], c=c_hyp, alpha=1, s=4)   
+                    #axs[2,alphas.index(alpha)].set_xscale('log'); axs[2,alphas.index(alpha)].set_yscale('log')
 
-                        attn_setup_other, config_other, run_performance_other, train_setting_other =\
-                            load_model_files(model_dir_other)
+                else:    
 
-                        config_other['dataset_name'] = attn_setup_other['dataset_name']
-                        config_other['max_len'] = config_other['seq_len']
+                    # for idx in range(len(shortest_path[:-1])):
+                    #     i, j = shortest_path[idx:idx+2]
+                    #     axs[0,alphas.index(alpha)].plot([x[i], x[j]], [y[i], y[j]], 
+                    #             c='grey', alpha=0.6, linewidth=10*scale * attention_weight[i,j].item(), 
+                    #             linestyle='--')                       
 
-                        model_other = DPformer(config_other, is_return_dist=True)     
-                        checkpoint_other = njoin(model_dir_other, 'ckpt.pt')
-                        ckpt_other = torch.load(checkpoint_other)
-                        model_other.load_state_dict(ckpt_other['model'])
-                        model_other.eval()    
-                        outputs_other, attention_weights_other, g_dists_other = model_other(X[None])   
-                        g_dist_other = g_dists_other[0]              
-                        attention_weight_other = attention_weights_other[0]
+                    # for i in range(X_len):
+                    #     for j in range(X_len):
+                    for i in far_xy_idxs:
+                        for j in far_xy_idxs:                
+                            # attention score
+                            # if attn_score[0,0,i,j] > thresh and i!=j:
+                            #     axs[0,alphas.index(alpha)].plot([x[i], x[j]], [y[i], y[j]], 
+                            #             c=c_hyp, linewidth=scale * attn_score[0,0,i,j].item(), 
+                            #             linestyle='-')
+                            #             #zorder=1)              
 
-                        for q_ii, q_row in enumerate(q_rows):
-                            axs[2,alphas.index(alpha)].scatter(g_dist_other[0,0,q_row,:].detach().flatten().numpy(), 
-                                                            attention_weight_other[0,0,q_row,:].detach().flatten().numpy(), 
-                                                            c='k', s=2, marker=markers[q_ii],
-                                                            alpha=trans[q_ii])
+                            # 1 / [1 - log(attention_weights)]
+                            if attention_weight[i,j] > thresh and i!=j and [i,j] :
+                                axs[0,alphas.index(alpha)].plot([x[i], x[j]], [y[i], y[j]], 
+                                        c=c_hyp, linewidth=scale * attention_weight[i,j].item(), #linewidth=scale * 1/(0.2-np.log(1 + attention_weight[i,j].item())), 
+                                        linestyle='-')  # linewidth=scale * attention_weight[i,j].item(),
+                                        #zorder=1)   
 
-                # attention weights
-                for q_ii, q_row in enumerate(q_rows):
-                    axs[2,alphas.index(alpha)].scatter(g_dist[0,0,q_row,:].detach().flatten().numpy(), 
-                                                    attention_weight[q_row,:].detach().flatten().numpy(), 
-                                                    c=c_hyp, s=2, marker=markers[q_ii],
-                                                    alpha=trans[q_ii])
+                    axs[0,alphas.index(alpha)].scatter(x[far_xy_idxs], y[far_xy_idxs], 
+                                                        c='k', marker='.', alpha=1, s=1)     
+                    # Furtherest tokens in PCA space
+                    axs[0,alphas.index(alpha)].scatter(x[max_g_dist_indices[0]], y[max_g_dist_indices[0]], 
+                                                        c='r', marker='x', alpha=0.75, s=4)   
+                    axs[0,alphas.index(alpha)].scatter(x[max_g_dist_indices[1]], y[max_g_dist_indices[1]], 
+                                                        c='r', marker='x', alpha=0.75, s=4)  
+                    # Furtherest tokens in diffusion map space
+                    axs[1,alphas.index(alpha)].scatter(eigvecs[max_g_dist_indices[0],-1], eigvecs[max_g_dist_indices[0],-2], 
+                                                        c='r', marker='x', alpha=0.75, s=4)   
+                    axs[1,alphas.index(alpha)].scatter(eigvecs[max_g_dist_indices[1],-1], eigvecs[max_g_dist_indices[1],-2], 
+                                                        c='r', marker='x', alpha=0.75, s=4)                  
 
-                dists = np.arange(1, g_dist.max().item(), 1)
-                if 'v2_rd' not in args.fns_type:
-                    d_intrinsic_kernel = config['d_intrinsic']
-                else:
-                    d_intrinsic_kernel = 1
-                kernel_values = fdm_kernel(dists, alpha, d_intrinsic_kernel, 
-                                           bandwidth=config['bandwidth'], 
-                                           is_rescaled_dist=False)  # already rescaled in forward prop
-                                           #is_rescaled_dist=config['is_rescale_dist'])
-                axs[2,alphas.index(alpha)].plot(dists, kernel_values, c=c_hyp)
+                    # plot most probable path between distant tokens
+                    for idx in shortest_path[1:-1]:
+                        if idx not in far_xy_idxs:
+                            axs[0,alphas.index(alpha)].scatter(x[idx], y[idx], 
+                                                            c='green', marker='o', alpha=1, s=1.5)
 
-                # index vs distance
-                for q_ii, q_row in enumerate(q_rows[:1]):            
-                    axs[3,alphas.index(alpha)].plot(list(range(1,config['max_len']+1)), 
-                                                    g_dist[0,0,q_row,:].detach().flatten().numpy(),                                                      
-                                                    c=c_hyp, linestyle=linestyles[q_ii],
-                                                    linewidth=1,
-                                                    alpha=trans[q_ii])   
+                            # axs[alphas.index(alpha), 1].scatter(eigvecs[idx,-1], eigvecs[idx,-2], 
+                            #                                  c='green', marker='o', alpha=1, s=1.5)
 
-                # distance histogram
-                axs[4,alphas.index(alpha)].hist(g_dist[0,0,:,:].detach().flatten().numpy(), 750,
-                                                color=c_hyp)
+                    scale2 = 2 * scale
+                    for ii in range(len(shortest_path)-1):
+                        i, j = shortest_path[ii], shortest_path[ii+1]
+                        axs[0,alphas.index(alpha)].plot([x[i], x[j]], [y[i], y[j]], 
+                                                        alpha=0.75,
+                                                        c='grey', linewidth=scale * attention_weight[i,j].item(), #linewidth=scale2 * 1/(0.2-np.log(1 + attention_weight[i,j].item())), 
+                                                        linestyle=':')
+                        # axs[alphas.index(alpha), 1].plot([eigvecs[i,-1], eigvecs[j,-1]], [eigvecs[i,-2], eigvecs[j,-2]],
+                        #          alpha=0.75, c='grey', linestyle='--')
 
-                axs[2,alphas.index(alpha)].set_xscale('log')
-                axs[2,alphas.index(alpha)].set_yscale('log')
+                    # attention weights vs distance
+                    markers = ['.', '^', 's']
+                    linestyles = ['-', '--', '-.']
+                    trans = [1, 0.75,0.5]
+                    #q_rows = [0,1,2]
+                    q_rows = [0, 100, 400]
+                    if alphas.index(alpha) == 0:
+                        if len(dp_types) > 0:
+                            df_model_other = DCT_ALL[dp_types[0]]
+                            model_dir_other = njoin(df_model.loc[ii,'model_dir'], f'model={seed}')
 
-                # label text                
-                for ii, idx in enumerate(far_xy_idxs):
-                    txt = txts[ii]
-                    axs[0,alphas.index(alpha)].annotate(txt, (x[idx], y[idx]), 
-                                                         size=5.5, zorder=3)
-                    axs[1,alphas.index(alpha)].annotate(txt, (eigvecs[idx,-1], eigvecs[idx,-2]), 
-                                                         size=5.5, zorder=3)
+                            attn_setup_other, config_other, run_performance_other, train_setting_other =\
+                                load_model_files(model_dir_other)
 
-                # label rows
-                axs[0,alphas.index(alpha)].set_title(rf'$\alpha$ = {alpha}', fontsize=10)    
-                axs[0,alphas.index(alpha)].set_xlabel(rf'PC$_1$',fontsize=8)
-                axs[0,alphas.index(alpha)].set_ylabel(rf'PC$_2$',fontsize=8)
-                axs[1,alphas.index(alpha)].set_xlabel(rf'DM$_1$',fontsize=8)
-                axs[1,alphas.index(alpha)].set_ylabel(rf'DM$_2$',fontsize=8)
-                axs[2,alphas.index(alpha)].set_xlabel(rf'Distance',fontsize=8)
-                axs[2,alphas.index(alpha)].set_ylabel(rf'Attn Weights',fontsize=8)   
-                axs[3,alphas.index(alpha)].set_xlabel(rf'Index',fontsize=8)
-                axs[3,alphas.index(alpha)].set_ylabel(rf'Distance',fontsize=8)                     
-                axs[4,alphas.index(alpha)].set_xlabel(rf'Distance',fontsize=8)
-                axs[4,alphas.index(alpha)].set_ylabel(rf'Histogram',fontsize=8)                                
+                            config_other['dataset_name'] = attn_setup_other['dataset_name']
+                            if config_other['dataset_name'] == 'imdb' and 'num_classes' not in config_other.keys():
+                                config_other['num_classes'] = 2
+                            config_other['max_len'] = config_other['seq_len']
 
-        # axs[0,0].set_title('Embedding PCs')
-        # axs[0,1].set_title('Diffusion map')
-        axs[0,1].text(1.1, 0.5, 'Embedding PCs', transform=axs[0,1].transAxes,
-        rotation=90, va='center', ha='center', fontsize=10)
-        axs[1,1].text(1.1, 0.5, 'Diffusion map', transform=axs[1,1].transAxes,
-        rotation=90, va='center', ha='center', fontsize=10)        
-        # axs[2,1].text(1.1, 0.5, 'Attention weights', transform=axs[1,1].transAxes,
-        # rotation=90, va='center', ha='center', fontsize=10)           
+                            model_other = DPformer(config_other, is_return_dist=True)     
+                            checkpoint_other = njoin(model_dir_other, 'ckpt.pt')
+                            ckpt_other = torch.load(checkpoint_other)
+                            model_other.load_state_dict(ckpt_other['model'])
+                            model_other.eval()    
+                            outputs_other, attention_weights_other, g_dists_other = model_other(X[None])   
+                            g_dist_other = g_dists_other[0]              
+                            attention_weight_other = attention_weights_other[0]
 
-        # legends
-        axs[0,0].plot([], [], alpha=0.75, c='grey',linestyle=':', label='Shortest path')
-        axs[0,0].plot([], [], alpha=1, c='k',linestyle='-', label='Attention weights')
-        axs[0,0].legend(frameon=False, fontsize=6.5, loc="upper left", bbox_to_anchor=(-0.05, 1.3))        
+                            for q_ii, q_row in enumerate(q_rows):
+                                axs[2,alphas.index(alpha)].scatter(g_dist_other[0,0,q_row,:].detach().flatten().numpy(), 
+                                                                attention_weight_other[0,0,q_row,:].detach().flatten().numpy(), 
+                                                                c='k', s=2, marker=markers[q_ii],
+                                                                alpha=trans[q_ii])
+                                
+                            axs[6,alphas.index(alpha)].hist(attention_weight_other.detach().flatten().numpy(), 750,
+                                                            color='k', alpha=0.5, density=True)                            
+
+                    # attention weights
+                    for q_ii, q_row in enumerate(q_rows):
+                        axs[2,alphas.index(alpha)].scatter(g_dist[0,0,q_row,:].detach().flatten().numpy(), 
+                                                        attention_weight[q_row,:].detach().flatten().numpy(), 
+                                                        c=c_hyp, s=2, marker=markers[q_ii],
+                                                        alpha=trans[q_ii])
+
+                    dists = np.arange(1, g_dist.max().item(), 1)
+                    if alpha < 2:
+                        if 'v2_rd' not in args.fns_type:
+                            d_intrinsic_kernel = config['d_intrinsic']
+                        else:
+                            d_intrinsic_kernel = 1
+
+                    # extract from model
+                    if config['is_rescale_dist']:
+                        dist_scale = model.layers[0].mha.fns_attn.dist_scale
+                    else:
+                        dist_scale = 1
+
+                    kernel_values = fdm_kernel(dists, alpha, d_intrinsic_kernel, 
+                                            bandwidth=config['bandwidth'], 
+                                            dist_scale=dist_scale)
+                                            #is_rescaled_dist=False)  # already rescaled in forward prop
+                                            #is_rescaled_dist=config['is_rescale_dist'])
+                    axs[2,alphas.index(alpha)].plot(dists, kernel_values, c=c_hyp)
+
+                    # index vs distance
+                    for q_ii, q_row in enumerate(q_rows[:1]):            
+                        axs[3,alphas.index(alpha)].plot(list(range(1,config['max_len']+1)), 
+                                                        g_dist[0,0,q_row,:].detach().flatten().numpy(),                                                      
+                                                        c=c_hyp, linestyle=linestyles[q_ii],
+                                                        linewidth=1,
+                                                        alpha=trans[q_ii])   
+
+                    # distance histogram
+                    axs[4,alphas.index(alpha)].hist(g_dist[0,0,:,:].detach().flatten().numpy(), 750,
+                                                    color=c_hyp, density=True)
+
+                    # attention score histogram
+                    axs[5,alphas.index(alpha)].hist(attn_score[0,0,:,:].detach().flatten().numpy(), 750,
+                                                    color=c_hyp, density=True)
+
+                    # attention weight histogram
+                    axs[6,alphas.index(alpha)].hist(attention_weight.detach().flatten().numpy(), 750,
+                                                    color=c_hyp, density=True)
+
+                    axs[2,alphas.index(alpha)].set_xscale('log')
+                    axs[2,alphas.index(alpha)].set_yscale('log')
+
+                    # label text                
+                    for ii, idx in enumerate(far_xy_idxs):
+                        txt = txts[ii]
+                        axs[0,alphas.index(alpha)].annotate(txt, (x[idx], y[idx]), 
+                                                            size=5.5, zorder=3)
+                        axs[1,alphas.index(alpha)].annotate(txt, (eigvecs[idx,-1], eigvecs[idx,-2]), 
+                                                            size=5.5, zorder=3)
+
+                    # label rows
+                    axs[0,alphas.index(alpha)].set_title(rf'$\alpha$ = {alpha}', fontsize=10)    
+                    axs[0,alphas.index(alpha)].set_xlabel(rf'PC$_1$',fontsize=8)
+                    axs[0,alphas.index(alpha)].set_ylabel(rf'PC$_2$',fontsize=8)
+                    axs[1,alphas.index(alpha)].set_xlabel(rf'DM$_1$',fontsize=8)
+                    axs[1,alphas.index(alpha)].set_ylabel(rf'DM$_2$',fontsize=8)
+                    axs[2,alphas.index(alpha)].set_xlabel(rf'Distance',fontsize=8)
+                    axs[2,alphas.index(alpha)].set_ylabel(rf'Attn Weights',fontsize=8)   
+                    axs[3,alphas.index(alpha)].set_xlabel(rf'Index',fontsize=8)
+                    axs[3,alphas.index(alpha)].set_ylabel(rf'Distance',fontsize=8)                     
+                    axs[4,alphas.index(alpha)].set_xlabel(rf'Distance',fontsize=8)
+                    axs[4,alphas.index(alpha)].set_ylabel(rf'Density',fontsize=8)                                
+                    axs[5,alphas.index(alpha)].set_xlabel(rf'Attn Score',fontsize=8)
+                    axs[5,alphas.index(alpha)].set_ylabel(rf'Density',fontsize=8) 
+                    axs[6,alphas.index(alpha)].set_xlabel(rf'Attn Weights',fontsize=8)
+                    axs[6,alphas.index(alpha)].set_ylabel(rf'Density',fontsize=8)                 
+
+            g_distss.append(g_dists)
+            attn_scoress.append(attention_scores)
+            attention_weightss.append(attention_weights)
+
+        t4 = time()
+        #print(f'Time 4: {t4 - t3}s')
+
+        if config['qk_share']:
+            for row in range(4,7):
+                for col in range(len(alphas)):
+                    axs[row,col].set_xscale('log'); axs[row,col].set_yscale('log')
+
+            # axs[0,0].set_title('Embedding PCs')
+            # axs[0,1].set_title('Diffusion map')
+            axs[0,1].text(1.1, 0.5, 'Embedding PCs', transform=axs[0,1].transAxes,
+            rotation=90, va='center', ha='center', fontsize=10)
+            axs[1,1].text(1.1, 0.5, 'Diffusion map', transform=axs[1,1].transAxes,
+            rotation=90, va='center', ha='center', fontsize=10)        
+            # axs[2,1].text(1.1, 0.5, 'Attention weights', transform=axs[1,1].transAxes,
+            # rotation=90, va='center', ha='center', fontsize=10)           
+
+            # legends
+            # axs[0,0].plot([], [], alpha=0.75, c='grey',linestyle=':', label='Shortest path')
+            # axs[0,0].plot([], [], alpha=1, c='k',linestyle='-', label='Attention weights')
+            # axs[0,0].legend(frameon=False, fontsize=6.5, loc="upper left", bbox_to_anchor=(-0.05, 1.3))        
 
         if 'L-hidden' in args.models_root.split('/')[1]:
             SAVE_DIR = njoin(FIGS_DIR, 'pretrained_analysis', args.models_root.split('/')[1])
         else:
             SAVE_DIR = njoin(FIGS_DIR, 'pretrained_analysis', args.models_root.split('/')[1], 
                             args.models_root.split('/')[2])
-        if not isdir(SAVE_DIR): makedirs(SAVE_DIR)    
-
-        if not isdir(SAVE_DIR): makedirs(SAVE_DIR)   
-        fig_file = f'fdm-{args.fns_type}-eps={eps}-pretrained_embd={pretrained_model_name}.pdf'
+        if not isdir(SAVE_DIR): makedirs(SAVE_DIR)       
+        qk_affix = 'qqv' if config['qk_share'] else 'qkv'
+        fig_file = f'fdm-{args.fns_type}-eps={eps}-pretrained_embd={pretrained_model_name}-{qk_affix}.pdf'
         plt.tight_layout()
         plt.savefig(njoin(SAVE_DIR, fig_file))            
         print(f'Figure saved in {njoin(SAVE_DIR, fig_file)}')    
+
+        t5 = time()
+        #print(f'Time 5: {t5 - t4}s')

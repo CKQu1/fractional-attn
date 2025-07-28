@@ -193,6 +193,10 @@ class EncoderLayer(nn.Module):
         self.p_drop = p_drop = config['p_drop']
         self.d_ff = d_ff = config['d_ff']
 
+        self.is_resnet_scale = config['is_resnet_scale']
+        if self.is_resnet_scale:
+            self.n_layers = config['n_layers']
+
         if not config['is_op']:
             self.mha = MultiHeadAttention(config, is_return_dist)
         else:
@@ -216,7 +220,10 @@ class EncoderLayer(nn.Module):
             attn_outputs, attn_weights, g_dist = self.mha(inputs, inputs, inputs, attn_mask)
 
         attn_outputs = self.dropout1(attn_outputs)
-        attn_outputs = self.layernorm1(inputs + attn_outputs)
+        if self.is_resnet_scale:  
+            attn_outputs = self.layernorm1(inputs + attn_outputs/(self.n_layers)**0.5)
+        else:
+            attn_outputs = self.layernorm1(inputs + attn_outputs)
         # |attn_outputs| : (batch_size, seq_len(=q_len), d_model)
         # |attn_weights| : (batch_size, n_heads, q_len, k_len)
 
@@ -276,6 +283,7 @@ class DPformer(nn.Module):
         self.pad_id = config['pad_id']
         self.fix_embed = config['fix_embed']
         self.max_len = config['seq_len']
+        self.num_classes = config['num_classes']
         if self.fix_embed:
             self.pretrained_model_name = config['pretrained_model_name']
 
@@ -317,7 +325,7 @@ class DPformer(nn.Module):
         self.layers = nn.ModuleList([EncoderLayer(config, self.is_return_dist) for _ in range(self.n_layers)])
 
         # layers to classify
-        self.linear = nn.Linear(self.d_model, 2)
+        self.linear = nn.Linear(self.d_model, self.num_classes)
         self.softmax = nn.Softmax(dim=-1)                                     
 
     def forward(self, inputs):

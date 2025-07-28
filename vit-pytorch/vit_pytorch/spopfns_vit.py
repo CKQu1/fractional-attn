@@ -300,7 +300,7 @@ class FasterOPDMFNSMultiHeadAttention(nn.Module):
         query = query.view(batch_size, sequence_length, num_attention_heads, attention_head_size).transpose(1, 2)
         value = value.view(batch_size, sequence_length, num_attention_heads, attention_head_size).transpose(1, 2)
 
-        #eps = 1e-7  # for limiting the divergence from acos
+        eps = 1e-7  # for limiting the divergence from acos
         if not self.qk_share:        
             key = self.k_projection(x)
             key = key.view(batch_size, sequence_length, num_attention_heads, attention_head_size).transpose(1, 2)                      
@@ -315,9 +315,18 @@ class FasterOPDMFNSMultiHeadAttention(nn.Module):
             #g_dist = torch.acos(torch.clamp(query @ query.transpose(-2, -1), -1+eps, 1-eps)) * sphere_radius
             # new method
             dot = query @ query.transpose(-2, -1)
-            dot = dot.masked_fill_(torch.diag_embed(torch.ones(sequence_length, device=query.device))==1, 1)
+            #dot = dot.masked_fill_(torch.diag_embed(torch.ones(sequence_length, device=query.device))==1, 1)
+            # dot = dot.masked_fill_(torch.diag_embed(torch.ones(sequence_length, device=query.device))>=1, 1-eps)
+            # dot = dot.masked_fill_(torch.diag_embed(torch.ones(sequence_length, device=query.device))<=-1, -1+eps)
+            dot = dot.masked_fill_(dot>=1, 1-eps)
+            dot = dot.masked_fill_(dot<=-1, -1+eps)            
+            # print('dot info')  # delete
+            # print(dot.isnan().sum())
+            # print(dot)
             g_dist = torch.acos_(dot) * sphere_radius            
-        
+            # print(g_dist.isnan().sum())
+            # print(g_dist)        
+
         # Calculate the attention scores
         if alpha < 2:
             attn_score = (1 + g_dist/bandwidth**0.5)**(-d_intrinsic-alpha)

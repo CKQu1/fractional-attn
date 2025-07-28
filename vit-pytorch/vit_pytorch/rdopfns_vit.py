@@ -154,6 +154,10 @@ class FasterOPDMFNSMultiHeadAttention(nn.Module):
         #self.qkv_projection = orthogonal(nn.Linear(self.hidden_size, self.all_head_size * 3, bias=self.qkv_bias))
         if not self.qk_share:
             self.k_projection = orthogonal(nn.Linear(self.hidden_size, self.all_head_size, bias=self.qkv_bias))
+        else:
+            if self.num_attention_heads > 1:
+                self.q_projection = orthogonal(nn.Linear(self.hidden_size, self.all_head_size, bias=self.qkv_bias))
+
         self.v_projection = nn.Linear(self.hidden_size, self.all_head_size, bias=self.qkv_bias)           
 
         self.attn_dropout = nn.Dropout(config["attention_probs_dropout_prob"])
@@ -177,17 +181,20 @@ class FasterOPDMFNSMultiHeadAttention(nn.Module):
         query, key, value = torch.chunk(qkv, 3, dim=-1)
         """
 
-        query = x
-        value = self.v_projection(x)
-
         # Resize the query, key, and value to (batch_size, num_attention_heads, sequence_length, attention_head_size)
-        batch_size, sequence_length, _ = query.size()
+        batch_size, sequence_length, _ = x.size()
         num_attention_heads, attention_head_size = self.num_attention_heads, self.attention_head_size
 
         alpha, bandwidth = self.alpha, self.bandwidth
         a = self.a
         d_intrinsic = attention_head_size
         qk_share = self.qk_share
+
+        if not self.qk_share or (self.qk_share and self.num_attention_heads == 1):            
+            query = x
+        else:
+            query = self.q_projection(x)
+        value = self.v_projection(x)
 
         query = query.view(batch_size, sequence_length, num_attention_heads, attention_head_size).transpose(1, 2)
         value = value.view(batch_size, sequence_length, num_attention_heads, attention_head_size).transpose(1, 2)
@@ -198,9 +205,11 @@ class FasterOPDMFNSMultiHeadAttention(nn.Module):
             key = key.view(batch_size, sequence_length, num_attention_heads, attention_head_size).transpose(1, 2)                      
             # geodesic distance in R^d
             g_dist = torch.cdist(query, key, p=2)
+            #g_dist = torch.cdist(query, key, p=2) / math.sqrt(attention_head_size)
         else:
             # geodesic distance oin R^d
             g_dist = torch.cdist(query, query, p=2)        
+            #g_dist = torch.cdist(query, query, p=2) / math.sqrt(attention_head_size)
         
         # Calculate the attention scores
         if alpha < 2:

@@ -13,7 +13,7 @@ torchrun --nnodes=1 --nproc_per_node=2 ddp_main.py --max_iters=5 --eval_interval
 if __name__ == '__main__':
       
     script_name = "batch_main.py"
-    nstack = 30
+    nstack = 20
 
     # add or change datasets here
     patch_size = 1
@@ -24,7 +24,7 @@ if __name__ == '__main__':
     n_layers = 1
     #ROOT = njoin(DROOT, 'small-model-v3')    
     #ROOT = njoin(DROOT, 'full-model-ps=2')
-    ROOT = njoin(DROOT, f'{n_layers}L-model-ps={patch_size}')
+    ROOT = njoin(DROOT, f'{n_layers}L-model-ps={patch_size}-v2')
     #ROOT = njoin(DROOT, 'lowdim-small')
     job_path = njoin(ROOT, 'jobs_all')
 
@@ -93,8 +93,8 @@ if __name__ == '__main__':
 
                         if model_size == 'small':
                             common_kwargs['lr_scheduler_type'] = 'constant'
-                            #common_kwargs['max_lr'] = 4e-4  # too big
-                            common_kwargs['max_lr'] = 1e-4
+                            #common_kwargs['max_lr'] = 1e-4
+                            common_kwargs['max_lr'] = 1e-3
 
                             common_kwargs['epochs'] = 50
                             common_kwargs['n_layers'] = 1
@@ -159,5 +159,5 @@ if __name__ == '__main__':
                         nstack=nstack,
                         cluster=CLUSTER)
         
-        # for i in range(len(commands)):
-        #     qsub(f'{commands[i]} {script_names[i]}', pbs_array_trues[i], path=job_path, **kwargs_qsubs[i])         
+        for i in range(len(commands)):
+            qsub(f'{commands[i]} {script_names[i]}', pbs_array_trues[i], path=job_path, **kwargs_qsubs[i])         

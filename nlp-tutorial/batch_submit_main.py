@@ -6,7 +6,7 @@ from constants import DROOT, CLUSTER
 from utils.mutils import njoin, get_seed, structural_model_root, str2bool
 from qsub_parser import job_setup, qsub, add_common_kwargs
 
-from constants import DATASET_NAMES, MAX_LENS, MAX_LENS_DICT
+#from constants import DATASET_NAMES, MAX_LENS, MAX_LENS_DICT
 
 """
 torchrun --nnodes=1 --nproc_per_node=2 ddp_main.py --max_iters=5 --eval_interval=5\
@@ -15,99 +15,100 @@ torchrun --nnodes=1 --nproc_per_node=2 ddp_main.py --max_iters=5 --eval_interval
 
 if __name__ == '__main__':
       
+    DATASET_NAMES = ['imdb']  # 'imdb', 'glue-sst2', 'ag_news', 'emotion', 'yelp_polarity'
     date_str = datetime.today().strftime('%Y-%m-%d')    
     script_name = "batch_main.py"
     #nstack = 44
-    nstack = 20
+    nstack = 2
 
     #seeds = list(range(5))
-    seeds = list(range(10))
-    #seeds = [0,1]
+    #seeds = list(range(10))
+    seeds = [0]
     
-    n_layers = 3
-    #n_layers = 6
-    #n_layers = 4
+    n_layers = 1
     #if n_layers == 1:
     if n_layers < 4:
         model_size = 'small'  
-        #alphas = []
-        #alphas = [1,1.2,1.4,1.6,1.8]
-        alphas = [1,1.2,1.4,1.6,1.8,2]        
-        #alphas = [1,1.1,1.2,1.3,1.4,1.5,1.6,1.7,1.8,1.9,2]
-        #alphas = [1.2,1.6,2]
-        bandwidths = [1]
-        manifolds = ['v2_rd']  # ['rd', 'sphere', 'v2_rd']
+        alphas = [1.2, 2]
+        #alphas = [1,1.2,1.4,1.6,1.8,2]        
+        bandwidths = [1]  # 'median'
+        manifolds = ['rd']  # ['rd', 'sphere', 'v2_rd']
 
-        hidden = 64
-
+        hidden = 8
         fix_embed = False
         is_ops = [True]
         qk_shares = [True, False]
         #qk_shares = [True]
         is_rescale_dist = True
-        #max_len = 2048
-        #max_len = 511
-        max_len = None
+        is_resnet_scale = False
+
+        max_len = 512
         #train_mask_type = 'longformer'
         train_mask_type = None
 
-        #pretrained_model_name = 'gpt2'
-        #pretrained_model_name = 'albert-base-v2'
-        #pretrained_model_name = 'distilbert-base-uncased'
-        pretrained_model_name = 'glove' 
+        if fix_embed:
+            pretrained_model_name = 'glove'  # distilbert-base-uncased, albert-base-v2
 
-        is_train_others = True
+        is_train_others = False
     else:
         model_size = 'large'
-        #alphas = [1.2, 1.6, 2]
-        #alphas = [1.2, 2]
-        alphas = [1,1.2,1.4,1.6,1.8,2]
-        bandwidths = [1]      
-        manifolds = ['v2_rd']  # ['rd', 'v2_rd']
+        #alphas = [1,1.2,1.4,1.6,1.8,2]
+        alphas = [1.2, 2]
+        #bandwidths = [1]
+        bandwidths = [1]  # 'median'      
+        manifolds = ['rd']  # ['rd', 'v2_rd', 'sphere']
 
         fix_embed = False
         is_ops = [False, True]
+        #is_ops = [False]
         qk_shares = [True, False]
-        #is_rescale_dist = False        
+        #qk_shares = [False]
+                
+        #train_mask_type = 'longformer'
+        train_mask_type = None
+
         is_rescale_dist = True
+        #is_rescale_dist = False
+        is_resnet_scale = False
 
         hidden = 256
-        max_len = None
+        max_len = 512
 
-        is_train_others = True
-        #is_train_others = False
+        #is_train_others = True
+        is_train_others = False
 
-    model_sizes = [model_size]            
-    if fix_embed:
-        ROOT =  njoin(DROOT, f'{n_layers}L-hidden={hidden}-max_len={max_len}-{pretrained_model_name}') 
-    else:
-        ROOT = njoin(DROOT, f'{n_layers}L-hidden={hidden}-max_len={max_len}')
-    if train_mask_type is not None:
-        ROOT += f'-mask={train_mask_type}'        
-    if is_rescale_dist:
-        ROOT += '-rescaled'        
+    model_sizes = [model_size]        
+    f_prefix = f'{n_layers}L-v4'
+    # if is_resnet_scale:
+    #     f_prefix += '-RR'
+    # if fix_embed:
+    #     ROOT = njoin(DROOT, f'{f_prefix}-hidden={hidden}-max_len={max_len}-{pretrained_model_name}') 
+    # else:
+    #     ROOT = njoin(DROOT, f'{f_prefix}-hidden={hidden}-max_len={max_len}')
+    # if train_mask_type is not None:
+    #     ROOT += f'-mask={train_mask_type}'        
+    # if is_rescale_dist:
+    #     ROOT += '-rescaled'        
+    ROOT = njoin(DROOT, 'test-run') 
     job_path = njoin(ROOT, 'jobs_all')
 
     for model_size in model_sizes:
         kwargss_all = []    
         for seed in seeds:
-            for didx in [1]:
             #for didx in [0]:
+            for didx in range(len(DATASET_NAMES)):
 
                 dataset_name = DATASET_NAMES[didx]
                 
-                # CPUs
-                #select = 1; ngpus, ncpus = 0, 8; mem = '24GB'  # imdb          
-                #select = 1; ngpus, ncpus = 0, 16; mem = '32GB'  # rotten_tomatoes
                 # GPUs
+                select = 1; ngpus, ncpus = 1, 1
+                walltime = '23:59:59'
                 if model_size == 'large':
-                    select = 1; ngpus, ncpus = 1, 1; mem = '10GB'  # 6L8H imdb (512 len)                      
+                    mem = '10GB'  # 6L8H imdb (512 len)                      
                 else:
-                    select = 1; ngpus, ncpus = 1, 1; mem = '6GB'  # 1L1H imdb (512 len)                                                                   
-                walltime = '23:59:59'                    
+                    mem = '6GB'  # 1L1H imdb (512 len)                                                                                                       
 
                 for qk_share in qk_shares:
-
                     for is_op in is_ops:
 
                         kwargss = []
@@ -127,18 +128,15 @@ if __name__ == '__main__':
                         common_kwargs = {                                  
                             "seed":              seed,
                             "qk_share":          qk_share,
-                            "is_rescale_dist":   is_rescale_dist,
-                            #"hidden":            hidden,
-                            #"hidden":           32,                          
-                            #"train_bs":          32,                                          
-                            #"lr_scheduler_type": "constant",                           
+                            "is_rescale_dist":   is_rescale_dist,   
+                            "is_resnet_scale":   is_resnet_scale,                                                                                  
                             #"lr_scheduler_type": "binary",                                       
                             "weight_decay":      0,
                             'max_lr':            1e-4,
                             'min_lr':            1e-5                            
                         }  
-                        #common_kwargs['max_len'] = MAX_LENS[didx] if max_len is None else max_len
-                        common_kwargs['max_len'] = MAX_LENS_DICT[dataset_name] if max_len is None else max_len                        
+                        #common_kwargs['max_len'] = MAX_LENS_DICT[dataset_name] if max_len is None else max_len                        
+                        common_kwargs['max_len'] = max_len
 
                         #common_kwargs['n_attn_heads'] = 1 if is_op else 8
                         #common_kwargs['n_attn_heads'] = 8
@@ -157,20 +155,18 @@ if __name__ == '__main__':
                             common_kwargs["train_bs"] = 32
 
                         elif model_size == 'small':
-                            common_kwargs["pretrained_model_name"] = pretrained_model_name
+                            if fix_embed:
+                                common_kwargs["pretrained_model_name"] = pretrained_model_name
 
                             common_kwargs["n_layers"] = n_layers
                             common_kwargs['n_attn_heads'] = 1
-                            #common_kwargs["n_attn_heads"] = 1                             
-                            #common_kwargs["epochs"] = 15
-                            common_kwargs["epochs"] = 25
-                            #common_kwargs["epochs"] = 30
+                            if dataset_name in ['imdb', 'rotten_tomatoes', 'ag_news']:
+                                common_kwargs["epochs"] = 25
+                            else:
+                                common_kwargs["epochs"] = 35
                             common_kwargs['fix_embed'] = fix_embed                            
 
                             # common_kwargs['lr_scheduler_type'] = 'constant'
-                            # #common_kwargs["max_lr"] = 3e-4
-                            # common_kwargs["max_lr"] = 1.5e-4
-
                             common_kwargs['lr_scheduler_type'] = 'binary'
                             # common_kwargs["max_lr"] = 1e-3
                             # common_kwargs["min_lr"] = 1e-4

@@ -355,10 +355,11 @@ def fns_fix_eps(models_roots, fns_type='spopfns'+MODEL_SUFFIX, metrics='val_acc'
     total_figs = 0
     model_types_plotted = []
     for row_idx, models_root in enumerate(models_roots):
-
-        fns_final_epoch_metrics = np.zeros([df_model['ensembles'].min(), 2, len(epss), len(alphas)])
-        fns_final_epoch_metrics[:] = np.nan              
+        inter_instances = list(set.intersection(*map(set,list(DCT_ALL[fns_type].loc[:,'instances']))))
+        fns_final_epoch_metrics = np.zeros([len(inter_instances), 2, len(epss), len(alphas)])
+        fns_final_epoch_metrics[:] = np.nan
         other_final_epoch_metrics = {}        
+        other_best_epoch_metrics = {}   
 
         DCT_ALL = collect_model_dirs(models_root)
         if DCT_ALL == {}:
@@ -374,6 +375,7 @@ def fns_fix_eps(models_roots, fns_type='spopfns'+MODEL_SUFFIX, metrics='val_acc'
             lstyle_model = LINESTYLE_DICT[model_type]
 
             # -------------------- FNS --------------------
+            row_stats = []
             for alp_idx, alpha in enumerate(alphas):
                 c_hyp = HYP_CMAP(HYP_CNORM(alpha))  # hyperparameter color  
 
@@ -406,6 +408,22 @@ def fns_fix_eps(models_roots, fns_type='spopfns'+MODEL_SUFFIX, metrics='val_acc'
                             fns_final_epoch_metrics[ii, 1, eps_idx, alp_idx] = run_perf.loc[:,metrics[0]].max()  
                         else:
                             fns_final_epoch_metrics[ii, 1, eps_idx, alp_idx] = run_perf.loc[:,metrics[0]].min()
+
+                # print results
+                median_metric = np.median(fns_final_epoch_metrics[:,0,eps_idx,alp_idx],0) 
+                mean_metric = np.mean(fns_final_epoch_metrics[:,0,eps_idx,alp_idx],0)
+                std_metric = np.std(fns_final_epoch_metrics[:,0,eps_idx,alp_idx],0)
+                min_metric, max_metric = fns_final_epoch_metrics[:,0,eps_idx,alp_idx].min(), fns_final_epoch_metrics[:,0,eps_idx,alp_idx].max()
+                mid_metric = (min_metric + max_metric)/2   
+                diff_metric = max_metric - mid_metric                         
+                row_stats.append([alpha, eps, min_metric, max_metric, 
+                mid_metric, diff_metric, median_metric, mean_metric, std_metric])
+
+            summary_stats = pd.DataFrame(data=row_stats, 
+                                         columns=['alpha', 'eps', 'min', 'max', 'mid', 'diff', 'median', 'mean', 'std'])
+            print('\n')    
+            print(summary_stats)
+            print('\n')
 
             if eps_idx == 0:                
             # -------------------- SINK --------------------                
@@ -456,6 +474,7 @@ def fns_fix_eps(models_roots, fns_type='spopfns'+MODEL_SUFFIX, metrics='val_acc'
                 
                     if model_type not in model_types_plotted:
                         model_types_plotted.append(model_type)
+
         perc_l, perc_u = 25, 75
         for col_idx in range(fns_final_epoch_metrics.shape[1]):
             ax = axs[row_idx, col_idx]

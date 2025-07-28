@@ -17,19 +17,23 @@ if __name__ == '__main__':
     nstack = 1  
 
     # add or change datasets here
-    patch_size = 4
-    DATASET_NAMES = ['cifar10']  #  'pathfinder-classification'            
+    patch_size = 1
+    #patch_size = 4
+    #DATASET_NAMES = ['cifar10']  #  'pathfinder-classification'            
+    DATASET_NAMES = ['mnist']
     
+    n_layers = 1
     #ROOT = njoin(DROOT, 'small-model-v3')    
     #ROOT = njoin(DROOT, 'full-model-ps=2')
-    ROOT = njoin(DROOT, f'2L-model-ps={patch_size}')
+    ROOT = njoin(DROOT, f'{n_layers}L-model-ps={patch_size}')
     #ROOT = njoin(DROOT, 'lowdim-small')
     job_path = njoin(ROOT, 'jobs_all')
 
-    #instances = list(range(5))    
     instances = [0]
-    #model_sizes = ['small']
-    model_sizes = ['large']
+    #instances = list(range(1,5))    
+    #instances = [3,4]
+    model_sizes = ['small']
+    #model_sizes = ['large']
 
     for model_size in model_sizes:
         kwargss_all = []    
@@ -39,7 +43,7 @@ if __name__ == '__main__':
                 ngpus, ncpus = 1, 1  # GPU
                 #ngpus, ncpus = 0, 1  # CPU                            
                 walltime = '23:59:59'
-                mem = '12GB' if model_size == 'large' else '8GB'                                              
+                mem = '12GB' if model_size == 'large' else '6GB'                                              
                 num_proc = ngpus if ngpus > 1 else ncpus
 
                 for qk_share in [True, False]:
@@ -50,17 +54,16 @@ if __name__ == '__main__':
 
                         kwargss = []
 
-                        if model_size == 'small':
-                            for model_name in ['opfnsvit']:                        
-                                #for alpha in [1.2, 1.6, 2]:                            
-                                for alpha in [1.2, 2]:
-                                #for alpha in [1, 1.4, 1.8]:
-                                #for alpha in [1.6]:
-                                    #for bandwidth in [0.001, 0.01, 0.1, 1]:
-                                    for bandwidth in [0.001, 0.1]:                                
-                                        #for manifold in ['rd', 'sphere']:                                
-                                        for manifold in ['sphere']:
-                                            kwargss.append({'model_name':model_name,'manifold':manifold,'alpha': alpha,'a': 0,'bandwidth':bandwidth})       
+                        if model_size == 'small':                                                
+                            for alpha in [1.2, 1.6, 2]:
+                                #for bandwidth in [0.1]:                                
+                                for bandwidth in [0.01, 0.1, 1]:
+                                    for manifold in ['sphere']:                                
+                                    #for manifold in ['rd']:
+                                        if is_orthog:
+                                            kwargss.append({'model_name':'opfnsvit','manifold':manifold,'alpha': alpha,'a': 0,'bandwidth':bandwidth}) 
+                                        else:
+                                            kwargss.append({'model_name':'fnsvit','manifold':manifold,'alpha': alpha,'a': 0,'bandwidth':bandwidth})     
                         else:
                             #for model_name in ['fnsvit']:                        
                             for alpha in [1.2, 2]:                            
@@ -75,38 +78,42 @@ if __name__ == '__main__':
                                         else:
                                             kwargss.append({'model_name':'fnsvit','manifold':manifold,'alpha': alpha,'a': 0,'bandwidth':bandwidth})                                         
 
-                        if is_orthog:
-                            kwargss.append({'model_name':'opdpvit'})
-                            for n_it in [3]:
-                                kwargss.append({'model_name':'opsinkvit','n_it':n_it})                            
-                        else:
-                            kwargss.append({'model_name':'dpvit'})
-                            for n_it in [3]:
-                                kwargss.append({'model_name':'sinkvit','n_it':n_it})
+                        # if is_orthog:
+                        #     kwargss.append({'model_name':'opdpvit'})
+                        #     for n_it in [3]:
+                        #         kwargss.append({'model_name':'opsinkvit','n_it':n_it})                            
+                        # else:
+                        #     kwargss.append({'model_name':'dpvit'})
+                        #     for n_it in [3]:
+                        #         kwargss.append({'model_name':'sinkvit','n_it':n_it})
                             
                         common_kwargs = {'instance':          instance,
+                                         'seed':              instance,
                                         'qk_share':          qk_share, 
                                         'hidden_size':       48,                                                                                                                                 
-                                        'weight_decay':      0,
-                                        #'lr_scheduler_type': 'constant',
-                                        #'lr_scheduler_type': 'cosine',
-                                        'lr_scheduler_type': 'binary',
-                                        'max_lr':            1e-4,
-                                        'min_lr':            1e-5
+                                        'weight_decay':      0
                                         }  
 
                         if model_size == 'small':
-                            common_kwargs['epochs'] = 200
+                            common_kwargs['lr_scheduler_type'] = 'constant'
+                            #common_kwargs['max_lr'] = 4e-4  # too big
+                            common_kwargs['max_lr'] = 5e-5
+
+                            common_kwargs['epochs'] = 35
                             common_kwargs['n_layers'] = 1
                             common_kwargs['n_attn_heads'] = 1   
                             common_kwargs['train_bs'] = 32     
                             #common_kwargs['patch_size'] = 4       
                             common_kwargs['patch_size'] = patch_size
-                            common_kwargs['hidden_size'] = 8             
+                            #common_kwargs['hidden_size'] = 8             
                         else:
+                            common_kwargs['lr_scheduler_type'] = 'binary'
+                            common_kwargs['max_lr'] = 1e-4
+                            common_kwargs['min_lr'] = 1e-5
+
                             common_kwargs['epochs'] = 300
                             #common_kwargs['n_layers'] = 6
-                            common_kwargs['n_layers'] = 2
+                            common_kwargs['n_layers'] = n_layers
                             #common_kwargs['n_attn_heads'] = 8
                             common_kwargs['n_attn_heads'] = 6
                             #common_kwargs['n_attn_heads'] = 1 if is_orthog else 6

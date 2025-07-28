@@ -326,13 +326,19 @@ class AttrDict(dict):
         super(AttrDict, self).__init__(*args, **kwargs)
         self.__dict__ = self    
 
+def str_or_float(value):
+    try:
+        return float(value)
+    except ValueError:
+        return value
+
 # -------------------- Kernels --------------------  
 
 # local and non-local kernels
-def fdm_kernel(g_dist, alpha, d_intrinsic, bandwidth=1, is_rescaled_dist=False):
+def fdm_kernel(g_dist, alpha, d_intrinsic, bandwidth=1, dist_scale=1):  # is_rescaled_dist=False
 
-    if is_rescaled_dist:
-        g_dist = g_dist / d_intrinsic**0.5
+    #if is_rescaled_dist:
+    g_dist = g_dist / dist_scale
 
     if alpha < 2:
         #attn_score = (1 + g_dist / head_dim**0.5 / bandwidth**0.5)**(-d_intrinsic-alpha)

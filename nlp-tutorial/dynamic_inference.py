@@ -128,7 +128,8 @@ if __name__ == '__main__':
     for eps_idx, eps in enumerate(epss):        
 
         # collect DP type
-        if eps_idx == 0 and len(dp_types) > 0:
+        is_eval_dp = eps_idx == 0 and len(dp_types) > 0
+        if is_eval_dp:
             df_dp = DCT_ALL[dp_types[0]]                        
             if df_dp.loc[0,'ensembles'] > 0:
                 dp_seeds = literal_eval(str(sorted(df_model.loc[0,'seeds']))) 
@@ -148,11 +149,14 @@ if __name__ == '__main__':
                 fix_embed = attn_setup['fix_embed']
                 pretrained_model_name = config['pretrained_model_name'] if fix_embed else False
                 dataset_name = config['dataset_name'] = attn_setup['dataset_name']
+                if dataset_name == 'imdb' and 'num_classes' not in config.keys():
+                    config['num_classes'] = 2                
                 config['max_len'] = config['seq_len']
                 main_args = AttrDict(config)
                 is_do_once = (alpha_idx==0) and (seed_idx==0)
                 
                 if is_do_once:
+                    qk_share = config['qk_share']
                     # load dataset
                     if dataset_name.lower() == 'imdb':
                         if fix_embed:
@@ -233,8 +237,11 @@ if __name__ == '__main__':
                     for model_idx, model_dir in enumerate(model_dirs):                        
                         if model_idx == 0:      
                             model = RDFNSformer(config)                                              
-                        elif model_idx == 1:
+                        elif model_idx == 1 and is_eval_dp:
                             dp_attn_setup, dp_config, _, _ = load_model_files(model_dir)
+                            dp_config['max_len'] = dp_config['seq_len']    
+                            if dataset_name == 'imdb' and 'num_classes' not in dp_config.keys():
+                                dp_config['num_classes'] = 2                                                      
                             ##### Distance based #####
                             if args.is_dist_based:  
                                 dp_config['dist_threshold'] = controlled_variable    
@@ -258,7 +265,7 @@ if __name__ == '__main__':
                         acc, loss = eval_model(model)
                         if model_idx == 0:
                             metric_dynamic[alpha_idx,:,var_ii,seed_idx] = acc, loss                    
-                        elif model_idx == 1:
+                        elif model_idx == 1 and is_eval_dp:
                             dp_metric_dynamic[alpha_idx,:,var_ii,seed_idx] = acc, loss
 
     marker = DEPTH_TO_MARKER[config['n_layers']]
@@ -281,29 +288,31 @@ if __name__ == '__main__':
         # axs[0,1].fill_between(controlled_variables, loss_mean - loss_std, loss_mean + loss_std,
         #                       color=c_hyp, alpha=1/2)          
          
-    acc_mean = dp_metric_dynamic[0,0,:,:].mean(-1)
-    acc_std = dp_metric_dynamic[0,0,:,:].std(-1)
-    loss_mean = dp_metric_dynamic[0,1,:,:].mean(-1)
-    loss_std = dp_metric_dynamic[0,1,:,:].std(-1)
+    if is_eval_dp:
+        acc_mean = dp_metric_dynamic[0,0,:,:].mean(-1)
+        acc_std = dp_metric_dynamic[0,0,:,:].std(-1)
+        loss_mean = dp_metric_dynamic[0,1,:,:].mean(-1)
+        loss_std = dp_metric_dynamic[0,1,:,:].std(-1)
 
-    c_hyp = HYP_CMAP(HYP_CNORM(alpha))                            
-    axs[0,0].plot(controlled_variables, acc_mean,
-                  marker=marker, markersize=MARKERSIZE,
-                  c=OTHER_COLORS_DICT[dp_types[0]],
-                  linestyle=LINESTYLE_DICT[dp_types[0]])
-    axs[0,1].plot(controlled_variables, loss_mean,
-                  marker=marker, markersize=MARKERSIZE,
-                  c=OTHER_COLORS_DICT[dp_types[0]],
-                  linestyle=LINESTYLE_DICT[dp_types[0]])        
+        c_hyp = HYP_CMAP(HYP_CNORM(alpha))                            
+        axs[0,0].plot(controlled_variables, acc_mean,
+                    marker=marker, markersize=MARKERSIZE,
+                    c=OTHER_COLORS_DICT[dp_types[0]],
+                    linestyle=LINESTYLE_DICT[dp_types[0]])
+        axs[0,1].plot(controlled_variables, loss_mean,
+                    marker=marker, markersize=MARKERSIZE,
+                    c=OTHER_COLORS_DICT[dp_types[0]],
+                    linestyle=LINESTYLE_DICT[dp_types[0]])        
 
     # legends
     for alpha_idx, alpha in enumerate(alphas):
         c_hyp = HYP_CMAP(HYP_CNORM(alpha))   
         axs[0,0].plot([], [], marker=marker, c=c_hyp, linestyle=LINESTYLE_DICT[args.fns_type],
                       label=rf'$\alpha$ = {alpha}')    
-    axs[0,0].plot([], [],
-                  marker=marker, c=OTHER_COLORS_DICT[dp_types[0]],
-                  linestyle=LINESTYLE_DICT[dp_types[0]])                      
+    if is_eval_dp:
+        axs[0,0].plot([], [],
+                      marker=marker, c=OTHER_COLORS_DICT[dp_types[0]],
+                      linestyle=LINESTYLE_DICT[dp_types[0]])                      
                         
     #axs[0,0].invert_xaxis(); axs[0,1].invert_xaxis()    
 
@@ -332,9 +341,10 @@ if __name__ == '__main__':
         SAVE_DIR = njoin(FIGS_DIR, 'nlp-task', args.models_root.split('/')[1], 
                          args.models_root.split('/')[2])
     if not isdir(SAVE_DIR): makedirs(SAVE_DIR)    
-    if args.is_dist_based:   
-        fig_file = f'dynamic_inference_dist-{args.fns_type}.pdf'
+    qkv = 'qqv' if qk_share else 'qkv'
+    if args.is_dist_based:           
+        fig_file = f'dynamic_inference_dist-{args.fns_type}-{qkv}.pdf'
     else:
-        fig_file = f'dynamic_inference_prob-{args.fns_type}.pdf'
+        fig_file = f'dynamic_inference_prob-{args.fns_type}-{qkv}.pdf'
     plt.savefig(njoin(SAVE_DIR, fig_file))            
     print(f'Figure saved in {njoin(SAVE_DIR, fig_file)}')

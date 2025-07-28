@@ -111,3 +111,54 @@ def glove_create_examples(args, glove_dim, tokenizer, mode: str = 'train'):
     dataset = TensorDataset(all_input_ids, all_label_ids)
 
     return dataset
+
+# ---------- datasets API ----------
+
+from datasets import load_dataset
+from torch.utils.data import DataLoader
+from constants import DROOT
+from .mutils import njoin
+
+def get_datasets(args, tokenizer):
+
+    # Load the dataset
+    if '-' not in args.dataset_name:
+        dataset = load_dataset(args.dataset_name, cache_dir=njoin(DROOT, 'DATASETS'))
+    else:
+        dataset_name, subset_name = args.dataset_name.split('-')
+        dataset = load_dataset(dataset_name, subset_name, cache_dir=njoin(DROOT, 'DATASETS'))
+    train_dataset = dataset['train']
+    if 'sst' not in args.dataset_name:
+        test_dataset = dataset['test']
+    else:
+        test_dataset = dataset['validation']
+
+    # Define a tokenization function with max length
+    def tokenize_function(examples, text_key='text'):
+        return tokenizer(examples[text_key], padding="max_length", truncation=True, max_length=args.max_len)
+
+    # Tokenize the dataset
+    text_key = 'text' if 'sst' not in args.dataset_name else 'sentence'
+    tokenized_train_dataset = train_dataset.map(lambda x: tokenize_function(x, text_key=text_key), batched=True)
+    tokenized_test_dataset = test_dataset.map(lambda x: tokenize_function(x, text_key=text_key), batched=True)
+
+    # Set format for PyTorch
+    tokenized_train_dataset.set_format(type="torch", columns=["input_ids", "attention_mask", "label"])
+    tokenized_test_dataset.set_format(type="torch", columns=["input_ids", "attention_mask", "label"])
+
+    return tokenized_train_dataset, tokenized_test_dataset
+
+# Custom collate function to return only (input_ids, labels)
+def collate_fn(batch):
+    input_ids = torch.stack([item["input_ids"] for item in batch])
+    labels = torch.tensor([item["label"] for item in batch])
+    return input_ids, labels
+
+def datasets_create_examples(args, tokenized_train_dataset, tokenized_test_dataset):
+    # Create a DataLoader for batching
+    batch_size = args.train_bs
+    train_loader = DataLoader(tokenized_train_dataset, batch_size=batch_size, shuffle=True,
+                              collate_fn=collate_fn)
+    test_loader = DataLoader(tokenized_test_dataset, batch_size=batch_size, shuffle=True,
+                             collate_fn=collate_fn)    
+    return train_loader, test_loader

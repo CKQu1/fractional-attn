@@ -28,14 +28,18 @@ from torch.optim import AdamW
 
 # single-core
 """
-python -i main.py --train_bs=32 --dataset_name=cifar10 --model_name=opdpvit --qk_share=True\
- --epochs=1 --weight_decay=0 --n_layers=2 --n_attn_heads=1 --model_root=.droot/debug-mode 
+python -i main.py --train_bs=32 --dataset_name=mnist --model_name=fnsvit --is_op=True --qk_share=True\
+ --epochs=45 --lr_scheduler_type=binary --min_lr=1e-4 --max_lr=1e-3 --weight_decay=0\
+ --n_layers=1 --n_attn_heads=1 --model_root=.droot/debug-mode 
 
-python -i main.py --train_bs=32 --lr=5e-5 --dataset_name=mnist --model_name=opfnsvit --manifold=sphere --qk_share=True\
- --alpha=1.5 --a=0 --epochs=1 --weight_decay=0 --n_layers=2 --n_attn_heads=1\
+python -i main.py --train_bs=32 --lr_scheduler_type=constant --dataset_name=mnist\
+ --model_name=fnsvit --is_op=True\
+ --manifold=rd --qk_share=True\
+ --alpha=1.5 --a=0 --epochs=1 --weight_decay=0 --n_layers=1 --n_attn_heads=1\
  --model_root=.droot/debug-mode
 
-python -i main.py --model_name=opfnsvit --manifold=rd --alpha=1.5 --max_iters=100 --eval_interval=5\
+python -i main.py --model_name=fnsvit --is_op=True --manifold=rd --alpha=1.5\
+ --max_iters=100 --eval_interval=5\
  --lr_scheduler_type=binary --max_lr=5e-5 --max_lr=5e-6\
  --eval_iters=200 --weight_decay=0 --n_layers=1 --n_attn_heads=2 --model_root=.droot/single-core  
 
@@ -70,8 +74,8 @@ if __name__ == '__main__':
     parser.add_argument('--beta1', default=0.9, type=float)
     parser.add_argument('--beta2', default=0.95, type=float)       
 
-    parser.add_argument('--lr_scheduler_type', default='constant', type=str, help='constant | cosine | binary') 
-    
+    parser.add_argument('--lr_scheduler_type', default='constant', type=str, help='constant | cosine | binary')     
+
     # log settings
     parser.add_argument('--epochs', default=None)
 
@@ -88,21 +92,21 @@ if __name__ == '__main__':
     parser.add_argument('--wandb_log', default=False, type=bool)
     parser.add_argument("--wandb_project", default='image-task', type=str)    
 
-    parser.add_argument('--instance', default=0, type=int)
     parser.add_argument('--seed', default=0, type=int)    
     # parser.add_argument('--debug', default=False, type=bool)  # for debuggin
-    # parser.add_argument('--lr_scheduler_type', default='constant', type=str)
     # parser.add_argument('--do_train', default=True, type=bool)
     # parser.add_argument('--do_eval', default=True, type=bool)
 
     # Model settings
     parser.add_argument('--model_name', default='dpvit', type=str)    
     # fnsvit type
-    parser.add_argument('--manifold', default='sphere', type=str)
+    parser.add_argument('--manifold', default='rd', type=str)
     parser.add_argument('--alpha', default=1, type=float)
     parser.add_argument('--bandwidth', default=1, type=float)  
     #parser.add_argument('--a', default=1, type=float)
     parser.add_argument('--a', default=0, type=float)
+    parser.add_argument('--is_rescale_dist', type=str2bool, nargs='?', const=True, default=False)
+
     # sinkvit type
     parser.add_argument('--n_it', default=1, type=int)
 
@@ -124,7 +128,8 @@ if __name__ == '__main__':
     # parser.add_argument('--n_classes', default=10, type=int)
     # parser.add_argument('--n_channels', default=3, type=int)
     parser.add_argument('--qkv_bias', type=str2bool, nargs='?', const=True, default=False)
-    parser.add_argument('--use_faster_attn', default=True, type=bool)    
+    #parser.add_argument('--use_faster_attn', default=True, type=bool)   
+    parser.add_argument('--is_op', type=str2bool, nargs='?', const=True, default=False) 
 
     parser.add_argument('--detect_anomaly', type=str2bool, nargs='?', const=True, default=False)
 
@@ -183,15 +188,17 @@ if __name__ == '__main__':
         # "num_channels": args.n_channels,
         "qkv_bias": args.qkv_bias,
         "qk_share": args.qk_share,
-        "use_faster_attention": args.use_faster_attn,
+        #"use_faster_attention": args.use_faster_attn,
+        "is_op": args.is_op
     }
 
-    attn_setup = {'qk_share': args.qk_share, 'qkv_bias': args.qkv_bias, 'instance': args.instance}    
+    attn_setup = {'qk_share': args.qk_share, 'qkv_bias': args.qkv_bias, 'instance': args.seed}    
     attn_setup['dataset_name'] = args.dataset_name    
     if 'fns' in model_name:
         attn_setup['manifold'] = args.manifold
         config['alpha'] = attn_setup['alpha'] = args.alpha      
-        config['bandwidth'] = attn_setup['bandwidth'] = args.bandwidth          
+        config['bandwidth'] = attn_setup['bandwidth'] = args.bandwidth    
+        config['is_rescale_dist'] = args.is_rescale_dist      
         if args.manifold == 'sphere':
 
             if args.alpha < 2:
@@ -218,9 +225,7 @@ if __name__ == '__main__':
 
     elif 'sinkvit' in model_name:
         config['n_it'] = attn_setup['n_it'] = args.n_it
-        config['bandwidth'] = attn_setup['bandwidth'] = args.bandwidth
-
-    attn_setup['model_name'] = model_name        
+        config['bandwidth'] = attn_setup['bandwidth'] = args.bandwidth            
 
     # adamw optimizer
     learning_rate = args.max_lr  # max learning rate
@@ -289,17 +294,6 @@ if __name__ == '__main__':
         model_root = njoin(DROOT, model_root)
     else:
         model_root = args.model_root  
-    models_dir, out_dir = create_model_dir(model_root, **attn_setup)   
-
-    # makedir of out_dir
-    os.makedirs(out_dir, exist_ok=True)
-
-    # save config
-    with open(njoin(out_dir,"config.json"), "w") as ofile: 
-        json.dump(config, ofile)   
-    # save attn_setup
-    with open(njoin(out_dir,"attn_setup.json"), "w") as ofile: 
-        json.dump(attn_setup, ofile)       
 
     print('-'*25)
     # print(f'ddp = {ddp}')
@@ -423,8 +417,7 @@ if __name__ == '__main__':
                               eval_interval, log_interval, eval_iters, args.eval_only, args.always_save_checkpoint,
                               args.warmup_iters,
                               device_name
-                              ]
-    train_settings.to_csv(njoin(out_dir, "train_setting.csv"))     
+                              ]         
 
     def get_batch(split):
         if split == 'train':
@@ -463,35 +456,26 @@ if __name__ == '__main__':
         print(f'Initializing a new {model_name} from scratch \n')
 
         if model_name == 'dpvit':
-            from vit_pytorch.vit import ViTForClassfication
-            model = ViTForClassfication(config)
-        if model_name == 'opdpvit':
-            from vit_pytorch.opvit import OPViTForClassfication
-            model = OPViTForClassfication(config)            
-        # elif model_name == 'fnsvit':
-        #     from vit_pytorch.fns_vit import FNSViTForClassfication
-        #     model = FNSViTForClassfication(config)    
-        # elif model_name == 'opfnsvit':
-        #     from vit_pytorch.opfns_vit import OPFNSViTForClassfication
-        #     model = OPFNSViTForClassfication(config)     
+            from vit_models.vit import ViTForClassfication
+            model = ViTForClassfication(config)       
+        elif model_name == 'rdfnsvit':
+            from vit_models.rdfns_vit import RDFNSViTForClassfication
+            model = RDFNSViTForClassfication(config)               
         elif model_name == 'spfnsvit':
             from vit_pytorch.spfns_vit import SPFNSViTForClassfication
             model = SPFNSViTForClassfication(config)    
         elif model_name == 'spopfnsvit':
             from vit_pytorch.spopfns_vit import SPOPFNSViTForClassfication
-            model = SPOPFNSViTForClassfication(config)      
-        elif model_name == 'rdfnsvit':
-            from vit_pytorch.rdfns_vit import RDFNSViTForClassfication
-            model = RDFNSViTForClassfication(config)    
-        elif model_name == 'rdopfnsvit':
-            from vit_pytorch.rdopfns_vit import RDOPFNSViTForClassfication
-            model = RDOPFNSViTForClassfication(config)               
+            model = SPOPFNSViTForClassfication(config)                    
         elif model_name == 'sinkvit':
             from vit_pytorch.sink_vit import SINKViTForClassfication
             model = SINKViTForClassfication(config)      
         elif model_name == 'opsinkvit':
             from vit_pytorch.opsink_vit import OPSINKViTForClassfication
-            model = OPSINKViTForClassfication(config)                         
+            model = OPSINKViTForClassfication(config)    
+
+        model_name = 'op' + model_name if args.is_op else model_name
+        attn_setup['model_name'] = model_name
 
     """
     elif init_from == 'resume':
@@ -527,6 +511,20 @@ if __name__ == '__main__':
             model_args[k] = getattr(model.config, k)
     """
 
+    # set up the dir here
+    models_dir, out_dir = create_model_dir(model_root, **attn_setup)   
+    # makedir of out_dir
+    os.makedirs(out_dir, exist_ok=True)
+
+    # save train settings
+    train_settings.to_csv(njoin(out_dir, "train_setting.csv"))    
+    # save config
+    with open(njoin(out_dir,"config.json"), "w") as ofile: 
+        json.dump(config, ofile)   
+    # save attn_setup
+    with open(njoin(out_dir,"attn_setup.json"), "w") as ofile: 
+        json.dump(attn_setup, ofile)       
+
     # crop down the model block size if desired, using model surgery
     # if block_size < model.config.block_size:
     #     model.crop_block_size(block_size)
@@ -535,8 +533,8 @@ if __name__ == '__main__':
 
     # ++++++++++ SOMEHOW THIS WORKS FOR CPUS AS WELL ++++++++++
     # initialize a GradScaler. If enabled=False scaler is a no-op
-    # if torch.cuda.is_available():
-    scaler = torch.cuda.amp.GradScaler(enabled=(dtype == 'float16'))
+    if torch.cuda.is_available():
+        scaler = torch.cuda.amp.GradScaler(enabled=(dtype == 'float16'))
     # else:
     #     scaler = torch.GradScaler('cpu', enabled=(dtype == 'float16'))
 
@@ -665,7 +663,8 @@ if __name__ == '__main__':
                 torch.autograd.set_detect_anomaly(True)            
 
         #for data, label in trainloader:
-        for batch in tqdm(trainloader):
+        #for batch in tqdm(trainloader):
+        for batch in trainloader:
 
             if args.dataset_name in ['cifar10', 'mnist']:
                 data, label = batch

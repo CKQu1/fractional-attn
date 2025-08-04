@@ -107,7 +107,8 @@ END"""
             PBS_SCRIPT = f"""<<'END'
 #!/bin/bash
 #PBS -N {kwargs.get('N', sys.argv[0] or 'job')}
-#PBS -q {kwargs.get('q','defaultQ')}
+##PBS -q {kwargs.get('q','defaultQ')}
+#PBS -q {kwargs.get('q','taiji')}
 #PBS -V
 #PBS -m n
 ##PBS -o {path} -e {path}
@@ -118,6 +119,7 @@ END"""
 args=($(python -c "import sys;print(' '.join(map(str, {pbs_array_data_chunk}[int(sys.argv[1])-{MAX_SUBJOBS*i}])))" $PBS_ARRAY_INDEX))
 cd {kwargs.get('cd', '$PBS_O_WORKDIR')}
 echo "pbs_array_args = ${{args[*]}}"    
+#export CONDA_PKGS_DIRS=~/.conda/pkgs
 {source_activate}
 {conda_activate}                                                     
 {command} ${{args[*]}} {additional_command} {post_command}
@@ -251,7 +253,7 @@ def job_setup(script_name, kwargss, **kwargs):
                 kwargs_qsub["q"] = 'l40s'
             else:
                 #kwargs_qsub["q"] = 'yossarian'                
-                kwargs_qsub["q"] = 'defaultQ'
+                kwargs_qsub["q"] = 'taiji'
 
             kwargs_qsub["source"] = PHYSICS_SOURCE 
             kwargs_qsub["conda"] = PHYSICS_CONDA

@@ -1,0 +1,214 @@
+import math
+import torch
+from torch import nn
+from torch.nn.utils.parametrizations import orthogonal
+
+from vit_pytorch.model_utils import NewGELUActivation, PatchEmbeddings, Embeddings, MLP
+
+
+class MultiHeadAttention(nn.Module):
+    """
+    Multi-head attention module with some optimizations.
+    All the heads are processed simultaneously with merged query, key, and value projections.
+    """
+
+    def __init__(self, config):
+        super().__init__()
+        self.hidden_size = config["hidden_size"]
+        self.num_attention_heads = config["num_attention_heads"]
+        # The attention head size is the hidden size divided by the number of attention heads
+        self.attention_head_size = self.hidden_size // self.num_attention_heads
+        self.all_head_size = self.num_attention_heads * self.attention_head_size
+        # Whether or not to use bias in the query, key, and value projection layers
+        self.qkv_bias = config["qkv_bias"]
+        self.qk_share = config["qk_share"]
+        self.is_op = config["is_op"]
+        
+        if self.is_op:
+            if not self.qk_share:
+                self.WK = orthogonal(nn.Linear(self.hidden_size, self.all_head_size, bias=self.qkv_bias))
+            if self.num_attention_heads > 1:
+                self.WQ = orthogonal(nn.Linear(self.hidden_size, self.all_head_size, bias=self.qkv_bias))
+        else:
+            self.WQ = nn.Linear(self.hidden_size, self.all_head_size, bias=self.qkv_bias)
+            if not self.qk_share:
+                self.WK = nn.Linear(self.hidden_size, self.all_head_size, bias=self.qkv_bias)
+
+        self.WV = nn.Linear(self.hidden_size, self.all_head_size, bias=self.qkv_bias)        
+        self.attn_dropout = nn.Dropout(config["attention_probs_dropout_prob"])
+        # Create a linear layer to project the attention output back to the hidden size
+        # In most cases, all_head_size and hidden_size are the same
+        self.output_projection = nn.Linear(self.all_head_size, self.hidden_size)
+        self.output_dropout = nn.Dropout(config["hidden_dropout_prob"])
+
+    def forward(self, x, output_attentions=False):
+        num_attention_heads, attention_head_size = self.num_attention_heads, self.attention_head_size
+
+        if not self.is_op or self.num_attention_heads > 1:
+            query = self.WQ(x)
+        else:
+            query = x
+        # Resize the query, key, and value to (batch_size, num_attention_heads, sequence_length, attention_head_size)
+        batch_size, sequence_length, _ = query.size()    
+        query = query.view(batch_size, sequence_length, num_attention_heads, attention_head_size).transpose(1, 2)
+
+        if not self.qk_share:
+            key = self.WK(x)
+            key = key.view(batch_size, sequence_length, num_attention_heads, attention_head_size).transpose(1, 2)
+            # Calculate the attention scores
+            # softmax(Q*K.T/sqrt(head_size))*V
+            attention_scores = torch.matmul(query, key.transpose(-1, -2))
+        else:
+            attention_scores = torch.matmul(query, query.transpose(-1, -2))
+
+        value = self.WV(x)
+        value = value.view(batch_size, sequence_length, num_attention_heads, attention_head_size).transpose(1, 2)
+
+        attention_scores = attention_scores / math.sqrt(attention_head_size)
+        attention_probs = nn.functional.softmax(attention_scores, dim=-1)
+        attention_probs = self.attn_dropout(attention_probs)
+        # Calculate the attention output
+        attention_output = torch.matmul(attention_probs, value)
+        # Resize the attention output
+        # from (batch_size, num_attention_heads, sequence_length, attention_head_size)
+        # To (batch_size, sequence_length, all_head_size)
+        attention_output = attention_output.transpose(1, 2) \
+                                           .contiguous() \
+                                           .view(batch_size, sequence_length, self.all_head_size)
+        # Project the attention output back to the hidden size
+        attention_output = self.output_projection(attention_output)
+        attention_output = self.output_dropout(attention_output)
+        # Return the attention output and the attention probabilities (optional)
+        if not output_attentions:
+            return (attention_output, None)
+        else:
+            return (attention_output, attention_probs)
+
+
+class Block(nn.Module):
+    """
+    A single transformer block.
+    """
+
+    def __init__(self, config):
+        super().__init__()
+        self.attention = MultiHeadAttention(config)
+        self.layernorm_1 = nn.LayerNorm(config["hidden_size"])
+        self.mlp = MLP(config)
+        self.layernorm_2 = nn.LayerNorm(config["hidden_size"])
+
+    # Norm & Add (Pre-LayerNorm)
+    # def forward(self, x, output_attentions=False):
+    #     # Self-attention
+    #     attention_output, attention_probs = \
+    #         self.attention(self.layernorm_1(x), output_attentions=output_attentions)
+    #     # Skip connection
+    #     x = x + attention_output
+    #     # Feed-forward network
+    #     mlp_output = self.mlp(self.layernorm_2(x))
+    #     # Skip connection
+    #     x = x + mlp_output
+    #     # Return the transformer block's output and the attention probabilities (optional)
+    #     if not output_attentions:
+    #         return (x, None)
+    #     else:
+    #         return (x, attention_probs)
+
+    # Add & Norm (Post-LayerNorm)
+    def forward(self, x, output_attentions=False):
+        # Self-attention
+        attention_output, attention_probs = \
+            self.attention(x, output_attentions=output_attentions)    
+        # Skip connection + layernorm
+        x = self.layernorm_1(x + attention_output)                
+        # Feed-forward network
+        mlp_output = self.mlp(x)     
+        # Skip connection + layernorm
+        x = self.layernorm_2(x + mlp_output)           
+        # Return the transformer block's output and the attention probabilities (optional)
+        if not output_attentions:
+            return (x, None)
+        else:
+            return (x, attention_probs)  
+
+
+class Encoder(nn.Module):
+    """
+    The transformer encoder module.
+    """
+
+    def __init__(self, config):
+        super().__init__()
+        # Create a list of transformer blocks
+        self.blocks = nn.ModuleList([])
+        for _ in range(config["num_hidden_layers"]):
+            block = Block(config)
+            self.blocks.append(block)
+
+    def forward(self, x, output_attentions=False):
+        # Calculate the transformer block's output for each block
+        all_attentions = []
+        for block in self.blocks:
+            x, attention_probs = block(x, output_attentions=output_attentions)
+            if output_attentions:
+                all_attentions.append(attention_probs)
+        # Return the encoder's output and the attention probabilities (optional)
+        if not output_attentions:
+            return (x, None)
+        else:
+            return (x, all_attentions)
+
+
+class ViTForClassfication(nn.Module):
+    """
+    The ViT model for classification.
+    """
+
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+        self.image_size = config["image_size"]
+        self.hidden_size = config["hidden_size"]
+        self.num_classes = config["num_classes"]
+        # Create the embedding module
+        self.embedding = Embeddings(config)
+        # Create the transformer encoder module
+        self.encoder = Encoder(config)
+        # Create a linear layer to project the encoder's output to the number of classes
+        self.classifier = nn.Linear(self.hidden_size, self.num_classes)
+        # Initialize the weights
+        self.apply(self._init_weights)
+
+    def forward(self, x, output_attentions=False):
+        # Calculate the embedding output
+        embedding_output = self.embedding(x)
+        # Calculate the encoder's output
+        encoder_output, all_attentions = self.encoder(embedding_output, output_attentions=output_attentions)
+        # Calculate the logits, take the [CLS] token's output as features for classification
+        logits = self.classifier(encoder_output[:, 0, :])
+        # Return the logits and the attention probabilities (optional)
+        if not output_attentions:
+            return (logits, None)
+        else:
+            return (logits, all_attentions)
+    
+    def _init_weights(self, module):
+        if isinstance(module, (nn.Linear, nn.Conv2d)):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=self.config["initializer_range"])
+            if module.bias is not None:
+                torch.nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.LayerNorm):
+            module.bias.data.zero_()
+            module.weight.data.fill_(1.0)
+        elif isinstance(module, Embeddings):
+            module.position_embeddings.data = nn.init.trunc_normal_(
+                module.position_embeddings.data.to(torch.float32),
+                mean=0.0,
+                std=self.config["initializer_range"],
+            ).to(module.position_embeddings.dtype)
+
+            module.cls_token.data = nn.init.trunc_normal_(
+                module.cls_token.data.to(torch.float32),
+                mean=0.0,
+                std=self.config["initializer_range"],
+            ).to(module.cls_token.dtype)

@@ -2,7 +2,7 @@ import os
 from datetime import datetime
 from os.path import isfile, isdir
 from time import sleep
-from constants import DROOT, CLUSTER
+from constants import DROOT, CLUSTER, PHYSICS_CONDA
 from mutils import njoin, get_instance, structural_model_root, str2bool
 from qsub_parser import job_setup, qsub, add_common_kwargs
 """
@@ -13,7 +13,7 @@ torchrun --nnodes=1 --nproc_per_node=2 ddp_main.py --max_iters=5 --eval_interval
 if __name__ == '__main__':
       
     script_name = "batch_main.py"
-    nstack = 20
+    nstack = 4
 
     # add or change datasets here
     patch_size = 1
@@ -21,102 +21,97 @@ if __name__ == '__main__':
     #DATASET_NAMES = ['cifar10']  #  'pathfinder-classification'            
     DATASET_NAMES = ['mnist']
     
-    n_layers = 1
-    #ROOT = njoin(DROOT, 'small-model-v3')    
-    #ROOT = njoin(DROOT, 'full-model-ps=2')
-    ROOT = njoin(DROOT, f'{n_layers}L-model-ps={patch_size}-v2')
-    #ROOT = njoin(DROOT, 'lowdim-small')
-    job_path = njoin(ROOT, 'jobs_all')
+    n_layers = [1]
+    #seeds = list(range(5))        
+    seeds = [0,1]
 
-    #instances = [0]
-    instances = list(range(5))    
-    #instances = [3,4]
-    model_sizes = ['small']
-    #model_sizes = ['large']
+    for n_layer in n_layers:
+        ROOT = njoin(DROOT, f'{n_layer}L-ps={patch_size}-v3')
+        job_path = njoin(ROOT, 'jobs_all')
 
-    for model_size in model_sizes:
         kwargss_all = []    
-        for instance in instances:
+        for seed in seeds:
             for didx, dataset_name in enumerate(DATASET_NAMES):            
                 select = 1; 
                 ngpus, ncpus = 1, 1  # GPU
                 #ngpus, ncpus = 0, 1  # CPU                            
                 walltime = '23:59:59'
-                mem = '12GB' if model_size == 'large' else '8GB'                                              
+                mem = '12GB' if n_layer >= 4 else '8GB'                                              
                 num_proc = ngpus if ngpus > 1 else ncpus
 
                 for qk_share in [True, False]:
                 #for qk_share in [True]:
-
-                    #for is_orthog in [True, False]:
-                    for is_orthog in [True]:
+                    #for is_op in [True, False]:
+                    for is_op in [True]:
 
                         kwargss = []
 
-                        if model_size == 'small':                                                
-                            #for alpha in [1.2, 1.6, 2]:
-                            for alpha in [1, 1.2, 1.4, 1.6, 1.8, 2]:
-                                #for bandwidth in [0.1]:                                
-                                for bandwidth in [0.01, 0.1, 1]:
-                                    for manifold in ['sphere']:                                
-                                    #for manifold in ['rd']:
-                                        if is_orthog:
-                                            kwargss.append({'model_name':'opfnsvit','manifold':manifold,'alpha': alpha,'a': 0,'bandwidth':bandwidth}) 
-                                        else:
-                                            kwargss.append({'model_name':'fnsvit','manifold':manifold,'alpha': alpha,'a': 0,'bandwidth':bandwidth})     
+                        if n_layer <= 4:                                                
+                            for alpha in [1.2, 2]:
+                            #for alpha in [1, 1.2, 1.4, 1.6, 1.8, 2]:
+                                for bandwidth in [1]:                              
+                                    #for manifold in ['sphere']:                                
+                                    for manifold in ['rd']:
+                                            kwargss.append({'model_name':'fnsvit','manifold':manifold,
+                                            'alpha': alpha,'a': 0,'bandwidth':bandwidth, 'is_op':is_op}
+                                            )     
                         else:                      
                             for alpha in [1.2, 2]:                            
                                 for bandwidth in [1]:
                                 #for bandwidth in [0.01, 1]:
                                     #for manifold in ['sphere']:                                
                                     for manifold in ['rd']:
-                                        if is_orthog:
-                                            kwargss.append({'model_name':'opfnsvit','manifold':manifold,'alpha': alpha,'a': 0,'bandwidth':bandwidth}) 
-                                        else:
-                                            kwargss.append({'model_name':'fnsvit','manifold':manifold,'alpha': alpha,'a': 0,'bandwidth':bandwidth})                                         
+                                        kwargss.append({'model_name':'fnsvit','manifold':manifold,
+                                        'alpha': alpha,'a': 0,'bandwidth':bandwidth,'is_op':is_op}
+                                        )    
 
-                        # if is_orthog:
-                        #     kwargss.append({'model_name':'opdpvit'})
-                        #     for n_it in [3]:
-                        #         kwargss.append({'model_name':'opsinkvit','n_it':n_it})                            
-                        # else:
-                        #     kwargss.append({'model_name':'dpvit'})
-                        #     for n_it in [3]:
-                        #         kwargss.append({'model_name':'sinkvit','n_it':n_it})
+                        # ----- dpvit -----
+                        #kwargss.append({'model_name':'dpvit','is_op':is_op})
+                        # ----- sinkvit -----
+                        # for n_it in [3]:
+                        #     kwargss.append({'model_name':'opsinkvit','n_it':n_it,'is_op':is_op})                            
                             
-                        common_kwargs = {'instance':          instance,
-                                         'seed':              instance,
+                        common_kwargs = {'seed':              seed,
                                         'qk_share':          qk_share, 
-                                        'hidden_size':       48,                                                                                                                                 
+                                        'n_layers':          n_layer,
+                                        'hidden_size':       48,
+                                        'patch_size':        patch_size,                                                                                                                                 
                                         'weight_decay':      0
                                         }  
+                        if n_layer == 1:
+                            common_kwargs['lr_scheduler_type'] = 'binary'
+                            #common_kwargs['max_lr'] = 1e-4
+                            common_kwargs['max_lr'] = 1e-3
+                            common_kwargs['min_lr'] = 1e-4
 
-                        if model_size == 'small':
+                            common_kwargs['epochs'] = 45
+                            common_kwargs['n_layers'] = 1
+                            common_kwargs['n_attn_heads'] = 1   
+                            common_kwargs['train_bs'] = 32                                                                
+
+                            common_kwargs['is_rescale_dist'] = True
+                        elif 1 < n_layer <= 4:
                             common_kwargs['lr_scheduler_type'] = 'constant'
                             #common_kwargs['max_lr'] = 1e-4
                             common_kwargs['max_lr'] = 1e-3
 
                             common_kwargs['epochs'] = 50
-                            common_kwargs['n_layers'] = 1
                             common_kwargs['n_attn_heads'] = 1   
-                            common_kwargs['train_bs'] = 32     
-                            #common_kwargs['patch_size'] = 4       
-                            common_kwargs['patch_size'] = patch_size
-                            #common_kwargs['hidden_size'] = 8             
+                            common_kwargs['train_bs'] = 32           
+                             
+                            common_kwargs['is_rescale_dist'] = True      
                         else:
                             common_kwargs['lr_scheduler_type'] = 'binary'
                             common_kwargs['max_lr'] = 1e-4
                             common_kwargs['min_lr'] = 1e-5
 
                             common_kwargs['epochs'] = 300
-                            #common_kwargs['n_layers'] = 6
-                            common_kwargs['n_layers'] = n_layers
-                            #common_kwargs['n_attn_heads'] = 8
+                            #common_kwargs['n_layers'] = 6                            
                             common_kwargs['n_attn_heads'] = 6
-                            #common_kwargs['n_attn_heads'] = 1 if is_orthog else 6
+                            #common_kwargs['n_attn_heads'] = 1 if is_op else 6
                             common_kwargs['train_bs'] = 32                         
-                            common_kwargs['patch_size'] = patch_size
                             
+                            common_kwargs['is_rescale_dist'] = True
                         # if num_proc > 1:
                         #     common_kwargs['grad_accum_step'] = num_proc * 2
 
@@ -160,4 +155,4 @@ if __name__ == '__main__':
                         cluster=CLUSTER)
         
         for i in range(len(commands)):
-            qsub(f'{commands[i]} {script_names[i]}', pbs_array_trues[i], path=job_path, **kwargs_qsubs[i])         
+            qsub(f'{commands[i]} {script_names[i]}', pbs_array_trues[i], path=job_path,**kwargs_qsubs[i])         

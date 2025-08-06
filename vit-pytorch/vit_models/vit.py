@@ -97,34 +97,31 @@ class Block(nn.Module):
         self.mlp = MLP(config)
         self.layernorm_2 = nn.LayerNorm(config["hidden_size"])
 
-    # Norm & Add (Pre-LayerNorm)
-    # def forward(self, x, output_attentions=False):
-    #     # Self-attention
-    #     attention_output, attention_probs = \
-    #         self.attention(self.layernorm_1(x), output_attentions=output_attentions)
-    #     # Skip connection
-    #     x = x + attention_output
-    #     # Feed-forward network
-    #     mlp_output = self.mlp(self.layernorm_2(x))
-    #     # Skip connection
-    #     x = x + mlp_output
-    #     # Return the transformer block's output and the attention probabilities (optional)
-    #     if not output_attentions:
-    #         return (x, None)
-    #     else:
-    #         return (x, attention_probs)
+        self.is_preln = config['is_preln']
 
-    # Add & Norm (Post-LayerNorm)
-    def forward(self, x, output_attentions=False):
-        # Self-attention
-        attention_output, attention_probs = \
-            self.attention(x, output_attentions=output_attentions)    
-        # Skip connection + layernorm
-        x = self.layernorm_1(x + attention_output)                
-        # Feed-forward network
-        mlp_output = self.mlp(x)     
-        # Skip connection + layernorm
-        x = self.layernorm_2(x + mlp_output)           
+    # Self-attention
+    def forward(self, x, output_attentions=False):        
+        # Norm & Add (Pre-LayerNorm)
+        if self.is_preln:
+            # Self-attention
+            attention_output, attention_probs = \
+                self.attention(self.layernorm_1(x), output_attentions=output_attentions)
+            # Skip connection
+            x = x + attention_output
+            # Feed-forward network
+            mlp_output = self.mlp(self.layernorm_2(x))
+            # Skip connection
+            x = x + mlp_output
+        # Add & Norm (Post-LayerNorm)
+        else:
+            attention_output, attention_probs = \
+                self.attention(x, output_attentions=output_attentions)    
+            # Skip connection + layernorm
+            x = self.layernorm_1(x + attention_output)                
+            # Feed-forward network
+            mlp_output = self.mlp(x)     
+            # Skip connection + layernorm
+            x = self.layernorm_2(x + mlp_output)           
         # Return the transformer block's output and the attention probabilities (optional)
         if not output_attentions:
             return (x, None)

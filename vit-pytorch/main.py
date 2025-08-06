@@ -28,7 +28,7 @@ from torch.optim import AdamW
 
 # single-core
 """
-python -i main.py --train_bs=32 --dataset_name=mnist --model_name=fnsvit --is_op=True --qk_share=True\
+python -i main.py --train_bs=32 --dataset_name=mnist --model_name=fnsvit --manifold=rd --alpha=2 --is_op=True --qk_share=True\
  --epochs=45 --lr_scheduler_type=binary --min_lr=1e-4 --max_lr=1e-3 --weight_decay=0\
  --n_layers=1 --n_attn_heads=1 --model_root=.droot/debug-mode 
 
@@ -99,6 +99,7 @@ if __name__ == '__main__':
 
     # Model settings
     parser.add_argument('--model_name', default='dpvit', type=str)    
+    parser.add_argument('--is_preln', type=str2bool, nargs='?', default=True)
     # fnsvit type
     parser.add_argument('--manifold', default='rd', type=str)
     parser.add_argument('--alpha', default=1, type=float)
@@ -189,10 +190,12 @@ if __name__ == '__main__':
         "qkv_bias": args.qkv_bias,
         "qk_share": args.qk_share,
         #"use_faster_attention": args.use_faster_attn,
-        "is_op": args.is_op
+        "is_op": args.is_op,
+        "is_preln": args.is_preln
     }
 
-    attn_setup = {'qk_share': args.qk_share, 'qkv_bias': args.qkv_bias, 'instance': args.seed}    
+    attn_setup = {'qk_share': args.qk_share, 'qkv_bias': args.qkv_bias, 'instance': args.seed,
+                  'is_op': args.is_op, 'is_preln': args.is_preln}    
     attn_setup['dataset_name'] = args.dataset_name    
     if 'fns' in model_name:
         attn_setup['manifold'] = args.manifold

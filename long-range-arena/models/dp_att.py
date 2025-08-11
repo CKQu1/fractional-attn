@@ -2,162 +2,11 @@ import math
 import torch
 from torch import nn
 from torch.nn import functional as F
+from torch.nn.utils.parametrizations import orthogonal
 
-# https://github.com/tintn/vision-transformer-from-scratch/blob/main/vit.py
-class NewGELUActivation(nn.Module):
-    """
-    Implementation of the GELU activation function currently in Google BERT repo (identical to OpenAI GPT). Also see
-    the Gaussian Error Linear Units paper: https://arxiv.org/abs/1606.08415
-
-    Taken from https://github.com/huggingface/transformers/blob/main/src/transformers/activations.py
-    """
-
-    def forward(self, input):
-        return (
-            0.5
-            * input
-            * (
-                1.0
-                + torch.tanh(
-                    math.sqrt(2.0 / math.pi)
-                    * (input + 0.044715 * torch.pow(input, 3.0))
-                )
-            )
-        )
-
-class DPAttentionHead(nn.Module):
-    """
-    A single attention head.
-    This module is used in the DPMultiHeadAttention module.
-
-    """
-
-    def __init__(
-        self,
-        hidden_size,
-        attention_head_size,
-        dropout,
-        bias=True,
-        qk_share=False,
-        is_cross_attention=False,
-    ):
-        super().__init__()
-        self.hidden_size = hidden_size
-        self.attention_head_size = attention_head_size
-
-        self.use_key = not qk_share or is_cross_attention
-        # Create the query, key, and value projection layers
-        self.query = nn.Linear(hidden_size, attention_head_size, bias=bias)
-        if self.use_key:
-            self.key = nn.Linear(hidden_size, attention_head_size, bias=bias)
-        self.value = nn.Linear(hidden_size, attention_head_size, bias=bias)
-
-        self.dropout = nn.Dropout(dropout)
-        self.is_cross_attention = is_cross_attention
-
-        self.qk_share = qk_share
-
-    def forward(self, x, encoder_output_states=None, attention_mask=None):
-        if encoder_output_states is not None:
-            assert (
-                self.is_cross_attention
-            ), "Please make sure to instantiate class with `Attention(..., is_cross_attention=True)`."
-            query = self.query(x)
-            key = self.key(encoder_output_states)
-            value = self.value(encoder_output_states)
-        else:
-            query = self.query(x)
-            if self.use_key:
-                key = self.key(x)
-            value = self.value(x)
-
-        if self.use_key:
-            attn_score = torch.matmul(query, key.transpose(-1, -2)) / math.sqrt(self.attention_head_size)
-        else:
-            attn_score = torch.matmul(query, query.transpose(-1, -2)) / math.sqrt(self.attention_head_size)
-
-        if attention_mask is not None:
-            # Write a very low value (indicating -inf) to the positions where mask == 0
-            if self.is_cross_attention:
-                attention_mask = attention_mask[
-                    :, :, : query.size(1), : key.size(1)
-                ]  # Feels like a dirty fix...
-            attn_score = attn_score.masked_fill_(attention_mask == 0, -1e9)
-
-        attention_probs = F.softmax(attn_score, dim=-1)
-        attention_probs = self.attn_dropout(attention_probs)
-
-        # Calculate the attention output
-        attention_output = attention_probs @ value
-
-        return (attention_output, attention_probs)
-
+from models.model_utils import NewGELUActivation
 
 class DPMultiHeadAttention(nn.Module):
-    """
-    Multi-head attention module.
-    This module is used in the TransformerEncoder module.
-    """
-
-    def __init__(self, config, is_cross_attention=False):
-        super().__init__()
-        self.hidden_size = config["hidden_size"]
-        self.num_attention_heads = config["num_heads"]
-        # The attention head size is the hidden size divided by the number of attention heads
-        self.attention_head_size = self.hidden_size // self.num_attention_heads
-        self.all_head_size = self.num_attention_heads * self.attention_head_size
-        # Whether or not to use bias in the query, key, and value projection layers
-        self.qkv_bias = config["qkv_bias"]
-        self.qk_share = config["qk_share"]
-        # Create a list of attention heads
-        self.heads = nn.ModuleList([])
-        # Whether it is cross attention
-        self.is_cross_attention = is_cross_attention
-
-        for _ in range(self.num_attention_heads):
-            head = DPAttentionHead(
-                self.hidden_size,
-                self.attention_head_size,
-                config["attention_probs_dropout_prob"],
-                self.qkv_bias,
-                self.qk_share,
-                self.is_cross_attention,
-            )
-            self.heads.append(head)
-        # Create a linear layer to project the attention output back to the hidden size
-        # In most cases, all_head_size and hidden_size are the same
-        self.output_projection = nn.Linear(self.all_head_size, self.hidden_size)
-        self.output_dropout = nn.Dropout(config["hidden_dropout_prob"])
-
-    def forward(
-        self,
-        x,
-        attention_mask=None,
-        output_attentions=False,
-        encoder_output_states=None,
-    ):
-        # Calculate the attention output for each attention head
-        attention_outputs = [
-            head(x, encoder_output_states, attention_mask) for head in self.heads
-        ]
-        # Concatenate the attention outputs from each attention head
-        attention_output = torch.cat(
-            [attention_output for attention_output, _ in attention_outputs], dim=-1
-        )
-        # Project the concatenated attention output back to the hidden size
-        attention_output = self.output_projection(attention_output)
-        attention_output = self.output_dropout(attention_output)
-        # Return the attention output and the attention probabilities (optional)
-        if not output_attentions:
-            return (attention_output, None)
-        else:
-            attention_probs = torch.stack(
-                [attention_probs for _, attention_probs in attention_outputs], dim=1
-            )
-            return (attention_output, attention_probs)
-
-
-class FasterDPMultiHeadAttention(nn.Module):
     """
     Multi-head attention module with some optimizations.
     All the heads are processed simultaneously with merged query, key, and value projections.
@@ -175,26 +24,21 @@ class FasterDPMultiHeadAttention(nn.Module):
         # Whether or not to use bias in the query, key, and value projection layers
         self.qkv_bias = config["qkv_bias"]
         self.qk_share = config["qk_share"]
-        # Create a linear layer to project the query, key, and value
-        """
-        if self.is_cross_attention:
-            self.kv_projection = nn.Linear(
-                self.hidden_size, self.all_head_size * 2, bias=self.qkv_bias
-            )
-            self.q_projection = nn.Linear(
-                self.hidden_size, self.all_head_size, bias=self.qkv_bias
-            )
-        else:
-            self.qkv_projection = nn.Linear(
-                self.hidden_size, self.all_head_size * 3, bias=self.qkv_bias
-            )
-        """
+        
         self.use_key = not self.qk_share or self.is_cross_attention  # whether to use key proj
+        self.is_op = config["is_op"]
 
-        self.q_projection = nn.Linear(self.hidden_size, self.all_head_size, bias=self.qkv_bias)
-        if self.use_key:
-            self.k_projection = nn.Linear(self.hidden_size, self.all_head_size, bias=self.qkv_bias)
-        self.v_projection = nn.Linear(self.hidden_size, self.all_head_size, bias=self.qkv_bias)
+        if self.is_op:
+            if not self.qk_share:
+                self.WK = orthogonal(nn.Linear(self.hidden_size, self.all_head_size, bias=self.qkv_bias))
+            if self.num_attention_heads > 1:
+                self.WQ = orthogonal(nn.Linear(self.hidden_size, self.all_head_size, bias=self.qkv_bias))
+        else:
+            self.WQ = nn.Linear(self.hidden_size, self.all_head_size, bias=self.qkv_bias)
+            if not self.qk_share:
+                self.WK = nn.Linear(self.hidden_size, self.all_head_size, bias=self.qkv_bias)
+
+        self.WV = nn.Linear(self.hidden_size, self.all_head_size, bias=self.qkv_bias)
 
         self.attn_dropout = nn.Dropout(config["attention_probs_dropout_prob"])
         # Create a linear layer to project the attention output back to the hidden size
@@ -215,23 +59,33 @@ class FasterDPMultiHeadAttention(nn.Module):
         # Split the projected query, key, and value into query, key, and value
         # (batch_size, sequence_length, all_head_size * 3) -> (batch_size, sequence_length, all_head_size)
         #query, key, value = torch.chunk(qkv, 3, dim=-1)
-        query = self.q_projection(x)
-        if self.use_key:
-            key = self.k_projection(x)
-        value = self.v_projection(x)
 
         # Resize the query, key, and value to (batch_size, num_attention_heads, sequence_length, attention_head_size)
-        batch_size, src_sequence_length, _ = query.size()
-        trg_sequence_length = key.size(1) if self.use_key else src_sequence_length
+        batch_size, src_sequence_length, _ = query.size()        
         num_attention_heads, attention_head_size = (
             self.num_attention_heads,
             self.attention_head_size,
         )
 
+        # query = query.view(batch_size, src_sequence_length, num_attention_heads, attention_head_size).transpose(1, 2)
+        # if self.use_key:
+        #     key = key.view(batch_size, trg_sequence_length, num_attention_heads, attention_head_size).transpose(1, 2)
+        # value = value.view( batch_size, trg_sequence_length, num_attention_heads, attention_head_size).transpose(1, 2)
+
+        if not self.is_op or self.num_attention_heads > 1:
+            query = self.WQ(x)
+        else:
+            query = x
+
         query = query.view(batch_size, src_sequence_length, num_attention_heads, attention_head_size).transpose(1, 2)
-        if self.use_key:
-            key = key.view(batch_size, trg_sequence_length, num_attention_heads, attention_head_size).transpose(1, 2)
-        value = value.view( batch_size, trg_sequence_length, num_attention_heads, attention_head_size).transpose(1, 2)
+        if not self.qk_share:            
+            key = self.WK(x)
+            trg_sequence_length = key.size(1)
+            key = key.view(batch_size, trg_sequence_length, num_attention_heads, attention_head_size).transpose(1, 2)            
+        else:
+            trg_sequence_length = src_sequence_length
+        value = self.WV(x)
+        value = value.view(batch_size, trg_sequence_length, num_attention_heads, attention_head_size).transpose(1, 2)      
 
         if self.use_key:
             attn_score = torch.matmul(query, key.transpose(-1, -2)) / math.sqrt(self.attention_head_size)
@@ -304,7 +158,7 @@ class DPEncoderBlock(nn.Module):
         super().__init__()
         self.use_faster_attention = config.get("use_faster_attention", False)
         if self.use_faster_attention:
-            self.attention = FasterDPMultiHeadAttention(config)
+            self.attention = DPMultiHeadAttention(config)
         else:
             self.attention = DPMultiHeadAttention(config)
         self.layernorm_1 = nn.LayerNorm(config["hidden_size"])

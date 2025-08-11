@@ -465,11 +465,8 @@ if __name__ == '__main__':
             from vit_models.rdfns_vit import RDFNSViTForClassfication
             model = RDFNSViTForClassfication(config)               
         elif model_name == 'spfnsvit':
-            from vit_pytorch.spfns_vit import SPFNSViTForClassfication
-            model = SPFNSViTForClassfication(config)    
-        elif model_name == 'spopfnsvit':
-            from vit_pytorch.spopfns_vit import SPOPFNSViTForClassfication
-            model = SPOPFNSViTForClassfication(config)                    
+            from vit_models.spfns_vit import SPFNSViTForClassfication
+            model = SPFNSViTForClassfication(config)                      
         elif model_name == 'sinkvit':
             from vit_pytorch.sink_vit import SINKViTForClassfication
             model = SINKViTForClassfication(config)      

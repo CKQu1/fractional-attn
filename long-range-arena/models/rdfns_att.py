@@ -1,220 +1,11 @@
-import math
 import torch
 from torch import nn
 from torch.nn import functional as F
+from torch.nn.utils.parametrizations import orthogonal
 
-# https://github.com/tintn/vision-transformer-from-scratch/blob/main/vit.py
-class NewGELUActivation(nn.Module):
-    """
-    Implementation of the GELU activation function currently in Google BERT repo (identical to OpenAI GPT). Also see
-    the Gaussian Error Linear Units paper: https://arxiv.org/abs/1606.08415
-
-    Taken from https://github.com/huggingface/transformers/blob/main/src/transformers/activations.py
-    """
-
-    def forward(self, input):
-        return (
-            0.5
-            * input
-            * (
-                1.0
-                + torch.tanh(
-                    math.sqrt(2.0 / math.pi)
-                    * (input + 0.044715 * torch.pow(input, 3.0))
-                )
-            )
-        )
-
-class RDFNSAttentionHead(nn.Module):
-    """
-    A single attention head.
-    This module is used in the RDFNSMultiHeadAttention module.
-
-    """
-
-    def __init__(
-        self,
-        alpha,
-        a,
-        bandwidth,
-        d_intrinsic,    
-        mask_val,    
-        hidden_size,
-        attention_head_size,
-        dropout,
-        bias=True,
-        qk_share=False,
-        is_cross_attention=False,
-    ):
-        super().__init__()
-        self.hidden_size = hidden_size
-        self.attention_head_size = attention_head_size
-
-        self.use_key = not qk_share or is_cross_attention
-        # Create the query, key, and value projection layers
-        self.query = nn.Linear(hidden_size, attention_head_size, bias=bias)
-        if not use_key:
-            self.key = nn.Linear(hidden_size, attention_head_size, bias=bias)
-        self.value = nn.Linear(hidden_size, attention_head_size, bias=bias)
-
-        self.dropout = nn.Dropout(dropout)
-
-        self.alpha, self.bandwidth = alpha, bandwidth
-        self.a = a
-        self.d_intrinsic = d_intrinsic
-        self.mask_val = mask_val
-
-        self.is_cross_attention = is_cross_attention
-
-        self.qk_share = qk_share
-
-    def forward(self, x, encoder_output_states=None, attention_mask=None):
-        if encoder_output_states is not None:
-
-            assert (
-                self.is_cross_attention
-            ), "Please make sure to instantiate class with `Attention(..., is_cross_attention=True)`."
-
-            query = self.query(x)
-            key = self.key(encoder_output_states)
-            value = self.value(encoder_output_states)
-        else:            
-
-            query = self.query(x)
-            if self.use_key:
-                key = self.key(x)
-            value = self.value(x)
-
-        alpha, bandwidth = self.alpha, self.bandwidth
-        a = self.a
-        d_intrinsic = self.d_intrinsic
-        mask_val = self.mask_val
-
-        # geodesic distance on R^d
-        if self.use_key:   
-            g_dist = torch.cdist(query, key)     
-        else:
-            g_dist = torch.cdist(query, query)
-
-        if attention_mask is not None:
-            # Write a very low value (indicating -inf) to the positions where mask == 0
-            if self.is_cross_attention:
-                attention_mask = attention_mask[
-                    :, :, : query.size(1), : key.size(1)
-                ]  # Feels like a dirty fix...
-            g_dist = g_dist.masked_fill_(attention_mask == 0, mask_val)
-
-        # Calculate the attention scores
-        if alpha < 2:
-            attn_score = (1 + g_dist / bandwidth**0.5) ** (-d_intrinsic - alpha)
-        else:
-            attn_score = torch.exp((-g_dist / bandwidth**0.5) ** (alpha / (alpha - 1)))
-
-        if a == 0:
-            # attn_score = attn_score.masked_fill_(attention_mask==0, -1e9) # Mask
-            attention_probs = F.normalize(
-                attn_score, p=1, dim=3
-            )  # can do this as the attn weights are always positive
-        else:
-            """
-            D_inv_row = torch.diag_embed(
-                attn_score.sum(-1) ** (-a)
-            )  # inverse of degree matrix of attn_score
-            D_inv_col = torch.diag_embed(
-                attn_score.sum(-2) ** (-a)
-            )  # inverse of degree matrix of attn_score
-            K_tilde = D_inv_row @ attn_score @ D_inv_col
-            # K_tilde = K_tilde.masked_fill_(attention_mask==0, -1e9) # Mask
-            """
-            N_R = attn_score.sum(-1)  # row sum
-            N_C = attn_score.sum(-2)  # col sum                
-            K_tilde = (N_R**(-a)).unsqueeze(-1) * attn_score * (N_C**(-a)).unsqueeze(-2) 
-
-            attention_probs = F.normalize(
-                K_tilde, p=1, dim=3
-            )  # can do this as the attn weights are always positive
-        attention_probs = self.attn_dropout(attention_probs)
-
-        # Calculate the attention output
-        attention_output = attention_probs @ value
-
-        return (attention_output, attention_probs)
-
+from models.model_utils import NewGELUActivation
 
 class RDFNSMultiHeadAttention(nn.Module):
-    """
-    Multi-head attention module.
-    This module is used in the TransformerEncoder module.
-    """
-
-    def __init__(self, config, is_cross_attention=False):
-        super().__init__()
-        self.hidden_size = config["hidden_size"]
-        self.num_attention_heads = config["num_heads"]
-        # The attention head size is the hidden size divided by the number of attention heads
-        self.attention_head_size = self.hidden_size // self.num_attention_heads
-        self.all_head_size = self.num_attention_heads * self.attention_head_size
-        # Whether or not to use bias in the query, key, and value projection layers
-        self.qkv_bias = config["qkv_bias"]
-        # Create a list of attention heads
-        self.heads = nn.ModuleList([])
-        # Whether it is cross attention
-        self.is_cross_attention = is_cross_attention
-
-        self.alpha = config["alpha"]
-        self.bandwidth = config["bandwidth"]
-        self.a = config["a"]  
-        self.mask_val = config["mask_val"]      
-
-        for _ in range(self.num_attention_heads):
-            head = RDFNSAttentionHead(
-                self.alpha,
-                self.a,
-                self.bandwidth,
-                config["d_intrinsic"],     
-                self.mask_val,
-                self.hidden_size,
-                self.attention_head_size,
-                config["attention_probs_dropout_prob"],
-                self.qkv_bias,
-                config['qk_share'],
-                self.is_cross_attention,
-            )
-            self.heads.append(head)
-        # Create a linear layer to project the attention output back to the hidden size
-        # In most cases, all_head_size and hidden_size are the same
-        self.output_projection = nn.Linear(self.all_head_size, self.hidden_size)
-        self.output_dropout = nn.Dropout(config["hidden_dropout_prob"])
-
-    def forward(
-        self,
-        x,
-        attention_mask=None,
-        output_attentions=False,
-        encoder_output_states=None,
-    ):
-        # Calculate the attention output for each attention head
-        attention_outputs = [
-            head(x, encoder_output_states, attention_mask) for head in self.heads
-        ]
-        # Concatenate the attention outputs from each attention head
-        attention_output = torch.cat(
-            [attention_output for attention_output, _ in attention_outputs], dim=-1
-        )
-        # Project the concatenated attention output back to the hidden size
-        attention_output = self.output_projection(attention_output)
-        attention_output = self.output_dropout(attention_output)
-        # Return the attention output and the attention probabilities (optional)
-        if not output_attentions:
-            return (attention_output, None)
-        else:
-            attention_probs = torch.stack(
-                [attention_probs for _, attention_probs in attention_outputs], dim=1
-            )
-            return (attention_output, attention_probs)
-
-
-class FasterRDFNSMultiHeadAttention(nn.Module):
     """
     Multi-head attention module with some optimizations.
     All the heads are processed simultaneously with merged query, key, and value projections.
@@ -232,7 +23,10 @@ class FasterRDFNSMultiHeadAttention(nn.Module):
         # Whether or not to use bias in the query, key, and value projection layers
         self.qkv_bias = config["qkv_bias"]
         self.qk_share = config['qk_share']
+
         self.use_key = not self.qk_share or self.is_cross_attention
+        self.is_op = config["is_op"]        
+
         # Create a linear layer to project the query, key, and value
         """
         if self.is_cross_attention:
@@ -247,11 +41,21 @@ class FasterRDFNSMultiHeadAttention(nn.Module):
                 self.hidden_size, self.all_head_size * 3, bias=self.qkv_bias
             )
         """
-        self.q_projection = nn.Linear(self.hidden_size, self.all_head_size, bias=self.qkv_bias)
-        if self.use_key:
-            self.k_projection = nn.Linear(self.hidden_size, self.all_head_size, bias=self.qkv_bias)
-        self.v_projection = nn.Linear(self.hidden_size, self.all_head_size, bias=self.qkv_bias)
+        # self.q_projection = nn.Linear(self.hidden_size, self.all_head_size, bias=self.qkv_bias)
+        # if self.use_key:
+        #     self.k_projection = nn.Linear(self.hidden_size, self.all_head_size, bias=self.qkv_bias)
+        # self.v_projection = nn.Linear(self.hidden_size, self.all_head_size, bias=self.qkv_bias)
+        if self.is_op:
+            if not self.qk_share:
+                self.WK = orthogonal(nn.Linear(self.hidden_size, self.all_head_size, bias=self.qkv_bias))
+            if self.num_attention_heads > 1:
+                self.WQ = orthogonal(nn.Linear(self.hidden_size, self.all_head_size, bias=self.qkv_bias))
+        else:
+            self.WQ = nn.Linear(self.hidden_size, self.all_head_size, bias=self.qkv_bias)
+            if not self.qk_share:
+                self.WK = nn.Linear(self.hidden_size, self.all_head_size, bias=self.qkv_bias)
 
+        self.WV = nn.Linear(self.hidden_size, self.all_head_size, bias=self.qkv_bias)
         self.attn_dropout = nn.Dropout(config["attention_probs_dropout_prob"])
         # Create a linear layer to project the attention output back to the hidden size
         # In most cases, all_head_size and hidden_size are the same
@@ -264,6 +68,15 @@ class FasterRDFNSMultiHeadAttention(nn.Module):
         if self.alpha < 2:
             self.d_intrinsic = config["d_intrinsic"]
         self.mask_val = config["mask_val"]
+
+        self.is_rescale_dist = config['is_rescale_dist']
+        if self.is_rescale_dist:
+            if self.alpha >= 2:
+                self.dist_scale = (self.attention_head_size)**0.5
+            else:
+                #self.dist_scale = (self.attention_head_size)**(1/self.alpha)
+                #self.dist_scale = self.attention_head_size**0.5 / (self.attention_head_size**(1/self.attention_head_size) - 1)
+                self.dist_scale = self.attention_head_size**0.5 / (2**(1/self.attention_head_size) - 1) 
 
     def forward(
         self,
@@ -278,14 +91,23 @@ class FasterRDFNSMultiHeadAttention(nn.Module):
         # Split the projected query, key, and value into query, key, and value
         # (batch_size, sequence_length, all_head_size * 3) -> (batch_size, sequence_length, all_head_size)
         #query, key, value = torch.chunk(qkv, 3, dim=-1)
-        query = self.q_projection(x)
-        if self.use_key:
-            key = self.k_projection(x)
-        value = self.v_projection(x)       
+        # query = self.q_projection(x)
+        # if self.use_key:
+        #     key = self.k_projection(x)     
+
+        alpha, bandwidth = self.alpha, self.bandwidth
+        a = self.a
+        mask_val = self.mask_val
+        if alpha < 2:
+            d_intrinsic = self.d_intrinsic
+
+        if not self.is_op or self.num_attention_heads > 1:
+            query = self.WQ(x)
+        else:
+            query = x
 
         # Resize the query, key, and value to (batch_size, num_attention_heads, sequence_length, attention_head_size)
-        batch_size, src_sequence_length, _ = query.size()
-        trg_sequence_length = key.size(1) if self.use_key else src_sequence_length
+        batch_size, src_sequence_length, _ = query.size()        
         num_attention_heads, attention_head_size = (
             self.num_attention_heads,
             self.attention_head_size,
@@ -296,35 +118,44 @@ class FasterRDFNSMultiHeadAttention(nn.Module):
         # print(f'({batch_size}, {src_sequence_length}, {num_attention_heads}, {attention_head_size})')
         ##### end{debug} #####
 
-        alpha, bandwidth = self.alpha, self.bandwidth
-        a = self.a
-        mask_val = self.mask_val
-        if alpha < 2:
-            d_intrinsic = self.d_intrinsic
+        # query = query.view(
+        #             batch_size,
+        #             src_sequence_length,
+        #             num_attention_heads,
+        #             attention_head_size,
+        #         ).transpose(1, 2)
+        # if self.use_key:
+        #     key = key.view(
+        #             batch_size,
+        #             trg_sequence_length,
+        #             num_attention_heads,
+        #             attention_head_size,
+        #         ).transpose(1, 2)
+        # value = value.view(
+        #     batch_size, trg_sequence_length, num_attention_heads, attention_head_size
+        # ).transpose(1, 2)
+        # # geodesic distance on R^d        
+        # if self.use_key:
+        #     g_dist = torch.cdist(query, key)
+        # else:
+        #     g_dist = torch.cdist(query, query)
 
-        query = query.view(
-                    batch_size,
-                    src_sequence_length,
-                    num_attention_heads,
-                    attention_head_size,
-                ).transpose(1, 2)
-        if self.use_key:
-            key = key.view(
-                    batch_size,
-                    trg_sequence_length,
-                    num_attention_heads,
-                    attention_head_size,
-                ).transpose(1, 2)
+        query = query.view(batch_size, src_sequence_length, num_attention_heads, attention_head_size).transpose(1, 2)
+        if not self.qk_share:            
+            key = self.WK(x)
+            trg_sequence_length = key.size(1)
+            key = key.view(batch_size, trg_sequence_length, num_attention_heads, attention_head_size).transpose(1, 2)            
+            g_dist = torch.cdist(query, key, p=2)  # Euclidean dist in R^d             
+        else:                      
+            trg_sequence_length = src_sequence_length                         
+            g_dist = torch.cdist(query, query, p=2)
+        if self.is_rescale_dist:
+            g_dist = g_dist / self.dist_scale
+
+        value = self.WV(x)
         value = value.view(
             batch_size, trg_sequence_length, num_attention_heads, attention_head_size
-        ).transpose(1, 2)
-
-        # geodesic distance on R^d        
-        if self.use_key:
-            g_dist = torch.cdist(query, key)
-        else:
-            g_dist = torch.cdist(query, query)
-
+        ).transpose(1, 2)        
         # print(f'g_dist: {torch.isnan(g_dist).sum()}')
         # print(f'g_dist min: {g_dist.min()}')
         # print(f'g_dist max: {g_dist.max()}')
@@ -335,14 +166,11 @@ class FasterRDFNSMultiHeadAttention(nn.Module):
 
         # Calculate the attention scores
         if alpha < 2:
-            #attn_score = (1 + g_dist / bandwidth**0.5) ** (-d_intrinsic - alpha)
-            attn_score = (1 + g_dist / math.sqrt(attention_head_size) / bandwidth**0.5) ** (-d_intrinsic - alpha)
+            attn_score = (1 + g_dist / bandwidth**0.5) ** (-d_intrinsic - alpha)
         else:
-            #attn_score = torch.exp((-g_dist / bandwidth**0.5) ** (alpha / (alpha - 1)))
-            attn_score = torch.exp((-g_dist / math.sqrt(attention_head_size) / bandwidth**0.5) ** (alpha / (alpha - 1)))
-
-        # if attention_mask is not None:
-        #     attn_score = attn_score.masked_fill_(attention_mask == 0, mask_val)
+            attn_score = torch.exp((-g_dist / bandwidth**0.5) ** (alpha / (alpha - 1)))
+        if attention_mask is not None:
+            attn_score = attn_score.masked_fill_(attention_mask == 0, mask_val)
 
         # print(f'attn_score: {torch.isnan(attn_score).sum()}')
         # print(f'attn_score min: {attn_score.min()}')
@@ -369,15 +197,7 @@ class FasterRDFNSMultiHeadAttention(nn.Module):
             N_C = attn_score.sum(-2)  # col sum                
             K_tilde = (N_R**(-a)).unsqueeze(-1) * attn_score * (N_C**(-a)).unsqueeze(-2) 
 
-            attention_probs = F.normalize(
-                K_tilde, p=1, dim=3
-            )  # can do this as the attn weights are always positive
-
-        # print(f'attention_probs: {torch.isnan(attention_probs).sum()}')
-        # print(f'attention_probs min: {attention_probs.min()}')
-        # print(f'attention_probs max: {attention_probs.max()}')
-        # print('\n')
-
+            attention_probs = F.normalize(K_tilde, p=1, dim=3)  # can do this as the attn weights are always positive
         attention_probs = self.attn_dropout(attention_probs)
         
         # print(f'attention_probs shape: {attention_probs.shape}')
@@ -433,11 +253,7 @@ class RDFNSEncoderBlock(nn.Module):
 
     def __init__(self, config):
         super().__init__()
-        self.use_faster_attention = config.get("use_faster_attention", False)
-        if self.use_faster_attention:
-            self.attention = FasterRDFNSMultiHeadAttention(config)
-        else:
-            self.attention = RDFNSMultiHeadAttention(config)
+        self.attention = RDFNSMultiHeadAttention(config)
         self.layernorm_1 = nn.LayerNorm(config["hidden_size"])
         self.mlp = MLP(config)
         self.layernorm_2 = nn.LayerNorm(config["hidden_size"])

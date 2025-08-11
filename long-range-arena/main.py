@@ -47,13 +47,20 @@ $ torchrun --nproc_per_node=8 --nnodes=2 --node_rank=1 --master_addr=123.456.123
 # single-core
 """
 python -i main.py --model_name=fnsformer --num_heads=2 --dataset_name=listops-classification\
- --max_iters=30 --eval_interval=10 --log_interval=10 --eval_iters=10 --weight_decay=0 --model_root=.droot/debug_mode
+ --max_iters=30 --eval_interval=10 --log_interval=10 --eval_iters=10 --weight_decay=0\
+ --model_root=.droot/debug_mode
 
 python -i main.py --model_name=dpformer --num_heads=2 --dataset_name=listops-classification\
  --max_iters=30 --eval_interval=10 --log_interval=10 --eval_iters=10 --weight_decay=0 --model_root=.droot/debug_mode
 
 python -i main.py --model_name=sinkformer --num_heads=2 --dataset_name=listops-classification\
  --max_iters=30 --eval_interval=10 --log_interval=10 --eval_iters=10 --weight_decay=0 --model_root=.droot/debug_mode
+"""
+
+"""
+python -i main.py --model_name=fnsformer --manifold=rd --is_op=True --dataset_name=pathfinder-classification\
+ --epochs=10 --weight_decay=0 --lr_scheduler_type=constant --max_lr=0.01\
+ --model_root=.droot/debug_mode
 """
 
 # multi-core
@@ -95,8 +102,7 @@ if __name__ == '__main__':
     parser.add_argument('--wandb_log', default=False, type=bool)
     parser.add_argument("--wandb_project", default='translation-task', type=str)    
 
-    parser.add_argument('--instance', default='none', type=str)
-    parser.add_argument('--seed', default=42, type=int)    
+    parser.add_argument('--seed', default=0, type=int)    
     # parser.add_argument('--debug', default=False, type=bool)  # for debuggin
     parser.add_argument('--lr_scheduler_type', default='constant', type=str)
     # parser.add_argument('--do_train', default=True, type=bool)
@@ -105,10 +111,11 @@ if __name__ == '__main__':
     # Model settings
     parser.add_argument('--model_name', default='fnsformer', type=str) # 
     # FNS
-    parser.add_argument('--manifold', default='sphere', type=str) #
+    parser.add_argument('--manifold', default='rd', type=str) #
     parser.add_argument('--alpha', default=1, type=float) #
     parser.add_argument('--a', default=0, type=float) #
     parser.add_argument('--sphere_radius', default=1, type=float)
+    parser.add_argument('--is_rescale_dist', type=str2bool, nargs='?', default=True)
     # SINK
     parser.add_argument('--n_it', default=1, type=int)
     # general
@@ -133,7 +140,8 @@ if __name__ == '__main__':
     parser.add_argument('--initializer_range', default=0.02, type=float)
     parser.add_argument('--qk_share', type=str2bool, nargs='?', const=True, default=False)
     parser.add_argument('--qkv_bias', default=False, type=bool)
-    parser.add_argument('--use_faster_attn', default=True, type=bool)
+    parser.add_argument('--is_op', type=str2bool, nargs='?', const=True, default=False)
+    #parser.add_argument('--use_faster_attn', default=True, type=bool)
     parser.add_argument('--pooling_mode', default=None, type=str)
     parser.add_argument('--interaction', default='none', type=str) # 'NLI' = NLI, else not
     
@@ -237,10 +245,11 @@ if __name__ == '__main__':
         "initializer_range": args.initializer_range,
         "qkv_bias": args.qkv_bias,
         "qk_share": args.qk_share,
-        "use_faster_attention": args.use_faster_attn,
+        #"use_faster_attention": args.use_faster_attn,
         "tokenizer_path": args.tokenizer_path,
         "pooling_mode": args.pooling_mode,
         "interaction": args.interaction,
+        "is_op": args.is_op
     }
     # These are not hard constraints, but are used to prevent misconfigurations
     assert config["hidden_size"] % config["num_heads"] == 0
@@ -287,7 +296,7 @@ if __name__ == '__main__':
     else:
         model_root = args.model_root                 
 
-    torch.manual_seed(1337)
+    torch.manual_seed(args.seed)
     if torch.cuda.is_available():
         torch.backends.cuda.matmul.allow_tf32 = True # allow tf32 on matmul
         torch.backends.cudnn.allow_tf32 = True # allow tf32 on cudnn
@@ -337,16 +346,15 @@ if __name__ == '__main__':
     config["vocab_size"] = vocab_size
     config["padding_idx"] = 0
     
-    instance = int(args.instance) if args.instance.lower() != 'none' else None
-    attn_setup = {'qk_share': args.qk_share, 'qkv_bias': args.qkv_bias}
-    if instance is not None:
-        attn_setup['instance'] = instance    
+    attn_setup = {'qk_share': args.qk_share, 'qkv_bias': args.qkv_bias, 'instance': args.seed,
+                  'is_op': args.is_op}  
     attn_setup['dataset_name'] = args.dataset_name    
     if 'fnsformer' in model_name:
         attn_setup['manifold'] = args.manifold
         config['alpha'] = attn_setup['alpha'] = args.alpha      
         config['bandwidth'] = attn_setup['bandwidth'] = args.bandwidth          
         config['a'] = attn_setup['a'] = args.a
+        config['is_rescale_dist'] = attn_setup['is_rescale_dist'] = args.is_rescale_dist
         if args.manifold == 'sphere':
 
             if args.alpha < 2:
@@ -365,7 +373,8 @@ if __name__ == '__main__':
         elif args.manifold == 'rd':
             if args.alpha < 2:
                 config['d_intrinsic'] = attn_setup['d_intrinsic'] = args.hidden_size//args.num_heads  # head_dim                
-            config['mask_val'] = 1 / config["max_length"]
+            #config['mask_val'] = 1 / config["max_length"]
+            config['mask_val'] = 0
 
             model_name = 'rd' + model_name
 
@@ -375,6 +384,7 @@ if __name__ == '__main__':
         config['n_it'] = attn_setup['n_it'] = args.n_it
         config['bandwidth'] = attn_setup['bandwidth'] = args.bandwidth           
 
+    model_name = 'op' + model_name if args.is_op else model_name
     config['model_name'] = attn_setup['model_name'] = model_name
 
     models_dir, out_dir = create_model_dir(model_root, **attn_setup)        
@@ -588,20 +598,21 @@ if __name__ == '__main__':
             else:
                 metrics_ls.append([iter_num, lr, losses['train'].item(), losses['val'].item(), 
                                    acc['train'].item(), acc['val'].item(), dt])
-                
-            if losses['val'] < best_val_loss or always_save_checkpoint:
-                best_val_loss = losses['val']
-                if iter_num > 0:
-                    checkpoint = {
-                        'model': model.state_dict(),
-                        'optimizer': optimizer.state_dict(),
-                        #'model_args': model_args,
-                        'iter_num': iter_num,
-                        'best_val_loss': best_val_loss,
-                        'config': config,
-                    }
-                    print(f"saving checkpoint to {out_dir}")
-                    torch.save(checkpoint, os.path.join(out_dir, 'ckpt.pt'))
+
+            # ----- save based on best val_loss -----                
+            # if losses['val'] < best_val_loss or always_save_checkpoint:
+            #     best_val_loss = losses['val']
+            #     if iter_num > 0:
+            #         checkpoint = {
+            #             'model': model.state_dict(),
+            #             'optimizer': optimizer.state_dict(),
+            #             #'model_args': model_args,
+            #             'iter_num': iter_num,
+            #             'best_val_loss': best_val_loss,
+            #             'config': config,
+            #         }
+            #         print(f"saving checkpoint to {out_dir}")
+            #         torch.save(checkpoint, os.path.join(out_dir, 'ckpt.pt'))
 
             if not wandb_log:
                 df = pd.DataFrame(metrics_ls, columns=['iter', 'lr', 'train_loss', 'val_loss', 'train_acc', 'val_acc', 'secs_per_eval'])
@@ -654,5 +665,17 @@ if __name__ == '__main__':
                     os.remove(njoin(out_dir, '_run_performance.csv'))
                 df = pd.DataFrame(metrics_ls, columns=['iter', 'lr', 'train_loss', 'val_loss', 'train_acc', 'val_acc', 'secs_per_eval'])
                 df.to_csv(njoin(out_dir, 'run_performance.csv'))
+
+            # ----- save model -----
+            checkpoint = {
+                'model': model.state_dict(),
+                'optimizer': optimizer.state_dict(),
+                #'model_args': model_args,
+                'iter_num': iter_num,
+                'config': config,
+            }
+            print(f"saving checkpoint to {out_dir}")
+            torch.save(checkpoint, os.path.join(out_dir, 'ckpt.pt'))
+
             print(f'All data saved under {out_dir}')
             break

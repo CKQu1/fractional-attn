@@ -152,7 +152,7 @@ def collect_model_dirs(models_root, **kwargs):
             metrics_dict[metric] = []        
         #cols_attn = ['fix_embed', 'qk_share', 'qkv_bias', 'dataset_name']
         cols_attn = ['qk_share', 'qkv_bias', 'dataset_name']
-        cols_config = ['num_attention_heads', 'num_hidden_layers', 'patch_size', 'hidden_size']
+        cols_config = ['num_attention_heads', 'num_hidden_layers', 'patch_size', 'hidden_size', 'is_op',]
         cols_train = ['steps_per_epoch']
         #cols_train = []
         cols_other = ['ensembles', 'instances', 'model_dir']

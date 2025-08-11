@@ -49,22 +49,20 @@ class ClassificationModel(nn.Module):
         self.pooling_mode = config["pooling_mode"]
         self.padding_idx = config["padding_idx"]
         # ----- add models here -----
-        if config['model_name'] == 'spfnsformer':
-            self.encoder = SPFNSEncoder(config)
-        elif config['model_name'] == 'spopfnsformer':
-            self.encoder = SPOPFNSEncoder(config)   
-        elif config['model_name'] == 'rdfnsformer':
-            self.encoder = RDFNSEncoder(config)
-        elif config['model_name'] == 'rdopfnsformer':
-            self.encoder = RDOPFNSEncoder(config)                
-        elif config['model_name'] == 'dpformer':
+        # if config['model_name'] == 'spfnsformer':
+        #     self.encoder = SPFNSEncoder(config)
+        # elif config['model_name'] == 'spopfnsformer':
+        #     self.encoder = SPOPFNSEncoder(config)   
+        if config['model_name'][-11:] == 'rdfnsformer':
+            self.encoder = RDFNSEncoder(config)            
+        elif config['model_name'][-8:] == 'dpformer':
             self.encoder = DPEncoder(config)    
-        elif config['model_name'] == 'sinkformer':
-            self.encoder = SINKEncoder(config)    
-        # else:
-        #     model_name = config['model_name']
-        #     print(f'Model {model_name} does not exist!')
-        #     quit()
+        # elif config['model_name'] == 'sinkformer':
+        #     self.encoder = SINKEncoder(config)    
+        else:
+            model_name = config['model_name']
+            print(f'Model {model_name} does not exist!')
+            quit()
         self.classifier = ClassifierHead(config)
 
     def forward(self, x, attention_mask=None, output_attentions=False):
@@ -147,14 +145,10 @@ class RetrievalModel(nn.Module): # CHECK
         if self.pooling_mode == 'CLS':
             self.cls_token = nn.Parameter(torch.randn(1,1,config["hidden_size"]))
         # ----- add models here -----
-        if config['model_name'] == 'fnsformer':
-            self.encoder = FNSEncoder(config)
-        if config['model_name'] == 'opfnsformer':
-            self.encoder = OPFNSEncoder(config)            
-        elif config['model_name'] == 'dpformer':
-            self.encoder = DPEncoder(config)    
-        elif config['model_name'] == 'sinkformer':
-            self.encoder = SINKEncoder(config)    
+        if config['model_name'][-11:] == 'rdfnsformer':
+            self.encoder = RDFNSEncoder(config)            
+        elif config['model_name'][-8:] == 'dpformer':
+            self.encoder = DPEncoder(config)     
         else:
             model_name = config['model_name']
             print(f'Model {model_name} does not exist!')

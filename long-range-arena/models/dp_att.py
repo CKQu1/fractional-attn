@@ -4,7 +4,7 @@ from torch import nn
 from torch.nn import functional as F
 from torch.nn.utils.parametrizations import orthogonal
 
-from models.model_utils import NewGELUActivation
+from models.model_utils import NewGELUActivation, MLP
 
 class DPMultiHeadAttention(nn.Module):
     """
@@ -60,13 +60,6 @@ class DPMultiHeadAttention(nn.Module):
         # (batch_size, sequence_length, all_head_size * 3) -> (batch_size, sequence_length, all_head_size)
         #query, key, value = torch.chunk(qkv, 3, dim=-1)
 
-        # Resize the query, key, and value to (batch_size, num_attention_heads, sequence_length, attention_head_size)
-        batch_size, src_sequence_length, _ = query.size()        
-        num_attention_heads, attention_head_size = (
-            self.num_attention_heads,
-            self.attention_head_size,
-        )
-
         # query = query.view(batch_size, src_sequence_length, num_attention_heads, attention_head_size).transpose(1, 2)
         # if self.use_key:
         #     key = key.view(batch_size, trg_sequence_length, num_attention_heads, attention_head_size).transpose(1, 2)
@@ -76,6 +69,10 @@ class DPMultiHeadAttention(nn.Module):
             query = self.WQ(x)
         else:
             query = x
+
+        # Resize the query, key, and value to (batch_size, num_attention_heads, sequence_length, attention_head_size)
+        batch_size, src_sequence_length, _ = query.size()        
+        num_attention_heads, attention_head_size = self.num_attention_heads, self.attention_head_size
 
         query = query.view(batch_size, src_sequence_length, num_attention_heads, attention_head_size).transpose(1, 2)
         if not self.qk_share:            
@@ -130,25 +127,6 @@ class DPMultiHeadAttention(nn.Module):
             return (attention_output, attention_probs)
 
 
-class MLP(nn.Module):
-    """
-    A multi-layer perceptron module.
-    """
-
-    def __init__(self, config):
-        super().__init__()
-        self.dense_1 = nn.Linear(config["hidden_size"], config["intermediate_size"])
-        self.activation = NewGELUActivation()
-        self.dense_2 = nn.Linear(config["intermediate_size"], config["hidden_size"])
-        self.dropout = nn.Dropout(config["hidden_dropout_prob"])
-
-    def forward(self, x):
-        x = self.dense_1(x)
-        x = self.activation(x)
-        x = self.dense_2(x)
-        x = self.dropout(x)
-        return x
-
 class DPEncoderBlock(nn.Module):
     """
     A single transformer block.
@@ -156,31 +134,42 @@ class DPEncoderBlock(nn.Module):
 
     def __init__(self, config):
         super().__init__()
-        self.use_faster_attention = config.get("use_faster_attention", False)
-        if self.use_faster_attention:
-            self.attention = DPMultiHeadAttention(config)
-        else:
-            self.attention = DPMultiHeadAttention(config)
+        self.attention = DPMultiHeadAttention(config)
         self.layernorm_1 = nn.LayerNorm(config["hidden_size"])
         self.mlp = MLP(config)
         self.layernorm_2 = nn.LayerNorm(config["hidden_size"])
+        self.is_preln = config['is_preln']
 
-    def forward(self, x, attention_mask=None, output_attentions=False):
-        # Self-attention
-        attention_output, attention_probs = self.attention(
-            x, attention_mask=attention_mask, output_attentions=output_attentions
-        )
-        # Skip connection
-        x = self.layernorm_1(x + attention_output)
-        # Feed-forward network
-        mlp_output = self.mlp(x)
-        # Skip connection
-        x = self.layernorm_2(x + mlp_output)
+    # Self-attention
+    def forward(self, x, attention_mask=None, output_attentions=False):      
+        # Norm & Add (Pre-LayerNorm)
+        if self.is_preln:
+            attention_output, attention_probs = self.attention(
+                self.layernorm_1(x), attention_mask=attention_mask, output_attentions=output_attentions
+            )
+            # Skip connection
+            x = x + attention_output
+            # Feed-forward network
+            mlp_output = self.mlp(self.layernorm_2(x))
+            # Skip connection
+            x = x + mlp_output        
+        # Add & Norm (Post-LayerNorm)
+        else:
+            attention_output, attention_probs = self.attention(
+                x, attention_mask=attention_mask, output_attentions=output_attentions
+            )
+            # Skip connection
+            x = self.layernorm_1(x + attention_output)
+            # Feed-forward network
+            mlp_output = self.mlp(x)
+            # Skip connection
+            x = self.layernorm_2(x + mlp_output)
         # Return the transformer block's output and the attention probabilities (optional)
         if not output_attentions:
             return (x, None)
         else:
             return (x, attention_probs)
+
 
 class DPEncoder(nn.Module):
     """

@@ -82,8 +82,8 @@ if __name__ == '__main__':
 
     parser.add_argument('--max_lr', default=6e-4, type=float, help='max learning rate')
     parser.add_argument('--min_lr', default=6e-5, type=float, help='min learning rate')
-    parser.add_argument('--train_bs', default=2, type=int)
-    parser.add_argument('--eval_bs', default=1, type=int)
+    parser.add_argument('--train_bs', default=32, type=int)
+    parser.add_argument('--eval_bs', default=32, type=int)
     parser.add_argument('--weight_decay', default=0.01, type=float)
     parser.add_argument('--beta1', default=0.9, type=float)
     parser.add_argument('--beta2', default=0.95, type=float)        
@@ -127,6 +127,7 @@ if __name__ == '__main__':
     parser.add_argument('--tokenizer_path', default=None, type=str)  # tokenizer file path
 
     # Config settings
+    parser.add_argument('--is_preln', type=str2bool, nargs='?', default=True)
     parser.add_argument('--hidden_size', default=128, type=int)
     parser.add_argument('--intermediate_size', default=128, type=int)    
     parser.add_argument('--num_encoder_layers', default=1, type=int)
@@ -249,7 +250,8 @@ if __name__ == '__main__':
         "tokenizer_path": args.tokenizer_path,
         "pooling_mode": args.pooling_mode,
         "interaction": args.interaction,
-        "is_op": args.is_op
+        "is_op": args.is_op,
+        "is_preln": args.is_preln
     }
     # These are not hard constraints, but are used to prevent misconfigurations
     assert config["hidden_size"] % config["num_heads"] == 0
@@ -266,7 +268,10 @@ if __name__ == '__main__':
     # learning rate decay settings
     decay_lr = args.decay_lr # whether to decay the learning rate
     warmup_iters = args.warmup_iters # how many steps to warm up for    
-    min_lr = args.min_lr # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
+    if args.lr_scheduler_type == 'constant':
+        min_lr = args.min_lr = None
+    else:
+        min_lr = args.min_lr # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
 
     # system
     #device = 'cuda' # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
@@ -347,7 +352,7 @@ if __name__ == '__main__':
     config["padding_idx"] = 0
     
     attn_setup = {'qk_share': args.qk_share, 'qkv_bias': args.qkv_bias, 'instance': args.seed,
-                  'is_op': args.is_op}  
+                  'is_op': args.is_op, 'is_preln': args.is_preln}  
     attn_setup['dataset_name'] = args.dataset_name    
     if 'fnsformer' in model_name:
         attn_setup['manifold'] = args.manifold

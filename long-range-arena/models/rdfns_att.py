@@ -3,7 +3,7 @@ from torch import nn
 from torch.nn import functional as F
 from torch.nn.utils.parametrizations import orthogonal
 
-from models.model_utils import NewGELUActivation
+from models.model_utils import NewGELUActivation, MLP
 
 class RDFNSMultiHeadAttention(nn.Module):
     """
@@ -108,10 +108,7 @@ class RDFNSMultiHeadAttention(nn.Module):
 
         # Resize the query, key, and value to (batch_size, num_attention_heads, sequence_length, attention_head_size)
         batch_size, src_sequence_length, _ = query.size()        
-        num_attention_heads, attention_head_size = (
-            self.num_attention_heads,
-            self.attention_head_size,
-        )
+        num_attention_heads, attention_head_size = self.num_attention_heads, self.attention_head_size
 
         ##### begin{debug} #####
         # print(f'query shape: {query.shape}')
@@ -168,8 +165,13 @@ class RDFNSMultiHeadAttention(nn.Module):
         if alpha < 2:
             attn_score = (1 + g_dist / bandwidth**0.5) ** (-d_intrinsic - alpha)
         else:
-            attn_score = torch.exp((-g_dist / bandwidth**0.5) ** (alpha / (alpha - 1)))
+            attn_score = torch.exp(-(g_dist / bandwidth**0.5) ** (alpha / (alpha - 1)))
         if attention_mask is not None:
+            # Write a very low value (indicating -inf) to the positions where mask == 0
+            if self.is_cross_attention:
+                attention_mask = attention_mask[
+                    :, :, : src_sequence_length, : trg_sequence_length
+                ]  # Feels like a dirty fix...
             attn_score = attn_score.masked_fill_(attention_mask == 0, mask_val)
 
         # print(f'attn_score: {torch.isnan(attn_score).sum()}')
@@ -227,25 +229,6 @@ class RDFNSMultiHeadAttention(nn.Module):
             return (attention_output, attention_probs)
 
 
-class MLP(nn.Module):
-    """
-    A multi-layer perceptron module.
-    """
-
-    def __init__(self, config):
-        super().__init__()
-        self.dense_1 = nn.Linear(config["hidden_size"], config["intermediate_size"])
-        self.activation = NewGELUActivation()
-        self.dense_2 = nn.Linear(config["intermediate_size"], config["hidden_size"])
-        self.dropout = nn.Dropout(config["hidden_dropout_prob"])
-
-    def forward(self, x):
-        x = self.dense_1(x)
-        x = self.activation(x)
-        x = self.dense_2(x)
-        x = self.dropout(x)
-        return x
-
 class RDFNSEncoderBlock(nn.Module):
     """
     A single transformer block.
@@ -257,23 +240,38 @@ class RDFNSEncoderBlock(nn.Module):
         self.layernorm_1 = nn.LayerNorm(config["hidden_size"])
         self.mlp = MLP(config)
         self.layernorm_2 = nn.LayerNorm(config["hidden_size"])
+        self.is_preln = config['is_preln']
 
-    def forward(self, x, attention_mask=None, output_attentions=False):
-        # Self-attention
-        attention_output, attention_probs = self.attention(
-            x, attention_mask=attention_mask, output_attentions=output_attentions
-        )
-        # Skip connection
-        x = self.layernorm_1(x + attention_output)
-        # Feed-forward network
-        mlp_output = self.mlp(x)
-        # Skip connection
-        x = self.layernorm_2(x + mlp_output)
+    # Self-attention
+    def forward(self, x, attention_mask=None, output_attentions=False):      
+        # Norm & Add (Pre-LayerNorm)
+        if self.is_preln:
+            attention_output, attention_probs = self.attention(
+                self.layernorm_1(x), attention_mask=attention_mask, output_attentions=output_attentions
+            )
+            # Skip connection
+            x = x + attention_output
+            # Feed-forward network
+            mlp_output = self.mlp(self.layernorm_2(x))
+            # Skip connection
+            x = x + mlp_output        
+        # Add & Norm (Post-LayerNorm)
+        else:
+            attention_output, attention_probs = self.attention(
+                x, attention_mask=attention_mask, output_attentions=output_attentions
+            )
+            # Skip connection
+            x = self.layernorm_1(x + attention_output)
+            # Feed-forward network
+            mlp_output = self.mlp(x)
+            # Skip connection
+            x = self.layernorm_2(x + mlp_output)
         # Return the transformer block's output and the attention probabilities (optional)
         if not output_attentions:
             return (x, None)
         else:
             return (x, attention_probs)
+
 
 class RDFNSEncoder(nn.Module):
     """

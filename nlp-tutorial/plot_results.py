@@ -9,6 +9,7 @@ import regex as re
 
 from ast import literal_eval
 from matplotlib.transforms import ScaledTranslation
+from matplotlib.ticker import NullFormatter
 from os import makedirs
 from os.path import isdir, isfile
 from string import ascii_lowercase
@@ -1071,8 +1072,8 @@ def hyperparam_effects(models_root, fns_manifold='rd', is_rescale_dist=False,
     counter_matrix = np.zeros([nrows, len(selected_alphas), len(layers), len(emb_ds)])
     for qk_ii, qk_share in enumerate(qk_shares):
         qk_share_dirname = 'config_qqv' if qk_share else 'config_qkv'
-        for layer_idx, layer in enumerate(layers):
-            for emb_d_idx, emb_d in tqdm(enumerate(emb_ds)):
+        for layer_idx, layer in tqdm(enumerate(layers)):
+            for emb_d_idx, emb_d in enumerate(emb_ds):
                 print(f'qk_share = {qk_share}, layer = {layer}, emb_d = {emb_d}')    
                 # directories matching the above setting in the triple for loop
                 if f'{layer}-{emb_d}' in layer_dirs_dict.keys():
@@ -1139,6 +1140,7 @@ def hyperparam_effects(models_root, fns_manifold='rd', is_rescale_dist=False,
 
     linestyles = ['-', '--', '-.', ':']
     markers = ['o', '8', 'p', 's', 'v']
+    axs[0,0].set_xscale('log')
     for row in range(nrows):
         for col in range(ncols):
             for aidx in range(average_metric_matrix.shape[1]):
@@ -1146,22 +1148,19 @@ def hyperparam_effects(models_root, fns_manifold='rd', is_rescale_dist=False,
                 mask = ~np.isnan(average_metrics)
 
                 c_hyp = HYP_CMAP(HYP_CNORM(selected_alphas[aidx]))
-                axs[row,col].plot(emb_ds[mask], average_metrics[mask], label=rf'$\alpha={selected_alphas[aidx]}$',
-                                     c=c_hyp)
-                                     #marker=markers[lidx])
-
-                axs[0,0].set_xscale('log')
+                axs[row,col].plot(emb_ds[mask], average_metrics[mask], 
+                                  label=rf'{NAMES_DICT[fns_type]}, $\alpha={selected_alphas[aidx]}$',
+                                  c=c_hyp)
+                
                 axs[row,col].set_xticks(list(emb_ds))
-                #axs[-1,0].set_xticklabels([rf'$2^{{{emb_d_power}}}$' for emb_d_power in emb_ds])
                 axs[row,col].set_xticklabels(list(emb_ds))    
-                # axs[row, col].tick_params(axis='x', which='both', bottom=False, top=False)   
-                #axs[row,col].set_xscale('log')                             
+                axs[row,col].xaxis.set_minor_formatter(NullFormatter())                          
 
     axs[0,0].legend()
 
     for col in range(ncols):
         #axs[0,col].set_title(rf'{NAMES_DICT[fns_type]} ($\alpha = {selected_alphas[col]}$)')
-        axs[0,col].set_title(rf'{NAMES_DICT[fns_type]} ($L = {layers[col]}$)')
+        axs[0,col].set_title(rf'$L = {layers[col]}$')
     # if other_model_type in DCT_ALL.keys():        
     #     axs[0,ncols].set_title(f'{NAMES_DICT[other_model_type]}')
     for row in range(nrows):

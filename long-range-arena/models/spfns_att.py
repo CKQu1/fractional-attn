@@ -142,7 +142,7 @@ class SPFNSMultiHeadAttention(nn.Module):
         if alpha < 2:
             attn_score = (1 + g_dist / bandwidth**0.5) ** (-d_intrinsic - alpha)
         else:
-            attn_score = torch.exp((-g_dist / bandwidth**0.5) ** (alpha / (alpha - 1)))
+            attn_score = torch.exp(-(g_dist / bandwidth**0.5) ** (alpha / (alpha - 1)))
 
         if a == 0:
             # attn_score = attn_score.masked_fill_(attention_mask.expand(-1,self.num_attention_heads,-1,-1)==0, -1e9) # Mask

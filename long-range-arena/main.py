@@ -111,10 +111,9 @@ if __name__ == '__main__':
     # Model settings
     parser.add_argument('--model_name', default='fnsformer', type=str) # 
     # FNS
-    parser.add_argument('--manifold', default='rd', type=str) #
-    parser.add_argument('--alpha', default=1, type=float) #
-    parser.add_argument('--a', default=0, type=float) #
-    parser.add_argument('--sphere_radius', default=1, type=float)
+    parser.add_argument('--manifold', default='rd', type=str)
+    parser.add_argument('--alpha', default=1, type=float)
+    parser.add_argument('--a', default=0, type=float)
     parser.add_argument('--is_rescale_dist', type=str2bool, nargs='?', default=True)
     # SINK
     parser.add_argument('--n_it', default=1, type=int)
@@ -133,8 +132,7 @@ if __name__ == '__main__':
     parser.add_argument('--num_encoder_layers', default=1, type=int)
     parser.add_argument('--num_decoder_layers', default=0, type=int)
     parser.add_argument('--num_heads', default=2, type=int)
-    parser.add_argument('--force_num_heads', type=str2bool, nargs='?', const=True, default=False)
-    parser.add_argument('--num_classifier_layers', default=1, type=int)
+    #parser.add_argument('--num_classifier_layers', default=1, type=int)
     parser.add_argument('--hidden_dropout_prob', default=0.0, type=float)
     parser.add_argument('--encoder_dropout_prob', default=0.0, type=float)
     parser.add_argument('--attention_probs_dropout_prob', default=0.0, type=float)
@@ -147,65 +145,76 @@ if __name__ == '__main__':
     parser.add_argument('--interaction', default='none', type=str) # 'NLI' = NLI, else not
     
     # CHANGES HERE
-    parser.add_argument('--apples_to_apples', type=str2bool, nargs='?', const=True, default=False)
+    parser.add_argument('--apples_to_apples', type=str2bool, nargs='?', default=True)
 
     args = parser.parse_args()    
     
+    if args.dataset_name == 'listops-classification':
+        #args.pooling_mode = 'CLS' # Pooling not currently done in non-retrieval model
+        args.pooling_model = None
+    elif args.dataset_name == 'imdb-classification':
+        #args.pooling_mode = 'CLS'
+        args.pooling_model = None
+    elif args.dataset_name == 'aan-classification':
+        args.pooling_mode = 'CLS'
+        args.interaction = 'NLI'        
+    elif args.dataset_name == 'lra-cifar-classification':
+        args.pooling_mode = 'MEAN'
+    elif args.dataset_name == 'pathfinder-classification':
+        args.pooling_mode = 'MEAN'
+
     # If apples_to_apples comparison with other models
     if args.apples_to_apples:
         if args.dataset_name == 'listops-classification':
             args.hidden_size = 512 # IMMUTABLE
-            if not args.force_num_heads:
-                args.num_heads = 8 
+            args.num_heads = 8 
             args.num_encoder_layers = 6 # IMMUTABLE
             args.intermediate_size = 2048 # IMMUTABLE
-            #args.pooling_mode = 'CLS' # Pooling not currently done in non-retrieval model
-            args.pooling_model = None
             args.max_iters = 5000 # Can probably change this
         elif args.dataset_name == 'imdb-classification':
             args.hidden_size = 512 # IMMUTABLE
-            if not args.force_num_heads:
-                args.num_heads = 8 
+            args.num_heads = 8 
             args.num_encoder_layers = 6 # IMMUTABLE
             args.intermediate_size = 2048 # IMMUTABLE
-            #args.pooling_mode = 'CLS'
-            args.pooling_model = None
-            args.num_classifier_layers = 2 # 2-layer MLP
+            #args.num_classifier_layers = 2 # 2-layer MLP
 
             args.max_iters = 20000 # Can probably change this
             args.eval_interval = 500
             args.log_interval = 500
         elif args.dataset_name == 'aan-classification':
-            args.hidden_size = 128 # IMMUTABLE
-            if not args.force_num_heads:
-                args.num_heads = 4
+            args.hidden_size = 128 # IMMUTABLE            
+            args.num_heads = 4
             args.num_encoder_layers = 4 # IMMUTABLE
             args.intermediate_size = 512 # IMMUTABLE
-            args.pooling_mode = 'CLS'
-            args.interaction = 'NLI'
             args.max_iters = 5000 # Can probably change this
             args.eval_interval = 10
             args.log_interval = 10            
         elif args.dataset_name == 'lra-cifar-classification':
-            args.hidden_size = 64 # IMMUTABLE
-            if not args.force_num_heads:
-                args.num_heads = 4
+            args.hidden_size = 64 # IMMUTABLE            
+            args.num_heads = 4
             args.num_encoder_layers = 3 # IMMUTABLE
             args.intermediate_size = 128 # IMMUTABLE
-            args.num_classifier_layers = 2 # 2-layer MLP
+            #args.num_classifier_layers = 2 # 2-layer MLP
             # args.pooling_mode = 'CLS' # Not mentioned
             args.epochs = 200 # Can probably change this
             # Also did extensive hyperparameter sweeps
         elif args.dataset_name == 'pathfinder-classification':
-            args.hidden_size = 64 # IMMUTABLE
-            if not args.force_num_heads:
-                args.num_heads = 4
-            args.num_encoder_layers = 3 # IMMUTABLE
-            args.intermediate_size = 128 # IMMUTABLE
-            args.num_classifier_layers = 2 # 2-layer MLP
-            # args.pooling_mode = 'CLS' # Not mentioned
-            args.epochs = 200 # Can probably change this            
+            # args.hidden_size = 64 # IMMUTABLE
+            # args.num_heads = 4 # IMMUTABLE
+            # args.num_encoder_layers = 3 # IMMUTABLE
+            # args.intermediate_size = 128 # IMMUTABLE
+            # args.num_classifier_layers = 2 # 2-layer MLP
+            # # args.pooling_mode = 'CLS' # Not mentioned
+            # args.epochs = 200 # Can probably change this            
             
+            args.hidden_size = 64 # IMMUTABLE
+            args.num_heads = 2 # IMMUTABLE
+            args.num_encoder_layers = 2 # IMMUTABLE
+            args.intermediate_size = 128 # IMMUTABLE
+            #args.num_classifier_layers = 2 # 2-layer MLP
+            # args.pooling_mode = 'CLS' # Not mentioned
+            args.epochs = 40 # for 2 layers  
+
     # assertions
     model_name = args.model_name.lower()
     if 'fns' in model_name:
@@ -469,6 +478,9 @@ if __name__ == '__main__':
     print(config)
     print('\n')
     print(train_settings)
+    print('\n')
+    print(model)
+    print('\n')
     # -------------------
 
     def get_batch(split):
@@ -589,7 +601,8 @@ if __name__ == '__main__':
         # evaluate the loss on train/val sets and write checkpoints
         if iter_num % eval_interval == 0:
             losses, acc = estimate_loss()
-            print(f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}, train accuracy {acc['train']:.4f}, val accuracy {acc['val']:.4f}")
+            print(f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f},\
+                    train accuracy {acc['train']:.4f}, val accuracy {acc['val']:.4f}")
             if wandb_log: 
                 wandb.log({
                     "iter": iter_num,
@@ -655,12 +668,13 @@ if __name__ == '__main__':
         if iter_num % log_interval == 0:
             # get loss as float. note: this is a CPU-GPU sync point
             # scale up to undo the division above, approximating the true total loss (exact would have been a sum)
-            lossf = loss.item()
+            #lossf = loss.item()
             # if local_iter_num >= 5: # let the training loop settle a bit
             #     mfu = raw_model.estimate_mfu(batch_size * gradient_accumulation_steps, dt)  # mfu (model flop utilization)
             #     running_mfu = mfu if running_mfu == -1.0 else 0.9*running_mfu + 0.1*mfu
             #print(f"iter {iter_num}: loss {lossf:.4f}, time {dt*1000:.2f}ms, mfu {running_mfu*100:.2f}%")
-            print(f"iter {iter_num}: loss {lossf:.4f}, time {dt*1000:.2f}ms")
+            #print(f"iter {iter_num}: loss {lossf:.4f}, time {dt*1000:.2f}ms")
+            print(f"iter {iter_num}: time {dt*1000:.2f}ms")
         iter_num += 1
         
         # termination conditions
@@ -671,7 +685,7 @@ if __name__ == '__main__':
                 df = pd.DataFrame(metrics_ls, columns=['iter', 'lr', 'train_loss', 'val_loss', 'train_acc', 'val_acc', 'secs_per_eval'])
                 df.to_csv(njoin(out_dir, 'run_performance.csv'))
 
-            # ----- save model -----
+            # ----- save model on final step -----
             checkpoint = {
                 'model': model.state_dict(),
                 'optimizer': optimizer.state_dict(),

@@ -533,8 +533,8 @@ if __name__ == '__main__':
 
     # ++++++++++ SOMEHOW THIS WORKS FOR CPUS AS WELL ++++++++++
     # initialize a GradScaler. If enabled=False scaler is a no-op
-    if torch.cuda.is_available():
-        scaler = torch.cuda.amp.GradScaler(enabled=(dtype == 'float16'))
+    # if torch.cuda.is_available():
+    #     scaler = torch.cuda.amp.GradScaler(enabled=(dtype == 'float16'))
     # else:
     #     scaler = torch.GradScaler('cpu', enabled=(dtype == 'float16'))
 

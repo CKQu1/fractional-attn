@@ -1,0 +1,2 @@
+--model_name=opfnsvit --manifold=sphere --alpha=1.2 --bandwidth=1 --instance=0 --n_layers-1 --n_attn_heads=1 --train_bs=16 --qk_share=False --hidden_size=48 --weight_decay=0 --lr_scheduler_type=cosine --max_lr=1e-4 --min_lr=1e-5 --epochs=10
+--model_name=opfnsvit --manifold=sphere --alpha=1.6 --bandwidth=1 --instance=0 --n_layers-1 --n_attn_heads=1 --train_bs=16 --qk_share=False --hidden_size=48 --weight_decay=0 --lr_scheduler_type=cosine --max_lr=1e-4 --min_lr=1e-5 --epochs=10

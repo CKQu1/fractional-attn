@@ -99,7 +99,7 @@ if __name__ == '__main__':
     parser.add_argument('--cache_dir', default=njoin(DROOT, 'cache_dir'), type=str)
     
     parser.add_argument("--init_from", default='scratch', type=str, help='scratch | resume | gpt2')
-    parser.add_argument('--wandb_log', default=False, type=bool)
+    parser.add_argument('--is_wandb_log', default=False, type=bool)
     parser.add_argument("--wandb_project", default='translation-task', type=str)    
 
     parser.add_argument('--seed', default=0, type=int)    
@@ -190,14 +190,21 @@ if __name__ == '__main__':
             args.eval_interval = 10
             args.log_interval = 10            
         elif args.dataset_name == 'lra-cifar-classification':
+            # args.hidden_size = 64 # IMMUTABLE            
+            # args.num_heads = 4
+            # args.num_encoder_layers = 3 # IMMUTABLE
+            # args.intermediate_size = 128 # IMMUTABLE
+            # #args.num_classifier_layers = 2 # 2-layer MLP
+            # # args.pooling_mode = 'CLS' # Not mentioned
+            # args.epochs = 200 # Can probably change this
+            # Also did extensive hyperparameter sweeps
             args.hidden_size = 64 # IMMUTABLE            
-            args.num_heads = 4
-            args.num_encoder_layers = 3 # IMMUTABLE
+            args.num_heads = 1
+            args.num_encoder_layers = 1 # IMMUTABLE
             args.intermediate_size = 128 # IMMUTABLE
             #args.num_classifier_layers = 2 # 2-layer MLP
             # args.pooling_mode = 'CLS' # Not mentioned
-            args.epochs = 200 # Can probably change this
-            # Also did extensive hyperparameter sweeps
+            args.epochs = 5 # Can probably change this            
         elif args.dataset_name == 'pathfinder-classification':
             # args.hidden_size = 64 # IMMUTABLE
             # args.num_heads = 4 # IMMUTABLE
@@ -213,7 +220,7 @@ if __name__ == '__main__':
             args.intermediate_size = 128 # IMMUTABLE
             #args.num_classifier_layers = 2 # 2-layer MLP
             # args.pooling_mode = 'CLS' # Not mentioned
-            args.epochs = 40 # for 2 layers  
+            args.epochs = 60 # for 2 layers  
 
     # assertions
     model_name = args.model_name.lower()
@@ -229,7 +236,7 @@ if __name__ == '__main__':
     always_save_checkpoint = args.always_save_checkpoint # if True, always save a checkpoint after each eval
     init_from = args.init_from
     # wandb logging
-    wandb_log = args.wandb_log # disabled by default
+    is_wandb_log = args.is_wandb_log # disabled by default
     wandb_project = args.wandb_project
     wandb_run_name = f'{model_name}-{args.dataset_name}' # 'run' + str(time.time())
 
@@ -270,9 +277,7 @@ if __name__ == '__main__':
     learning_rate = args.max_lr  # max learning rate
     epochs = args.epochs
     # previously had max_iters HERE
-    weight_decay = args.weight_decay
-    beta1 = args.beta1
-    beta2 = args.beta2
+    beta1, beta2 = args.beta1, args.beta2
     grad_clip = args.grad_clip # clip gradients at this value, or disable if == 0.0
     # learning rate decay settings
     decay_lr = args.decay_lr # whether to decay the learning rate
@@ -285,7 +290,8 @@ if __name__ == '__main__':
     # system
     #device = 'cuda' # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
     #device = f'cuda:{torch.cuda.device_count()}' if torch.cuda.is_available() else 'cpu'
-    device = f'cuda' if torch.cuda.is_available() else "cpu"
+    is_use_cuda = torch.cuda.is_available()
+    device = f'cuda' if is_use_cuda else "cpu"
     device_name = torch.cuda.get_device_name(0) if 'cuda' in device else platform.processor()
     dtype = 'bfloat16' if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else 'float16' # 'float32', 'bfloat16', or 'float16', the latter will auto implement a GradScaler
     #compile = True # use PyTorch 2.0 to compile the model to be faster
@@ -404,12 +410,10 @@ if __name__ == '__main__':
     models_dir, out_dir = create_model_dir(model_root, **attn_setup)        
     # makedir of out_dir
     if not isdir(out_dir): os.makedirs(out_dir, exist_ok=True)    
-
-    # save config
-    with open(njoin(out_dir,"config.json"), "w") as ofile: 
-        json.dump(config, ofile)   
-    # save attn_setup
-    with open(njoin(out_dir,"attn_setup.json"), "w") as ofile: 
+    
+    with open(njoin(out_dir,"config.json"), "w") as ofile:  # save config
+        json.dump(config, ofile)       
+    with open(njoin(out_dir,"attn_setup.json"), "w") as ofile:  # save attn_setup
         json.dump(attn_setup, ofile)   
 
     # Create fnsformer model; I don't anticipate we would need to run sinkformer
@@ -427,6 +431,9 @@ if __name__ == '__main__':
             model = ClassificationModel(config)
     model.to(device)
         
+    # ++++++++++ SOMEHOW THIS WORKS FOR CPUS AS WELL ++++++++++
+    # initialize a GradScaler. If enabled=False scaler is a no-op
+    #if torch.cuda.is_available():        
     scaler = torch.cuda.amp.GradScaler(enabled=(dtype == 'float16'))
     loss_fn = nn.CrossEntropyLoss()
     optimizer = AdamW(model.parameters(), lr=learning_rate, betas=(beta1,beta2), weight_decay=args.weight_decay)
@@ -436,7 +443,7 @@ if __name__ == '__main__':
         unoptimized_model = model
         model = torch.compile(model, backend='aot_eager')
     # logging
-    if wandb_log:
+    if is_wandb_log:
         import wandb  # NOT IN CONTAINER
         wandb.init(project=wandb_project, name=wandb_run_name, config=config) 
 
@@ -584,7 +591,7 @@ if __name__ == '__main__':
     dt = None
     
     #fb_train_indices = fb_indices('train')
-    if not wandb_log:
+    if not is_wandb_log:
         metrics_ls = []    
     while True:
         # determine and set the learning rate for this iteration
@@ -598,12 +605,16 @@ if __name__ == '__main__':
         elif args.lr_scheduler_type == 'constant':
             lr = learning_rate    
     
+        # pass in learning rate manually
+        for param_group in optimizer.param_groups:
+            param_group['lr'] = lr        
+
         # evaluate the loss on train/val sets and write checkpoints
         if iter_num % eval_interval == 0:
             losses, acc = estimate_loss()
             print(f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f},\
                     train accuracy {acc['train']:.4f}, val accuracy {acc['val']:.4f}")
-            if wandb_log: 
+            if is_wandb_log: 
                 wandb.log({
                     "iter": iter_num,
                     "train/loss": losses['train'],
@@ -632,7 +643,7 @@ if __name__ == '__main__':
             #         print(f"saving checkpoint to {out_dir}")
             #         torch.save(checkpoint, os.path.join(out_dir, 'ckpt.pt'))
 
-            if not wandb_log:
+            if not is_wandb_log:
                 df = pd.DataFrame(metrics_ls, columns=['iter', 'lr', 'train_loss', 'val_loss', 'train_acc', 'val_acc', 'secs_per_eval'])
                 df.to_csv(njoin(out_dir, '_run_performance.csv'))   
                 
@@ -653,7 +664,7 @@ if __name__ == '__main__':
             loss = loss_fn(logits, Y) 
         # immediately async prefetch next batch while model is doing the forward pass on the GPU
         X, Y, padding_mask = get_batch('train')
-        # backward pass, with gradient scaling if training in fp16
+        # backward pass, with gradient scaling if training in fp16        
         scaler.scale(loss).backward()
         # clip the gradient
         if grad_clip != 0.0:
@@ -679,7 +690,7 @@ if __name__ == '__main__':
         
         # termination conditions
         if iter_num > max_iters:
-            if not wandb_log:
+            if not is_wandb_log:
                 if isfile(njoin(out_dir, '_run_performance.csv')):
                     os.remove(njoin(out_dir, '_run_performance.csv'))
                 df = pd.DataFrame(metrics_ls, columns=['iter', 'lr', 'train_loss', 'val_loss', 'train_acc', 'val_acc', 'secs_per_eval'])

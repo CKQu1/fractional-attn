@@ -5,6 +5,7 @@ from torch.nn.utils.parametrizations import orthogonal
 
 from models.model_utils import NewGELUActivation, MLP
 
+torch.autograd.set_detect_anomaly(True)
 class RDFNSMultiHeadAttention(nn.Module):
     """
     Multi-head attention module with some optimizations.
@@ -83,8 +84,7 @@ class RDFNSMultiHeadAttention(nn.Module):
         x,
         attention_mask=None,
         output_attentions=False
-    ):
-        torch.autograd.set_detect_anomaly(True)
+    ):        
         # Project the query, key, and value
         # (batch_size, sequence_length, hidden_size) -> (batch_size, sequence_length, all_head_size * 3)        
         #qkv = self.qkv_projection(x)
@@ -128,16 +128,9 @@ class RDFNSMultiHeadAttention(nn.Module):
         #             num_attention_heads,
         #             attention_head_size,
         #         ).transpose(1, 2)
-        # value = value.view(
-        #     batch_size, trg_sequence_length, num_attention_heads, attention_head_size
-        # ).transpose(1, 2)
-        # # geodesic distance on R^d        
-        # if self.use_key:
-        #     g_dist = torch.cdist(query, key)
-        # else:
-        #     g_dist = torch.cdist(query, query)
 
         query = query.view(batch_size, src_sequence_length, num_attention_heads, attention_head_size).transpose(1, 2)
+        # geodesic distance on R^d
         if not self.qk_share:            
             key = self.WK(x)
             trg_sequence_length = key.size(1)
@@ -153,10 +146,6 @@ class RDFNSMultiHeadAttention(nn.Module):
         value = value.view(
             batch_size, trg_sequence_length, num_attention_heads, attention_head_size
         ).transpose(1, 2)        
-        # print(f'g_dist: {torch.isnan(g_dist).sum()}')
-        # print(f'g_dist min: {g_dist.min()}')
-        # print(f'g_dist max: {g_dist.max()}')
-        # print('\n')
 
         # if attention_mask is not None:
         #     g_dist = g_dist.masked_fill_(attention_mask == 0, mask_val)
@@ -164,7 +153,7 @@ class RDFNSMultiHeadAttention(nn.Module):
         # Calculate the attention scores
         if alpha < 2:
             attn_score = (1 + g_dist / bandwidth**0.5) ** (-d_intrinsic - alpha)
-        else:
+        else:            
             attn_score = torch.exp(-(g_dist / bandwidth**0.5) ** (alpha / (alpha - 1)))
         if attention_mask is not None:
             # Write a very low value (indicating -inf) to the positions where mask == 0
@@ -172,18 +161,12 @@ class RDFNSMultiHeadAttention(nn.Module):
                 attention_mask = attention_mask[
                     :, :, : src_sequence_length, : trg_sequence_length
                 ]  # Feels like a dirty fix...
-            attn_score = attn_score.masked_fill_(attention_mask == 0, mask_val)
-
-        # print(f'attn_score: {torch.isnan(attn_score).sum()}')
-        # print(f'attn_score min: {attn_score.min()}')
-        # print(f'attn_score max: {attn_score.max()}')
-        # print('\n')
+            attn_score = attn_score.masked_fill(attention_mask == 0, mask_val)
 
         if a == 0:
             # attn_score = attn_score.masked_fill_(attention_mask.expand(-1,self.num_attention_heads,-1,-1)==0, -1e9) # Mask
-            attention_probs = F.normalize(
-                attn_score, p=1, dim=3
-            )  # can do this as the attn weights are always positive
+            # can do this as the attn weights are always positive
+            attention_probs = F.normalize(attn_score, p=1, dim=3)  
         else:
             """
             D_inv_row = torch.diag_embed(

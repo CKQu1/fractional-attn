@@ -13,9 +13,15 @@ from einops.layers.torch import Rearrange, Reduce
 from PIL import Image  # Only used for Pathfinder
 from torchtext import vocab as vocab_
 
+# from constants import *
+# from mutils import *
+
+# # the line below must be before import load_dataset
+# os.environ["HF_DATASETS_CACHE"] = njoin(DROOT, 'huggingface_cache')
+# print(f'HF_DATASETS_CACHE: ' + os.environ["HF_DATASETS_CACHE"])
+
 from datasets import DatasetDict, Value, load_dataset
 from .base import default_data_path, SequenceDataset, ImageResolutionSequenceDataset
-
 
 class IMDB(SequenceDataset):
     _name_ = "imdb"
@@ -645,6 +651,7 @@ class AAN(SequenceDataset):
         self._collate_fn = collate_batch
 
     def process_dataset(self):
+        #print(f'original cache_dir: {self.cache_dir}')  # delete later
         cache_dir = (
             None if self.cache_dir is None else self.cache_dir / self._cache_dir_name
         )
@@ -661,7 +668,9 @@ class AAN(SequenceDataset):
             },
             delimiter="\t",
             column_names=["label", "input1_id", "input2_id", "text1", "text2"],
-            keep_in_memory=True,
+            #keep_in_memory=True,
+            keep_in_memory=False,
+            cache_dir = cache_dir
         )  # True)
         dataset = dataset.remove_columns(["input1_id", "input2_id"])
         new_features = dataset["train"].features.copy()
@@ -678,7 +687,8 @@ class AAN(SequenceDataset):
         dataset = dataset.map(
             tokenize,
             remove_columns=["text1", "text2"],
-            keep_in_memory=True,
+            #keep_in_memory=True,
+            keep_in_memory=False,
             load_from_cache_file=False,
             num_proc=max(self.n_workers, 1),
         )

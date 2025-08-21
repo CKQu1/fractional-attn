@@ -8,6 +8,8 @@ from einops import rearrange
 
 from utils.util import is_list
 
+from constants import *
+from mutils import *
 
 def deprecated(cls_or_func):
     def _deprecated(*args, **kwargs):
@@ -17,9 +19,9 @@ def deprecated(cls_or_func):
 
 
 # Default data path is environment variable or hippo/data
-default_data_path = Path(__file__).parent.parent.parent.absolute()
-default_data_path = default_data_path / "raw_data"
-
+#default_data_path = Path(__file__).parent.parent.parent.absolute()
+#default_data_path = default_data_path / "raw_data"
+default_data_path = njoin(DROOT, 'raw_data')
 
 class DefaultCollateMixin:
     """Controls collating in the DataLoader

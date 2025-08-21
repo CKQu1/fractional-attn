@@ -13,65 +13,68 @@ torchrun --nnodes=1 --nproc_per_node=2 ddp_main.py --max_iters=5 --eval_interval
 if __name__ == '__main__':
       
     script_name = "batch_main.py"
-    nstack = 4
+    nstack = 1
+    is_use_gpu = False
 
     # add or change datasets here
-    patch_size = 1
-    #patch_size = 4
-    #DATASET_NAMES = ['cifar10']  #  'pathfinder-classification'            
-    DATASET_NAMES = ['mnist']
+    patch_size = 2
+    is_preln = True  # default is True
+    #patch_size = 4         
+    DATASET_NAMES = ['mnist']  #  'cifar10', 'pathfinder-classification'   
     
     n_layers = [1]
     #seeds = list(range(5))        
-    seeds = [0,1]
+    seeds = [0]
 
+    qk_shares = [True]
+    is_ops = [True]
+    manifolds = ['sphere']
+    
     for n_layer in n_layers:
-        ROOT = njoin(DROOT, f'{n_layer}L-ps={patch_size}-v3')
+        ROOT = njoin(DROOT, f'{n_layer}L-ps={patch_size}-v7')
         job_path = njoin(ROOT, 'jobs_all')
 
         kwargss_all = []    
         for seed in seeds:
             for didx, dataset_name in enumerate(DATASET_NAMES):            
                 select = 1; 
-                ngpus, ncpus = 1, 1  # GPU
-                #ngpus, ncpus = 0, 1  # CPU                            
-                walltime = '23:59:59'
-                mem = '12GB' if n_layer >= 4 else '8GB'                                              
+                if is_use_gpu:
+                    ngpus, ncpus = 1, 1  # GPU
+                    mem = '12GB' if n_layer >= 4 else '8GB'
+                else:
+                    ngpus, ncpus = 0, 1  # CPU                            
+                    mem = '48GB' if n_layer >= 4 else '24GB'
+                walltime = '23:59:59'                                                              
                 num_proc = ngpus if ngpus > 1 else ncpus
 
-                for qk_share in [True, False]:
-                #for qk_share in [True]:
-                    #for is_op in [True, False]:
-                    for is_op in [True]:
-
+                for qk_share in qk_shares:
+                    for is_op in is_ops:
                         kwargss = []
 
                         if n_layer <= 4:                                                
                             for alpha in [1.2, 2]:
                             #for alpha in [1, 1.2, 1.4, 1.6, 1.8, 2]:
-                                for bandwidth in [1]:                              
-                                    #for manifold in ['sphere']:                                
-                                    for manifold in ['rd']:
+                                for bandwidth in [1]:                                                         
+                                    for manifold in manifolds:
                                             kwargss.append({'model_name':'fnsvit','manifold':manifold,
                                             'alpha': alpha,'a': 0,'bandwidth':bandwidth, 'is_op':is_op}
                                             )     
                         else:                      
                             for alpha in [1.2, 2]:                            
-                                for bandwidth in [1]:
-                                #for bandwidth in [0.01, 1]:
-                                    #for manifold in ['sphere']:                                
-                                    for manifold in ['rd']:
+                                for bandwidth in [1]:                            
+                                    for manifold in manifolds:
                                         kwargss.append({'model_name':'fnsvit','manifold':manifold,
                                         'alpha': alpha,'a': 0,'bandwidth':bandwidth,'is_op':is_op}
                                         )    
 
                         # ----- dpvit -----
-                        #kwargss.append({'model_name':'dpvit','is_op':is_op})
+                        kwargss.append({'model_name':'dpvit','is_op':is_op})
                         # ----- sinkvit -----
                         # for n_it in [3]:
                         #     kwargss.append({'model_name':'opsinkvit','n_it':n_it,'is_op':is_op})                            
                             
-                        common_kwargs = {'seed':              seed,
+                        common_kwargs = {'seed':             seed,
+                                        'is_preln':          is_preln,  
                                         'qk_share':          qk_share, 
                                         'n_layers':          n_layer,
                                         'hidden_size':       48,
@@ -81,8 +84,8 @@ if __name__ == '__main__':
                         if n_layer == 1:
                             common_kwargs['lr_scheduler_type'] = 'binary'
                             #common_kwargs['max_lr'] = 1e-4
-                            common_kwargs['max_lr'] = 1e-3
-                            common_kwargs['min_lr'] = 1e-4
+                            common_kwargs['max_lr'] = 4e-3
+                            common_kwargs['min_lr'] = 4e-4
 
                             common_kwargs['epochs'] = 45
                             common_kwargs['n_layers'] = 1

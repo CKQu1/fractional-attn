@@ -28,7 +28,8 @@ listops = {
               },
               "training":{
                   "batch_size":32, 
-                  "learning_rate":0.0001,
+                  #"learning_rate":0.0001,
+                  "learning_rate":0.00005,
                   "warmup":1000,
                   #"warmup":500,
                   "lr_decay":"linear",

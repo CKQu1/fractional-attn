@@ -13,14 +13,14 @@ torchrun --nnodes=1 --nproc_per_node=2 ddp_main.py --max_iters=5 --eval_interval
 if __name__ == '__main__':
       
     script_name = "batch_main.py"
-    nstack = 1
+    nstack = 2
     is_use_gpu = True
 
     select = 1 
     if is_use_gpu:
         ngpus, ncpus = 1, 1  # GPU
         #mem = '12GB' if n_layer >= 4 else '8GB'
-        mem = '8GB'
+        mem = '10GB'
     else:
         ngpus, ncpus = 0, 1  # CPU                            
         #mem = '48GB' if n_layer >= 4 else '24GB'
@@ -35,15 +35,15 @@ if __name__ == '__main__':
     #seeds = list(range(5))        
     seeds = [0]
 
-    qk_shares = [False]
-    is_ops = [False]
+    qk_shares = [True, False]
+    is_ops = [True, False]
     manifolds = ['rd']
-    alphas = [1.2, 2]
+    alphas = [2]
     is_rescale_dist = True
     is_preln = True
     
     # for n_layer in n_layers:
-    ROOT = njoin(DROOT, f'exps2')
+    ROOT = njoin(DROOT, f'exps4')
     job_path = njoin(ROOT, 'jobs_all')
 
     kwargss_all = []    
@@ -54,7 +54,7 @@ if __name__ == '__main__':
                     kwargss = []
 
                     # ----- dpformer -----
-                    kwargss.append({'model_name':'dpformer'})
+                    #kwargss.append({'model_name':'dpformer'})
 
                     # ----- fnsformer -----                                           
                     for alpha in alphas:
@@ -79,7 +79,7 @@ if __name__ == '__main__':
                     if apples_to_apples:
                         common_kwargs['lr_scheduler_type'] = 'constant'
                         #common_kwargs['max_lr'] = 2e-4
-                        common_kwargs['max_lr'] = 3e-4
+                        common_kwargs['max_lr'] = 2.5e-4
                         #common_kwargs['min_lr'] = 4e-4
 
                         common_kwargs['train_bs'] = common_kwargs['eval_bs'] = 128                     

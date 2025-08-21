@@ -67,15 +67,21 @@ def load_seed_runs(model_dir, seeds, metric):
     runs = []
     for seed in seeds:
         seed_path = njoin(model_dir, f'model={seed}')
+        print(f'seed_path: {seed_path}')
         fpath = njoin(seed_path, 'run_performance.csv')
         if not isfile(fpath):
-            continue
+            fpath = njoin(seed_path, '_run_performance.csv')
+            if not isfile(fpath):
+                continue
         run = pd.read_csv(fpath)
         epochs = run['iter'].astype(int) // int(run.loc[1,'iter'])
         if 'acc' in metric and run.loc[run.index[-1], metric] <= 1:
             run[metric] *= 100
         runs.append(run[metric])
-    return epochs, pd.concat(runs, axis=1) if runs else (None, None)
+    if len(runs)==0:
+        return (None, None)
+    else:
+        return epochs, pd.concat(runs, axis=1)
 
 # final epoch stats
 def final_epoch_stats(run_perf_all, metric):
@@ -94,13 +100,13 @@ def final_epoch_stats(run_perf_all, metric):
 python -i plot_results.py plot_ensembles .droot/formers_trained/layers=2-heads=8-hidden=768-epochs=10-qkv/
 """
 def phase_ensembles(models_root, selected_dataset='pathfinder-classification',
-                    fns_manifold='rd', qk_share=False, selected_alphas='1.2',
+                    fns_manifold='rd', qk_share=True, selected_alphas='1.2,2',
                     metrics='val_acc,val_loss',
                     is_ops = [False,True],
                     #is_ops = [True],
                     cbar_separate=False, display=False):
 
-    global run_perf_all, DCT_ALL, model_info, other_model_types
+    global run_perf_all, DCT_ALL, model_info, other_model_types, other_model_types, matching_df
 
     assert fns_manifold in ['sp', 'rd', 'v2_rd'], f'{fns_manifold} does not exist!'
     qk_share, cbar_separate, display = map(str2bool, (qk_share, cbar_separate, display))
@@ -112,23 +118,6 @@ def phase_ensembles(models_root, selected_dataset='pathfinder-classification',
     # all trained model types
     model_types = []   
     DCT_ALL = {} 
-    # for ii, model_root_dir in enumerate(model_root_dirs):
-    #     DCT_cur = collect_model_dirs(model_root_dir, suffix=MODEL_SUFFIX)        
-    #     model_types_cur = list(DCT_cur.keys())
-    
-    #     for model_type in model_types_cur:
-    #         df_model_cur = DCT_cur[model_type]
-    #         if model_type not in model_types:
-    #             model_types.append(model_type)
-    #             if 'alpha' in df_model_cur.columns:
-    #                 DCT_ALL[model_type] = df_model_cur.dropna(subset='alpha')
-    #             else:
-    #                 DCT_ALL[model_type] = df_model_cur
-    #         else:                
-    #             if 'alpha' in df_model_cur.columns:
-    #                 DCT_ALL[model_type].append(df_model_cur.dropna(subset='alpha'), ignore_index=True)
-    #             else:
-    #                 DCT_ALL[model_type].append(df_model_cur, ignore_index=True)
     for model_root_dir in model_root_dirs:
         DCT_cur = collect_model_dirs(model_root_dir, suffix=MODEL_SUFFIX)
         for model_type, df_model_cur in DCT_cur.items():
@@ -160,6 +149,11 @@ def phase_ensembles(models_root, selected_dataset='pathfinder-classification',
     eps = 1
     assert eps in epss, 'eps does not exist!'
 
+    # ----- models to plot -----
+    fns_model_type = fns_manifold + 'fns' + MODEL_SUFFIX    
+    other_model_types = ['dp' + MODEL_SUFFIX]  # 'sink' + MODEL_SUFFIX
+    model_types_to_plot = [fns_model_type] + other_model_types
+
     qk_shares = list(df_model.loc[:,'qk_share'].unique())    
     nrows, ncols = len(metrics), len(is_ops)     
     figsize = (3*ncols,3.5*nrows)
@@ -169,119 +163,84 @@ def phase_ensembles(models_root, selected_dataset='pathfinder-classification',
 
     model_types_plotted = []           
     for (row_idx, metric), (col_idx, is_op) in product(enumerate(metrics), enumerate(is_ops)):
-        ax = axs[row_idx, col_idx]
-        # summary statistics
-        row_stats = []            
-        model_type = 'op' + fns_manifold + 'fns' + MODEL_SUFFIX if is_op else fns_manifold + 'fns' + MODEL_SUFFIX
-        print(f'model_type = {model_type}')
-        df_model = DCT_ALL[model_type]
-        matching_df = df_model[(df_model['ensembles']>0)&(df_model['qk_share']==qk_share)&
-                                (df_model['is_op']==is_op)&
-                                (df_model['model_dir'].str.contains(f'/{model_type}-'))]
-
-        if matching_df.shape[0] > 0: 
-            DCT_matching = { model_type: matching_df }
-        else:
-            DCT_matching = {}
-            continue
-
-        if model_type not in model_types_plotted:
-            model_types_plotted.append(model_type)
-
-        for alpha in selected_alphas:                
-            model_df = DCT_matching[model_type].dropna(subset='alpha')
-            model_df.reset_index(drop=True, inplace=True)
-            lstyle_model = LINESTYLE_DICT[model_type]
-
-            # -------------------- FNS --------------------                        
-            c_hyp = HYP_CMAP(HYP_CNORM(alpha))  # hyperparameter color  
-
-            model_info = model_df[(model_df['alpha']==alpha) & (model_df['bandwidth']==eps) & 
-                                    model_df['model_dir'].str.contains(selected_dataset)]
-            seeds = model_info['seeds'].item()
-            qk_share = model_info['qk_share'].item()
-            
-            epochs, run_perf_all = load_seed_runs(model_info['model_dir'].item(), seeds, metric)
-            counter = run_perf_all.shape[1]
-
-            if counter > 0:
-                metric_curves = get_metric_curves(run_perf_all)                    
-                if (row_idx,col_idx) == (0,0):
-                    im = ax.plot(epochs, metric_curves[1], linestyle=lstyle_model, c=c_hyp, alpha=TRANSP)                                                
-                else:
-                    ax.plot(epochs, metric_curves[1], linestyle=lstyle_model, c=c_hyp, alpha=TRANSP)                                            
-                ax.fill_between(epochs, metric_curves[0], metric_curves[2], color=c_hyp, alpha=TRANSP/2)                                                                        
-
-                # results of the final epoch
-                row_stats.append([alpha] + final_epoch_stats(run_perf_all,metric) + [counter])
-                summary_stats = pd.DataFrame(data=row_stats, columns=['alpha'] + stats_colnames)
-
-                # print message
-                print(metric)
-                print(f'is_op = {is_op}, qk_share = {qk_share}')
-                print(summary_stats)
-                print('\n')                       
-
-        # -------------------- SINK, DP --------------------   
-        #other_model_types = ['sink' + MODEL_SUFFIX, 'dp' + MODEL_SUFFIX]
-        other_model_types = ['dp' + MODEL_SUFFIX]
-        if is_op:                
-            other_model_types = ['op' + model_type for model_type in other_model_types]
-        other_model_types = list(set(other_model_types) & set(model_types))
-        for oidx, model_type in enumerate(other_model_types):
-            # summary statistics
-            row_stats = []
-            model_df = DCT_ALL[model_type]
-            other_matching_df = model_df[(model_df['ensembles']>0)&
-                                         (model_df['qk_share']==qk_share)&
-                                         (model_df['is_op']==is_op)&
-                                         (model_df['model_dir'].str.contains(f'/{model_type}-'))]                
-
-            lstyle_model = LINESTYLE_DICT[model_type]
-
-            model_info = other_matching_df.iloc[0,:]
-            seeds = model_info['seeds']
-            qk_share = model_info['qk_share']
-
-            epochs, run_perf_all = load_seed_runs(model_info['model_dir'], seeds, metric)
-            counter = run_perf_all.shape[1]
-            metric_curves = get_metric_curves(run_perf_all)
-
-            ax.plot(epochs, metric_curves[1], linestyle=lstyle_model, 
-                    c=OTHER_COLORS_DICT[model_type], alpha=TRANSP)                                                                                                           
-            ax.fill_between(epochs, metric_curves[0], metric_curves[2],
-                            color=OTHER_COLORS_DICT[model_type], alpha=TRANSP/2)    
-
-            # results of the final epoch
-            row_stats.append(final_epoch_stats(run_perf_all,metric) + [counter])
+        ax = axs[row_idx, col_idx]        
+        row_stats = [] # summary statistics
+        
+        print(f'model_type = {model_type}')        
+        for model_type in model_types_to_plot:
+            if is_op:
+                model_type = 'op' + model_type
+            if model_type in DCT_ALL.keys():
+                df_model = DCT_ALL[model_type]
+            else:
+                continue
+            matching_df = df_model[(df_model['ensembles']>0)&(df_model['qk_share']==qk_share)&
+                                   (df_model['is_op']==is_op)&                                    
+                                   (df_model['model_dir'].str.contains(selected_dataset))&
+                                   (df_model['model_dir'].str.contains(f'/{model_type}-'))]
 
             if model_type not in model_types_plotted:
                 model_types_plotted.append(model_type)
 
-            summary_stats = pd.DataFrame(data=row_stats, columns=stats_colnames)
+            lstyle_model = LINESTYLE_DICT[model_type]
+            for alpha in selected_alphas:
+                is_fns = 'fns' in model_type
+                alpha = alpha if is_fns else None
+                matching_df.reset_index(drop=True, inplace=True)                
+                                       
+                # color
+                color = HYP_CMAP(HYP_CNORM(alpha)) if is_fns else OTHER_COLORS_DICT[model_type]  
+                # -------------------- SINK, DP -------------------- 
+                model_info = matching_df 
+                # -------------------- FNS --------------------
+                if is_fns:
+                    condition = (matching_df['alpha']==alpha) & (matching_df['bandwidth']==eps)
+                    model_info = model_info[condition]
+                
+                if model_info.shape[0] > 0:
+                    seeds, qk_share = (model_info[k].item() for k in ('seeds', 'qk_share'))                
+                    epochs, run_perf_all = load_seed_runs(model_info['model_dir'].item(), seeds, metric)   
+                else:
+                    continue
 
-            print(model_type)
-            print(metric)
-            print(f'is_op = {is_op}, qk_share = {qk_share}')
-            print(summary_stats)
-            print('\n')
+                if run_perf_all is not None:
+                    counter = run_perf_all.shape[1]
+                    metric_curves = get_metric_curves(run_perf_all)          
+                    exe_plot = ax.plot(epochs, metric_curves[1], linestyle=lstyle_model, c=color, alpha=TRANSP)          
+                    if (row_idx,col_idx) == (0,0):
+                        im = exe_plot                                            
+                    ax.fill_between(epochs, metric_curves[0], metric_curves[2], color=color, alpha=TRANSP/2)                                                                        
+
+                    # results of the final epoch
+                    row_stats.append([alpha] + final_epoch_stats(run_perf_all,metric) + [counter])
+                    summary_stats = pd.DataFrame(data=row_stats, columns=['alpha'] + stats_colnames)
+
+                    # print message
+                    print(model_type if alpha is None else model_type + f', alpha = {alpha}')
+                    print(metric)
+                    print(f'is_op = {is_op}, qk_share = {qk_share}')
+                    print(summary_stats)
+                    print('\n')     
+                if not is_fns:
+                    break  # only do once if model is not FNS type
 
         ax.grid()      
     # axs[0,0].set_ylim([75,85])
 
     # labels
     model_labels = []
-    for model_type in model_types_plotted:   
-        color = 'k' if 'fns' in model_type else OTHER_COLORS_DICT[model_type]            
-        model_label = NAMES_DICT[model_type]
-        if model_label not in model_labels:            
-            axs[0,0].plot([], [], c=color, linestyle=LINESTYLE_DICT[model_type], label=model_label)
-            model_labels.append(model_label)
+    for model_type in model_types_plotted:  
+        if model_type[:2] != 'op': 
+            color = 'k' if 'fns' in model_type else OTHER_COLORS_DICT[model_type]            
+            model_label = NAMES_DICT[model_type]
+            if model_label not in model_labels:            
+                axs[0,0].plot([], [], c=color, linestyle=LINESTYLE_DICT[model_type], label=model_label)
+                model_labels.append(model_label)
 
     # legend
     for alpha in selected_alphas[::-1]:
         axs[0,0].plot([], [], c=HYP_CMAP(HYP_CNORM(alpha)), linestyle='solid', 
-                    label=rf'$\alpha$ = {alpha}')           
+                      label=rf'$\alpha$ = {alpha}')           
 
     #ncol_legend = 2 if len(model_types_plotted) == 3 else 1
     ncol_legend = 2
@@ -291,17 +250,16 @@ def phase_ensembles(models_root, selected_dataset='pathfinder-classification',
                         loc='best', ncol=ncol_legend, frameon=False)                       
 
     #for row_idx in range(len(qk_shares)):        
-    for row_idx in range(len(metrics)):
-        for col_idx, is_op in enumerate(is_ops):  
-            ax = axs[row_idx, col_idx]
-            #ax.set_ylabel(NAMES_DICT[metric])
-            if row_idx == 0:
-                #ax.set_title(NAMES_DICT[metric])
-                ax_title = r'$W \in O(d)$' if is_ops[col_idx] else r'$W \notin O(d)$'
-                ax.set_title(ax_title)
-            
-            axs[row_idx,col_idx].sharey(axs[row_idx, 0])
-            axs[-1,col_idx].set_xlabel('Epochs')
+    for (row_idx, metric), (col_idx, is_op) in product(enumerate(metrics), enumerate(is_ops)):
+        ax = axs[row_idx, col_idx]
+        #ax.set_ylabel(NAMES_DICT[metric])
+        if row_idx == 0:
+            #ax.set_title(NAMES_DICT[metric])
+            ax_title = r'$W \in O(d)$' if is_ops[col_idx] else r'$W \notin O(d)$'
+            ax.set_title(ax_title)
+        
+        axs[row_idx,col_idx].sharey(axs[row_idx, 0])
+        axs[-1,col_idx].set_xlabel('Epochs')
         axs[row_idx,0].set_ylabel(NAMES_DICT[metrics[row_idx]])
 
     # Adjust layout

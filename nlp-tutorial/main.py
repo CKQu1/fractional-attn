@@ -125,11 +125,11 @@ if __name__ == '__main__':
 
     # Model settings
     parser.add_argument('--model_name', default='spfnsvit', type=str)  
-    parser.add_argument('--is_resnet_scale', type=str2bool, nargs='?', const=True, default=False)
+    parser.add_argument('--is_resnet_scale', type=str2bool, nargs='?', default=True)
     # fns type
     parser.add_argument('--manifold', default='sphere', type=str)
     parser.add_argument('--alpha', default=1, type=float)
-    parser.add_argument('--bandwidth', default=1)  # type=float  
+    parser.add_argument('--bandwidth', default=1)  
     parser.add_argument('--a', default=0, type=float)
     parser.add_argument('--is_rescale_dist', type=str2bool, nargs='?', const=True, default=False) 
     # sink type
@@ -329,8 +329,7 @@ if __name__ == '__main__':
 
     # These are not hard constraints, but are used to prevent misconfigurations
     assert args.hidden % args.n_attn_heads == 0    
-    config = {
-        "is_resnet_scale": args.is_resnet_scale,
+    config = {        
         "hidden": args.hidden,
         "n_layers": args.n_layers,
         "n_heads": args.n_attn_heads,
@@ -425,7 +424,8 @@ if __name__ == '__main__':
     if 'fns' in model_name:
         attn_setup['manifold'] = args.manifold
         config['alpha'] = attn_setup['alpha'] = args.alpha      
-        config['bandwidth'] = attn_setup['bandwidth'] = args.bandwidth          
+        config['bandwidth'] = attn_setup['bandwidth'] = args.bandwidth    
+        config['is_resnet_scale'] = args.is_resnet_scale,      
         if args.manifold == 'sphere':
 
             model_name = 'sp' + model_name

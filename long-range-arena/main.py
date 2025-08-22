@@ -229,8 +229,7 @@ if __name__ == '__main__':
         assert 1 <= args.alpha <= 2, 'FNS alpha must be between [1,2]'
         assert args.a in [0,0.5,1], 'Normalization index must be 0 or 0.5 or 1'             
 
-    eval_interval = args.eval_interval
-    log_interval = args.log_interval
+    eval_interval, log_interval = args.eval_interval, args.log_interval
 
     eval_only = args.eval_only # if True, script exits right after the first eval
     always_save_checkpoint = args.always_save_checkpoint # if True, always save a checkpoint after each eval
@@ -244,11 +243,6 @@ if __name__ == '__main__':
     dataset = args.dataset_name
     train_batch_size = args.train_bs # if gradient_accumulation_steps > 1, this is the micro-batch size
     eval_batch_size = args.eval_bs
-    #block_size = 1024  # max sequence length (https://stackoverflow.com/questions/66294076/how-to-determine-the-block-size-in-training-a-dataset)
-
-    # model
-    dropout = 0.0 # for pretraining 0 is good, for finetuning try 0.1+
-    bias = False # do we use bias inside LayerNorm and Linear layers?
     
     config = {
         #"model_name": model_name,        

@@ -3,7 +3,7 @@ from prenlp.tokenizer import NLTKMosesTokenizer
 from torch.utils.data import DataLoader
 
 from models.model_utils import create_longformer_mask
-from utils.data_utils import create_examples
+from UTILS.data_utils import create_examples
 from tokenization import Tokenizer, PretrainedTokenizer
 #from trainer import Trainer
 
@@ -28,8 +28,8 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.distributed import init_process_group, destroy_process_group
 
 from constants import *
-from utils.mutils import njoin, create_model_dir, convert_train_history, structural_model_root
-from utils.mutils import str2bool, str2ls, str_or_float
+from UTILS.mutils import njoin, create_model_dir, convert_train_history, structural_model_root
+from UTILS.mutils import str2bool, str2ls, str_or_float
 
 #from torch.optim import AdamW
 from torch.optim import Adam
@@ -98,6 +98,7 @@ if __name__ == '__main__':
     parser.add_argument('--beta2', default=0.999, type=float)  # 0.95       
 
     parser.add_argument('--lr_scheduler_type', default='constant', type=str, help='cosine | binary | constant') 
+    parser.add_argument('--binary_ratio', default=2/3, type=float)
     
     # log settings
     parser.add_argument('--epochs', default=None)
@@ -125,11 +126,11 @@ if __name__ == '__main__':
 
     # Model settings
     parser.add_argument('--model_name', default='spfnsvit', type=str)  
-    parser.add_argument('--is_resnet_scale', type=str2bool, nargs='?', default=True)
+    parser.add_argument('--is_resnet_scale', type=str2bool, nargs='?', default=False)
     # fns type
     parser.add_argument('--manifold', default='sphere', type=str)
     parser.add_argument('--alpha', default=1, type=float)
-    parser.add_argument('--bandwidth', default=1)  
+    parser.add_argument('--bandwidth', default=1, type=float)  
     parser.add_argument('--a', default=0, type=float)
     parser.add_argument('--is_rescale_dist', type=str2bool, nargs='?', const=True, default=False) 
     # sink type
@@ -199,7 +200,7 @@ if __name__ == '__main__':
     torch.manual_seed(args.seed)   
     device_type = 'cuda' if 'cuda' in device else 'cpu' # for later use in torch.autocast
         
-    args.bandwidth = float(args.bandwidth) if args.bandwidth.replace('.','').isnumeric() else args.bandwidth
+    #args.bandwidth = float(args.bandwidth) if args.bandwidth.replace('.','').isnumeric() else args.bandwidth
     # poor man's data loader
     if dataset_name == 'imdb':
         if not args.fix_embed:
@@ -278,7 +279,7 @@ if __name__ == '__main__':
 
         # Build DataLoader
         if args.fix_embed and args.pretrained_model_name == 'glove':
-            from utils.data_utils import glove_create_examples
+            from UTILS.data_utils import glove_create_examples
             train_dataset = glove_create_examples(args, glove_dim, tokenizer, mode='train')
             test_dataset = glove_create_examples(args, glove_dim, tokenizer, mode='test')            
         else:
@@ -293,7 +294,7 @@ if __name__ == '__main__':
     else:
         assert not args.fix_embed, f'fix_embed cannot be done for dataset {args.dataset_name}'
         from transformers import AutoTokenizer
-        from utils.data_utils import get_datasets, datasets_create_examples
+        from UTILS.data_utils import get_datasets, datasets_create_examples
 
         # Load a tokenizer (Example: BERT)
         tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
@@ -344,6 +345,7 @@ if __name__ == '__main__':
         "qk_share": args.qk_share,     
         "is_op":    args.is_op,
         "fix_embed": args.fix_embed,
+        "is_resnet_scale": args.is_resnet_scale,
         "type_vocab_size": None        
     }
     config['device'] = device
@@ -424,8 +426,7 @@ if __name__ == '__main__':
     if 'fns' in model_name:
         attn_setup['manifold'] = args.manifold
         config['alpha'] = attn_setup['alpha'] = args.alpha      
-        config['bandwidth'] = attn_setup['bandwidth'] = args.bandwidth    
-        config['is_resnet_scale'] = args.is_resnet_scale,      
+        config['bandwidth'] = attn_setup['bandwidth'] = args.bandwidth                  
         if args.manifold == 'sphere':
 
             model_name = 'sp' + model_name
@@ -540,22 +541,22 @@ if __name__ == '__main__':
         json.dump(attn_setup, ofile)   
 
     # save train settings
-    train_settings = pd.DataFrame(columns=["max_lr", "min_lr", "batch_size", "beta1", "beta2",
-                                            "train_size", "eval_size", "steps_per_epoch",
-                                            "max_iters", "weight_decay", "grad_clip", "decay_lr",
-                                            "lr_scheduler_type",
-                                            "eval_interval", "log_interval", "eval_iters", "eval_only", "always_save_checkpoint",                         
-                                            "warmup_iters",
-                                            "device_name"
-                                            ], index=range(1))
-    train_settings.iloc[0] = [args.max_lr, args.min_lr, args.train_bs, args.beta1, args.beta2,
-                              train_size, eval_size, steps_per_epoch,
-                              max_iters, args.weight_decay, args.grad_clip, args.decay_lr,
-                              args.lr_scheduler_type,
-                              eval_interval, log_interval, eval_iters, args.eval_only, args.always_save_checkpoint,
-                              args.warmup_iters,
-                              device_name
-                              ]
+    col_names = ["max_lr", "min_lr", "batch_size", "beta1", "beta2", "train_size", "eval_size", 
+                 "steps_per_epoch", "max_iters", "weight_decay", "grad_clip", "decay_lr",
+                 "lr_scheduler_type"]
+    row_data = [args.max_lr, args.min_lr, args.train_bs, args.beta1, args.beta2, train_size, eval_size, 
+                steps_per_epoch, max_iters, args.weight_decay, args.grad_clip, args.decay_lr,
+                args.lr_scheduler_type]
+    if args.lr_scheduler_type == 'binary':  # only case to add binary_ratio
+        col_names.append("binary_ratio")
+        row_data.append(args.binary_ratio)
+    col_names += ["eval_interval", "log_interval", "eval_iters", "eval_only", "always_save_checkpoint",                         
+                  "warmup_iters", "device_name"]
+    row_data += [eval_interval, log_interval, eval_iters, args.eval_only, args.always_save_checkpoint,
+                args.warmup_iters, device_name]
+
+    train_settings = pd.DataFrame(columns=col_names, index=range(1))
+    train_settings.iloc[0] = row_data
     train_settings.to_csv(njoin(out_dir, "train_setting.csv"))           
 
     #scaler = torch.cuda.amp.GradScaler(enabled=(dtype == 'float16'))
@@ -564,7 +565,6 @@ if __name__ == '__main__':
     loss_fn = nn.CrossEntropyLoss()
 
     # optimizer
-    #optimizer = model.configure_optimizers(weight_decay, learning_rate, (beta1, beta2), device_type)    
     #optimizer = Adam(model.parameters(), lr=learning_rate)  # sinkformer
     optimizer = Adam(model.parameters(), lr=learning_rate, betas=(beta1,beta2), weight_decay=args.weight_decay)
     #optimizer = AdamW(model.parameters(), lr=learning_rate, betas=(beta1,beta2), weight_decay=args.weight_decay)    
@@ -659,7 +659,7 @@ if __name__ == '__main__':
                 # else:
                 #     lr = min_lr        
                 #if epoch + 1 < 15:
-                if epoch + 1 < epochs * 3/4:
+                if epoch + 1 < epochs * args.binary_ratio:
                     lr = learning_rate
                 else:
                     lr = min_lr
@@ -701,7 +701,6 @@ if __name__ == '__main__':
                 checkpoint = {
                     'model': raw_model.state_dict(),
                     'optimizer': optimizer.state_dict(),
-                    #'model_args': model_args,
                     'iter_num': iter_num,
                     #'best_val_loss': best_val_loss,
                     'epoch_val_loss': epoch_val_loss,

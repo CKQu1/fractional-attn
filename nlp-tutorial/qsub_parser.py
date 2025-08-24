@@ -5,7 +5,7 @@ import random
 from datetime import datetime
 from os.path import isdir, isfile
 from constants import *
-from utils.mutils import njoin
+from UTILS.mutils import njoin
 
 def qsub(command, pbs_array_data, **kwargs):
     global pbs_array_data_chunks
@@ -107,7 +107,7 @@ END"""
             PBS_SCRIPT = f"""<<'END'
 #!/bin/bash
 #PBS -N {kwargs.get('N', sys.argv[0] or 'job')}
-#PBS -q {kwargs.get('q','defaultQ')}
+#PBS -q {kwargs.get('q','l40s')}
 #PBS -V
 #PBS -m n
 ##PBS -o {path} -e {path}
@@ -248,10 +248,10 @@ def job_setup(script_name, kwargss, **kwargs):
         # ----- PHYSICS -----
         elif cluster == 'PHYSICS':
             if ngpus >= 1:
-                kwargs_qsub["q"] = 'l40s'
+                kwargs_qsub["q"] = kwargs.get('q', 'l40s')
             else:
                 #kwargs_qsub["q"] = 'yossarian'                
-                kwargs_qsub["q"] = 'defaultQ'
+                kwargs_qsub["q"] = kwargs.get('q', 'l40s')
 
             kwargs_qsub["source"] = PHYSICS_SOURCE 
             kwargs_qsub["conda"] = PHYSICS_CONDA
@@ -260,9 +260,9 @@ def job_setup(script_name, kwargss, **kwargs):
         # ----- FUDAN -----
         elif cluster == 'FUDAN_BRAIN':
             if ngpus >= 1:
-                kwargs_qsub["q"] = 'gpu'
+                kwargs_qsub["q"] = kwargs.get('q', 'gpu')
             else:
-                kwargs_qsub["q"] = 'defaultQ'                
+                kwargs_qsub["q"] = kwargs.get('q', 'defaultQ')    
 
             kwargs_qsub["conda"] = FUDAN_CONDA
         # -------------------        

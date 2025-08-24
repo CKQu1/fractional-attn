@@ -1,6 +1,6 @@
 import matplotlib as mpl
 import os
-from utils.mutils import njoin
+from UTILS.mutils import njoin
 from matplotlib.cm import get_cmap
 
 # ----- GENERAL -----
@@ -9,7 +9,7 @@ DROOT = njoin(RT, '.droot')
 FIGS_DIR = njoin(DROOT, 'figs_dir')
 SCRIPT_DIR = njoin(DROOT, 'submitted_scripts')
 
-CLUSTER = 'ARTEMIS' if 'project' in DROOT else 'PHYSICS' if 'headnode' in DROOT else 'FUDAN_BRAIN'
+CLUSTER = 'ARTEMIS' if 'project' in DROOT else 'PHYSICS' if 'taiji1' in DROOT else 'FUDAN_BRAIN'
 # -------------------
 
 # ----- ARTEMIS -----

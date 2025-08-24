@@ -16,9 +16,9 @@ from string import ascii_lowercase
 from time import time
 from tqdm import tqdm
 from constants import *
-from utils.mutils import njoin, str2bool, str2ls, create_model_dir, convert_train_history
-from utils.mutils import collect_model_dirs
-from utils.figure_utils import matrixify_axs, label_axs
+from UTILS.mutils import njoin, str2bool, str2ls, create_model_dir, convert_train_history
+from UTILS.mutils import collect_model_dirs
+from UTILS.figure_utils import matrixify_axs, label_axs
 
 matplotlib.use("Agg")
 

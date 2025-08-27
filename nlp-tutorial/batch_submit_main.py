@@ -15,11 +15,12 @@ torchrun --nnodes=1 --nproc_per_node=2 ddp_main.py --max_iters=5 --eval_interval
 if __name__ == '__main__':
           
     date_str = datetime.today().strftime('%Y-%m-%d')    
-    script_name = "batch_main.py"
-    nstack = 4
-    MEM_DICT = {1: '4GB', 2: '6GB', 3: '8GB', 4: '10GB', 5: '12GB', 6: '14GB'}
+    batch_script_name = "batch_main.py"
+    script_name = 'main.py'
+    nstack = 60
+    MEM_DICT = {1: '4GB', 2: '8GB', 3: '8GB', 4: '10GB', 5: '12GB', 6: '14GB'}
     #CLUSTER = 'PHYSICS'  # can manually enter here too
-    q = 'taiji'  # 'l40s', 'taiji'        
+    q = 'l40s'  # 'l40s', 'taiji'        
 
     # ensembles
     seeds = list(range(5))
@@ -37,7 +38,7 @@ if __name__ == '__main__':
     is_rescale_dist = True
     is_resnet_scale = False
     max_len = 512
-    n_layers = 1
+    n_layers = 3
     if n_layers < 4:
         hiddens = [8, 16 ,32 ,64]
         #hiddens = [64]
@@ -51,7 +52,7 @@ if __name__ == '__main__':
         binary_ratio = 3/4  # for L-d-grid study
 
     # resources
-    is_use_gpu = False
+    is_use_gpu = True
     select = 1
     (ngpus,ncpus) = (1,1) if is_use_gpu else (0,1)                               
     walltime = '23:59:59'
@@ -60,7 +61,8 @@ if __name__ == '__main__':
     # models
     is_force_train = False
     # FNS
-    alphas = [1, 1.2, 1.4, 1.6, 1.8, 2]  # 1, 1.2, 1.4, 1.6, 1.8, 2
+    #alphas = [1, 1.2, 1.4, 1.6, 1.8, 2] 
+    alphas = [1.2, 2]
     #alphas = [1]
     bandwidths = [1]  # 'median'      
     manifolds = ['rd']  # 'rd', 'v2_rd', 'sphere'       
@@ -167,12 +169,12 @@ if __name__ == '__main__':
         arg_strss = ''
         for kwargs in kwargss:
             arg_strss += ",".join("=".join((str(k),str(v))) for k,v in kwargs.items()) + ';'
-        batch_kwargss_all.append({'arg_strss': arg_strss[:-1]})
+        batch_kwargss_all.append({'arg_strss': arg_strss[:-1], 'script': script_name})
 
     print(f'Batched Total jobs: {len(batch_kwargss_all)} \n')
 
-    commands, script_names, pbs_array_trues, kwargs_qsubs =\
-            job_setup(script_name, batch_kwargss_all,
+    commands, batch_script_names, pbs_array_trues, kwargs_qsubs =\
+            job_setup(batch_script_name, batch_kwargss_all,
                     q=q,
                     ncpus=ncpus,
                     ngpus=ngpus,
@@ -183,5 +185,5 @@ if __name__ == '__main__':
                     nstack=nstack,
                     cluster=CLUSTER)
     
-    for i in range(len(commands)):
-        qsub(f'{commands[i]} {script_names[i]}', pbs_array_trues[i], path=job_path, **kwargs_qsubs[i])         
+    # for i in range(len(commands)):
+    #     qsub(f'{commands[i]} {batch_script_names[i]}', pbs_array_trues[i], path=job_path, **kwargs_qsubs[i])         

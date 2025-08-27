@@ -1,5 +1,6 @@
 import os
 from datetime import datetime
+from itertools import product
 from os.path import isfile, isdir
 from time import sleep
 from constants import DROOT, CLUSTER, PHYSICS_CONDA
@@ -13,7 +14,7 @@ torchrun --nnodes=1 --nproc_per_node=2 ddp_main.py --max_iters=5 --eval_interval
 if __name__ == '__main__':
       
     script_name = "batch_main.py"
-    nstack = 2
+    nstack = 1
     is_use_gpu = True
 
     select = 1 
@@ -31,104 +32,106 @@ if __name__ == '__main__':
     # add or change datasets here        
     DATASET_NAMES = ['pathfinder-classification']
     apples_to_apples = True
+    p_drop = 0.1  # dropout rate for embeddings, attn and hidden layers
     
     #seeds = list(range(5))        
     seeds = [0]
 
-    qk_shares = [True, False]
-    is_ops = [True, False]
+    qk_shares = [False]
+    is_ops = [False]
     manifolds = ['rd']
-    alphas = [2]
+    alphas = [1.2, 2]
     is_rescale_dist = True
-    is_preln = True
+    is_preln = False
     
     # for n_layer in n_layers:
-    ROOT = njoin(DROOT, f'exps4')
+    ROOT = njoin(DROOT, 'exps_preLN' if is_preln else 'exps_postLN')
     job_path = njoin(ROOT, 'jobs_all')
 
     kwargss_all = []    
-    for seed in seeds:
-        for didx, dataset_name in enumerate(DATASET_NAMES):            
-            for qk_share in qk_shares:
-                for is_op in is_ops:
-                    kwargss = []
+    for seed, dataset_name in product(seeds,DATASET_NAMES):
+        for qk_share, is_op in product(qk_share, is_ops):
+            kwargss = []
 
-                    # ----- dpformer -----
-                    #kwargss.append({'model_name':'dpformer'})
+            # ----- dpformer -----
+            kwargss.append({'model_name':'dpformer'})
 
-                    # ----- fnsformer -----                                           
-                    for alpha in alphas:
-                        for bandwidth in [1]:                                                         
-                            for manifold in manifolds:
-                                    kwargss.append({'model_name':'fnsformer','manifold':manifold,
-                                    'alpha': alpha,'a': 0,'bandwidth':bandwidth, 
-                                    'is_rescale_dist': is_rescale_dist}
-                                    )     
+            # ----- fnsformer -----                                           
+            for alpha in alphas:
+                for bandwidth in [1]:                                                         
+                    for manifold in manifolds:
+                            kwargss.append({'model_name':'fnsformer','manifold':manifold,
+                            'alpha': alpha,'a': 0,'bandwidth':bandwidth, 
+                            'is_rescale_dist': is_rescale_dist}
+                            )     
 
-                    # ----- sinkformer -----
-                    # for n_it in [3]:
-                    #     kwargss.append({'model_name':'opsinkformer','n_it':n_it,'is_op':is_op})                            
-                        
-                    common_kwargs = {'seed':              seed,
-                                    'qk_share':           qk_share,
-                                    'is_op':              is_op,
-                                    'is_preln':           is_preln,
-                                    'apples_to_apples':   apples_to_apples
-                                    }  
-
-                    if apples_to_apples:
-                        common_kwargs['lr_scheduler_type'] = 'constant'
-                        #common_kwargs['max_lr'] = 2e-4
-                        common_kwargs['max_lr'] = 2.5e-4
-                        #common_kwargs['min_lr'] = 4e-4
-
-                        common_kwargs['train_bs'] = common_kwargs['eval_bs'] = 128                     
-
-                    # if num_proc > 1:
-                    #     common_kwargs['grad_accum_step'] = num_proc * 2
-
-                    use_custom_optim = False if 'use_custom_optim' not in common_kwargs.keys() else common_kwargs['use_custom_optim']                                 
-
-                    # model_root_dirname = structural_model_root(qk_share=qk_share, num_encoder_layers=common_kwargs['num_encoder_layers'],
-                    #                                            n_attn_heads=common_kwargs['num_attention_heads']
-                    #                                            )  
-                    model_root_dirname = structural_model_root(qk_share=qk_share, 
-                                                               num_encoder_layers='default',
-                                                               n_attn_heads='default')                           
-                    model_root = njoin(ROOT, 'config_qqv' if qk_share else 'config_qkv', 
-                                       dataset_name, model_root_dirname)
+            # ----- sinkformer -----
+            # for n_it in [3]:
+            #     kwargss.append({'model_name':'opsinkformer','n_it':n_it,'is_op':is_op})                            
                 
-            
-                    for idx in range(len(kwargss)):
-                        # function automatically creates dir
-                        kwargss[idx]["dataset"] = dataset_name    
-                        kwargss[idx]['model_root'] = model_root
-                    
-                    kwargss = add_common_kwargs(kwargss, common_kwargs)
-                    kwargss_all += kwargss
+            common_kwargs = {'seed':              seed,
+                            'qk_share':           qk_share,
+                            'is_op':              is_op,
+                            'is_preln':           is_preln,
+                            'apples_to_apples':   apples_to_apples,
+                            'hidden_dropout_prob':p_drop,
+                            'encoder_dropout_prob':p_drop,
+                            'attention_probs_dropout_prob':p_drop
+                            }  
 
-        print(f'Total jobs: {len(kwargss_all)} \n')      
+            if apples_to_apples:
+                common_kwargs['lr_scheduler_type'] = 'constant'
+                #common_kwargs['max_lr'] = 2e-4
+                common_kwargs['max_lr'] = 2.5e-4
+                #common_kwargs['min_lr'] = 4e-4
 
-        batch_kwargss_all = []
-        kwargsss = [kwargss_all[i:i+nstack] for i in range(0, len(kwargss_all), nstack)]
-        for kwargss in kwargsss:
-            arg_strss = ''
-            for kwargs in kwargss:
-                arg_strss += ",".join("=".join((str(k),str(v))) for k,v in kwargs.items()) + ';'
-            batch_kwargss_all.append({'arg_strss': arg_strss[:-1]})
-  
-        print(f'Batched Total jobs: {len(batch_kwargss_all)} \n')
+                common_kwargs['train_bs'] = common_kwargs['eval_bs'] = 128                     
 
-        commands, script_names, pbs_array_trues, kwargs_qsubs =\
-                job_setup(script_name, batch_kwargss_all,
-                        ncpus=ncpus,
-                        ngpus=ngpus,
-                        select=select, 
-                        walltime=walltime,
-                        mem=mem,
-                        job_path=job_path,
-                        nstack=nstack,
-                        cluster=CLUSTER)
+            # if num_proc > 1:
+            #     common_kwargs['grad_accum_step'] = num_proc * 2
+
+            use_custom_optim = False if 'use_custom_optim' not in common_kwargs.keys() else common_kwargs['use_custom_optim']                                 
+
+            # model_root_dirname = structural_model_root(qk_share=qk_share, num_encoder_layers=common_kwargs['num_encoder_layers'],
+            #                                            n_attn_heads=common_kwargs['num_attention_heads']
+            #                                            )  
+            model_root_dirname = structural_model_root(qk_share=qk_share, 
+                                                        num_encoder_layers='default',
+                                                        n_attn_heads='default')                           
+            model_root = njoin(ROOT, 'config_qqv' if qk_share else 'config_qkv', 
+                                dataset_name, model_root_dirname)
         
-        for i in range(len(commands)):
-            qsub(f'{commands[i]} {script_names[i]}', pbs_array_trues[i], path=job_path,**kwargs_qsubs[i])         
+    
+            for idx in range(len(kwargss)):
+                # function automatically creates dir
+                kwargss[idx]["dataset"] = dataset_name    
+                kwargss[idx]['model_root'] = model_root
+            
+            kwargss = add_common_kwargs(kwargss, common_kwargs)
+            kwargss_all += kwargss
+
+    print(f'Total jobs: {len(kwargss_all)} \n')      
+
+    batch_kwargss_all = []
+    kwargsss = [kwargss_all[i:i+nstack] for i in range(0, len(kwargss_all), nstack)]
+    for kwargss in kwargsss:
+        arg_strss = ''
+        for kwargs in kwargss:
+            arg_strss += ",".join("=".join((str(k),str(v))) for k,v in kwargs.items()) + ';'
+        batch_kwargss_all.append({'arg_strss': arg_strss[:-1]})
+
+    print(f'Batched Total jobs: {len(batch_kwargss_all)} \n')
+
+    commands, script_names, pbs_array_trues, kwargs_qsubs =\
+            job_setup(script_name, batch_kwargss_all,
+                    ncpus=ncpus,
+                    ngpus=ngpus,
+                    select=select, 
+                    walltime=walltime,
+                    mem=mem,
+                    job_path=job_path,
+                    nstack=nstack,
+                    cluster=CLUSTER)
+    
+    for i in range(len(commands)):
+        qsub(f'{commands[i]} {script_names[i]}', pbs_array_trues[i], path=job_path,**kwargs_qsubs[i])         

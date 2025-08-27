@@ -33,6 +33,14 @@ def str2ls(s):
         else: 
             return [s]
 
+def find_subdirs(root_dir, matching_str):
+    matches = []
+    for dirpath, dirnames, _ in os.walk(root_dir):
+        for dirname in dirnames:
+            if matching_str in dirname.lower() and dirpath not in matches:
+                matches.append(dirpath)
+    return matches
+
 def get_seed(dir, *args):  # for enumerating each seed of training
     #global start, end, seeds, s_part
 
@@ -91,10 +99,11 @@ def create_model_dir(model_root_dir, **kwargs):
         dirname += f'-n_it={n_it}-eps={bandwidth}'
 
     models_dir = njoin(model_root_dir, dirname)
-    if 'seed' in kwargs:
-        seed = kwargs.get('seed')
-    else:
-        seed = get_seed(models_dir, 'model=')
+    # if 'seed' in kwargs:
+    #     seed = kwargs.get('seed')
+    # else:
+    #     seed = get_seed(models_dir, 'model=')
+    seed = kwargs.get('seed')
     model_dir = njoin(models_dir, f'model={seed}')        
        
     return models_dir, model_dir      
@@ -223,7 +232,10 @@ def load_model_files(model_dir):
         run_performance = pd.read_csv(njoin(model_dir, 'run_performance.csv'))
     else:
         run_performance = None
-    train_setting = pd.read_csv(njoin(model_dir, 'train_setting.csv'))
+    if isfile(njoin(model_dir, 'train_setting.csv')):
+        train_setting = pd.read_csv(njoin(model_dir, 'train_setting.csv'))
+    else:
+        train_setting = None
     f = open(njoin(model_dir,'config.json'))
     config = json.load(f)
     f.close()

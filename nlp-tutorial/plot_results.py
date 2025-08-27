@@ -8,6 +8,7 @@ import pandas as pd
 import regex as re
 
 from ast import literal_eval
+from itertools import product
 from matplotlib.transforms import ScaledTranslation
 from matplotlib.ticker import NullFormatter
 from os import makedirs
@@ -17,8 +18,11 @@ from time import time
 from tqdm import tqdm
 from constants import *
 from UTILS.mutils import njoin, str2bool, str2ls, create_model_dir, convert_train_history
-from UTILS.mutils import collect_model_dirs
+from UTILS.mutils import collect_model_dirs, find_subdirs
 from UTILS.figure_utils import matrixify_axs, label_axs
+
+import re
+from pathlib import Path
 
 matplotlib.use("Agg")
 
@@ -43,6 +47,38 @@ plt.rc('xtick', labelsize=BIGGER_SIZE)    # fontsize of the tick labels
 plt.rc('ytick', labelsize=BIGGER_SIZE)    # fontsize of the tick labels
 plt.rc('legend', fontsize=BIGGER_SIZE-2)    # legend fontsize
 plt.rc('figure', titlesize=BIGGER_SIZE)  # fontsize of the figure title
+
+# return median, 25/75 percentile
+def get_metric_curves(run_perf_all):
+    metric_m = run_perf_all.quantile(0.5,1)
+    metric_l = run_perf_all.quantile(0,1)
+    metric_u = run_perf_all.quantile(1,1)
+    return [metric_l, metric_m, metric_u]
+
+# aggregate all runs
+def load_seed_runs(model_dir, seeds, metric):
+    runs = []
+    for seed in seeds:
+        seed_path = njoin(model_dir, f'model={seed}')
+        #print(f'seed_path: {seed_path}')
+        fpath = njoin(seed_path, 'run_performance.csv')
+        if not isfile(fpath):
+            # fpath = njoin(seed_path, '_run_performance.csv')
+            # if not isfile(fpath):
+            #     continue
+            continue
+        run = pd.read_csv(fpath)
+        if int(run.loc[0,'iter']) > 0:
+            epochs = run['iter'].astype(int) // int(run.loc[0,'iter'])
+        else:
+            epochs = run['iter'].astype(int) // int(run.loc[1,'iter'])
+        if 'acc' in metric and run.loc[run.index[-1], metric] <= 1:
+            run[metric] *= 100
+        runs.append(run[metric])
+    if len(runs)==0:
+        return (None, None)
+    else:
+        return epochs, pd.concat(runs, axis=1)
 
 # Ablation study of Fracformer on sequence length
 def fns_seq_len(root, dataset_name='imdb', 
@@ -1013,20 +1049,16 @@ def phase_ensembles(models_root, selected_dataset='imdb',
         plt.savefig(njoin(SAVE_DIR,"alpha_colorbar.pdf"), bbox_inches='tight')  
 
 
-def hyperparam_effects(models_root, fns_manifold='rd', is_rescale_dist=False,
+def hyperparam_effects(models_root, fns_manifold='rd', is_rescale_dist=True,
                        qk_shares=[False, True], selected_alphas='1.2,2',
-                       metric='val_acc',
+                       metric='val_acc', selected_dataset='imdb',
                        is_op=True):
 
-    global layer_dirs_dict, DCT_ALL, setting_dir, layer_dir
-    global metric_matrix, counter_matrix, average_metric_matrix, run_perf, other_matching_df
-    global layers, emb_ds
-    global other_model_type, other_model_condition, other_model_info, other_matching_df, other_model_df
-    global model_df, run_perf
-    global qk_share
+    global metric_matrix, counter_matrix, average_metric_matrix, run_perf_all
+    global other_model_type, fns_type, layers
 
-    # Regular expression pattern
-    pattern = r"\d+L-v4-hidden=\d+-max_len=512"
+    linestyles = ['-', '--', '-.', ':']
+    markers = ['o', '8', 'p', 's', 'v']
 
     assert fns_manifold in ['sphere', 'rd', 'v2_rd'], f'{fns_manifold} does not exist!'
     assert metric in ['train_acc', 'train_loss', 'val_acc', 'val_loss']    
@@ -1035,15 +1067,18 @@ def hyperparam_effects(models_root, fns_manifold='rd', is_rescale_dist=False,
     if is_op:
         fns_type = 'op' + fns_type
         other_model_type = 'op' + other_model_type
-    is_op = str2bool(is_op)
-    is_rescale_dist = str2bool(is_rescale_dist)
+    model_types_to_plot = [fns_type, other_model_type]
+
+    is_op, is_rescale_dist = str2bool(is_op), str2bool(is_rescale_dist)
     qk_shares = str2ls(qk_shares)        
-    #display = str2bool(display)  
     selected_alphas = [float(selected_alpha) for selected_alpha in str2ls(selected_alphas)]
     eps = 1
 
+    # Regular expression pattern
+    pattern = r"\d+L-hidden=\d+-max_len=512"
     if is_rescale_dist:            
         pattern += "-rescaled"
+
     # Extract matching subfolders
     layer_dirs_dict = {}
     layers, emb_ds = [], []
@@ -1053,7 +1088,7 @@ def hyperparam_effects(models_root, fns_manifold='rd', is_rescale_dist=False,
             #layer, emb_d = int(is_match.group(1)), int(is_match.group(2))
             layer = int(layer_dir.split('L')[0])          
             #emb_d = int(layer_dir.split('-')[1].split('=')[1])
-            emb_d = int(layer_dir.split('-')[2].split('=')[1])  
+            emb_d = int(layer_dir.split('-')[1].split('=')[1])  
             if isdir(njoin(models_root, layer_dir)):
                 layer_dirs_dict[f'{layer}-{emb_d}'] = njoin(models_root, layer_dir)
             layers.append(layer)
@@ -1068,95 +1103,122 @@ def hyperparam_effects(models_root, fns_manifold='rd', is_rescale_dist=False,
     axs = matrixify_axs(axs, nrows, ncols)            
 
     # (model_types, qk_share, L, d_model)
-    metric_matrix = np.zeros([nrows, len(selected_alphas), len(layers), len(emb_ds)])
-    counter_matrix = np.zeros([nrows, len(selected_alphas), len(layers), len(emb_ds)])
-    for qk_ii, qk_share in enumerate(qk_shares):
+    N_model_types = len(selected_alphas) + 1
+    average_metric_matrix = np.zeros([nrows, N_model_types, len(layers), len(emb_ds)])
+    std_metric_matrix = np.zeros([nrows, N_model_types, len(layers), len(emb_ds)])
+    average_metric_matrix[:] = np.nan
+    std_metric_matrix[:] = np.nan
+    counter_matrix = np.zeros([nrows, N_model_types, len(layers), len(emb_ds)])
+    model_types_plotted = []
+    for (qk_ii,qk_share),(layer_idx,layer),(emb_d_idx,emb_d) in\
+         product(enumerate(qk_shares),enumerate(layers),enumerate(emb_ds)):
+
         qk_share_dirname = 'config_qqv' if qk_share else 'config_qkv'
-        for layer_idx, layer in tqdm(enumerate(layers)):
-            for emb_d_idx, emb_d in enumerate(emb_ds):
-                print(f'qk_share = {qk_share}, layer = {layer}, emb_d = {emb_d}')    
-                # directories matching the above setting in the triple for loop
-                if f'{layer}-{emb_d}' in layer_dirs_dict.keys():
-                    if qk_share_dirname in os.listdir(layer_dirs_dict[f'{layer}-{emb_d}']):
-                        setting_dir = njoin(layer_dirs_dict[f'{layer}-{emb_d}'], qk_share_dirname)
-                    else:
-                        continue
+        print(f'qk_share = {qk_share}, layer = {layer}, emb_d = {emb_d}')    
+        # directories matching the above setting in the triple for loop
+        if f'{layer}-{emb_d}' in layer_dirs_dict.keys():
+            if qk_share_dirname in os.listdir(layer_dirs_dict[f'{layer}-{emb_d}']):
+                setting_dir = njoin(layer_dirs_dict[f'{layer}-{emb_d}'], qk_share_dirname)
+            else:
+                continue
+        else:
+            continue
+        for _ in range(2):
+            setting_dir = njoin(setting_dir, os.listdir(setting_dir)[0])
+        DCT_ALL = collect_model_dirs(setting_dir, suffix=MODEL_SUFFIX)
+        model_df = DCT_ALL[fns_type].dropna(subset='alpha')
+        model_df.reset_index(drop=True, inplace=True)
+
+        for model_type in model_types_to_plot:
+            if model_type in DCT_ALL.keys():
+                df_model = DCT_ALL[model_type]
+            else:
+                continue
+            matching_df = df_model[(df_model['ensembles']>0)&(df_model['qk_share']==qk_share)&
+                                   (df_model['is_op']==is_op)&                                    
+                                   (df_model['model_dir'].str.contains(selected_dataset))&
+                                   (df_model['model_dir'].str.contains(f'/{model_type}-'))]
+
+            if model_type not in model_types_plotted:
+                model_types_plotted.append(model_type)
+            lstyle_model = LINESTYLE_DICT[model_type]            
+            for alpha_idx, alpha in enumerate(selected_alphas):  
+                # if is fns type
+                is_fns = 'fns' in model_type
+                alpha = alpha if is_fns else None
+                # -------------------- SINK, DP -------------------- 
+                model_info = matching_df 
+                # -------------------- FNS --------------------
+                if is_fns:
+                    condition = (matching_df['alpha']==alpha) & (matching_df['bandwidth']==eps)
+                    model_info = model_info[condition]
+                else:
+                    alpha_idx = len(selected_alphas)
+                
+                if model_info.shape[0] > 0:
+                    seeds, qk_share = (model_info[k].item() for k in ('seeds', 'qk_share'))                
+                    epochs, run_perf_all = load_seed_runs(model_info['model_dir'].item(), seeds, metric)   
                 else:
                     continue
-                for _ in range(2):
-                    setting_dir = njoin(setting_dir, os.listdir(setting_dir)[0])
-                DCT_ALL = collect_model_dirs(setting_dir, suffix=MODEL_SUFFIX)
-                model_df = DCT_ALL[fns_type].dropna(subset='alpha')
-                model_df.reset_index(drop=True, inplace=True)
-                for alpha_idx, alpha in enumerate(selected_alphas):             
-                    c_hyp = HYP_CMAP(HYP_CNORM(alpha))  # hyperparameter color 
-                    model_df = DCT_ALL[fns_type].dropna(subset='alpha')
-                    model_df.reset_index(drop=True, inplace=True)
-                    lstyle_model = LINESTYLE_DICT[fns_type]
 
-                    # -------------------- FNS --------------------                                         
-                    model_info = model_df[(model_df['alpha']==alpha) & (model_df['bandwidth']==eps) & 
-                                          (model_df['ensembles']>0)]
-                    if len(model_info.index) == 0:
-                        continue
+                if run_perf_all is not None:
+                    #counter = run_perf_all.shape[1]
+                    metric_curves = get_metric_curves(run_perf_all)  
 
-                    seeds = model_info['seeds'].item()                    
-                    for seed in seeds:
-                        model_seed_path = njoin(model_info['model_dir'].item(), f'model={seed}')
-                        if isfile(njoin(model_seed_path, 'run_performance.csv')): 
-                            run_perf = pd.read_csv(njoin(model_seed_path, 'run_performance.csv'))        
-                            if 'acc' in metric and run_perf.loc[run_perf.index[-1],metric] <= 1:
-                                run_perf.loc[:,metric] = run_perf.loc[:,metric] * 100
+                if run_perf_all is not None:
+                    average_metric_matrix[qk_ii,alpha_idx,layer_idx,emb_d_idx] =\
+                        np.nanmean(run_perf_all.loc[run_perf_all.index[-1]:,metric])
+                    std_metric_matrix[qk_ii,alpha_idx,layer_idx,emb_d_idx] =\
+                        np.nanstd(run_perf_all.loc[run_perf_all.index[-1]:,metric])
+                    counter_matrix[qk_ii,alpha_idx,layer_idx,emb_d_idx] =\
+                        (~np.isnan(run_perf_all.loc[run_perf_all.index[-1]:,metric].to_numpy())).sum()                        
 
-                            metric_matrix[qk_ii,alpha_idx,layer_idx,emb_d_idx] += run_perf.loc[run_perf.index[-1],metric]
-                            counter_matrix[qk_ii,alpha_idx,layer_idx,emb_d_idx] += 1
+                if not is_fns:
+                    break  # only do once if model is not FNS type                            
 
-                # -------------------- SINK, DP --------------------     
-                if other_model_type in DCT_ALL.keys():    
-                    other_model_df = DCT_ALL[other_model_type]                        
-                    other_model_condition = (other_model_df['ensembles']>0) &\
-                                            (other_model_df['qk_share']==qk_share) &\
-                                            (other_model_df['is_op']==is_op) &\
-                                            (other_model_df['model_dir'].str.contains(f'/{other_model_type}'))
-                    #print(f'other_model_condition: {other_model_condition}')
-                    other_matching_df = other_model_df[other_model_condition]             
+    # average_metric_matrix[average_metric_matrix==0] = np.nan
+    # counter_matrix[counter_matrix==0] = np.nan
 
-                    if other_matching_df.shape[0] > 0:
-                        other_model_info = other_matching_df.iloc[0,:]
-                        seeds = other_model_info['seeds']
-                        for seed in seeds:
-                            model_seed_path = njoin(other_model_info['model_dir'], f'model={seed}')
-                            if isfile(njoin(model_seed_path, 'run_performance.csv')): 
-                                run_perf = pd.read_csv(njoin(model_seed_path, 'run_performance.csv'))
-                                if 'acc' in metric and run_perf.loc[run_perf.index[-1],metric] <= 1:
-                                    run_perf.loc[:,metric] = run_perf.loc[:,metric] * 100     
-
-                                metric_matrix[qk_ii,len(selected_alphas),layer_idx,emb_d_idx] += run_perf.loc[run_perf.index[-1],metric]
-                                counter_matrix[qk_ii,len(selected_alphas),layer_idx,emb_d_idx] += 1                                
-
-    metric_matrix[metric_matrix==0] = np.nan
-    counter_matrix[counter_matrix==0] = np.nan
-    average_metric_matrix = metric_matrix / counter_matrix
-
-    linestyles = ['-', '--', '-.', ':']
-    markers = ['o', '8', 'p', 's', 'v']
     axs[0,0].set_xscale('log')
     for row in range(nrows):
         for col in range(ncols):
-            for aidx in range(average_metric_matrix.shape[1]):
+            ax = axs[row,col]
+            for aidx in range(len(selected_alphas) + 1):
                 average_metrics = average_metric_matrix[row,aidx,col]
+                std_metrics = std_metric_matrix[row,aidx,col]
                 mask = ~np.isnan(average_metrics)
 
-                c_hyp = HYP_CMAP(HYP_CNORM(selected_alphas[aidx]))
-                axs[row,col].plot(emb_ds[mask], average_metrics[mask], 
-                                  label=rf'{NAMES_DICT[fns_type]}, $\alpha={selected_alphas[aidx]}$',
-                                  c=c_hyp)
-                
-                axs[row,col].set_xticks(list(emb_ds))
-                axs[row,col].set_xticklabels(list(emb_ds))    
-                axs[row,col].xaxis.set_minor_formatter(NullFormatter())                          
+                is_fns = aidx < len(selected_alphas)
+                # color                                 
+                if is_fns:
+                    alpha = selected_alphas[aidx]
+                    legend_label = rf'$\alpha={selected_alphas[aidx]}$'
+                    color = HYP_CMAP(HYP_CNORM(alpha))  
+                    model_type = fns_type                  
+                else:
+                    legend_label = 'Transformer'
+                    model_type = other_model_type
+                    color = OTHER_COLORS_DICT[model_type]
+                linestyle = LINESTYLE_DICT[model_type]
 
-    axs[0,0].legend()
+                ax.plot(emb_ds[mask], average_metrics[mask], 
+                        c=color, linestyle=linestyle, label=legend_label)
+                                
+                ax.fill_between(emb_ds[mask], 
+                                average_metrics[mask] - std_metrics[mask], 
+                                average_metrics[mask] + std_metrics[mask],
+                                color=color, alpha=1/2) # linestyle=linestyle, 
+
+                if (row,col,aidx) == (0,0,0):
+                    axs[0,1].plot([],[],
+                                  linestyle=LINESTYLE_DICT[model_type],c='k',
+                                  label=NAMES_DICT[model_type])
+
+                ax.set_xticks(list(emb_ds))
+                ax.set_xticklabels(list(emb_ds))    
+                ax.xaxis.set_minor_formatter(NullFormatter())                          
+
+    axs[0,1].legend(frameon=False,ncols=2)
 
     for col in range(ncols):
         #axs[0,col].set_title(rf'{NAMES_DICT[fns_type]} ($\alpha = {selected_alphas[col]}$)')
@@ -1180,7 +1242,7 @@ def hyperparam_effects(models_root, fns_manifold='rd', is_rescale_dist=False,
         axs[-1,col].set_xlabel(r'Dimension $d$')
 
     # Adjust layout
-    #plt.tight_layout(rect=[0, 0, 0.93, 1])  # Leave space for the right label                 
+    plt.tight_layout(rect=[0, 0, 0.93, 1])  # Leave space for the right label                 
 
     # dataset_name_short = ''
     # if isinstance(dataset,str):
@@ -1206,6 +1268,160 @@ def hyperparam_effects(models_root, fns_manifold='rd', is_rescale_dist=False,
     plt.savefig(njoin(SAVE_DIR, fig_file))            
     print(f'Figure saved in {njoin(SAVE_DIR, fig_file)}')
 
+
+# for plotting dynamic inference
+# def dynamic_inference(models_root, layer=1,
+#                       fns_type='fns', manifold='rd', is_rescale_dist=True, selected_alphas=[1.2, 2.0],
+#                       is_op=True, qk_shares=[False,True], metric='test_acc',
+#                       batch_size=64, is_dist_based=False):
+
+#     # general setting
+#     batch_size = int(batch_size)
+#     is_dist_based = str2bool(is_dist_based)    
+#     fname = 'dist' if is_dist_based else 'prob'
+#     fname += f'-bs={batch_size}-inference.csv'
+
+#     # get layers, emb_ds
+#     pattern = r"\d+L-hidden=\d+-max_len=512"
+#     if is_rescale_dist:            
+#         pattern += "-rescaled"
+
+#     # Extract matching subfolders
+#     layer_dirs_dict = {}
+#     layers, emb_ds = [], []
+#     for layer_dir in os.listdir(models_root):
+#         is_match = re.fullmatch(pattern, layer_dir)
+#         if is_match:
+#             #layer, emb_d = int(is_match.group(1)), int(is_match.group(2))
+#             layer = int(layer_dir.split('L')[0])          
+#             #emb_d = int(layer_dir.split('-')[1].split('=')[1])
+#             emb_d = int(layer_dir.split('-')[1].split('=')[1])  
+#             if isdir(njoin(models_root, layer_dir)):
+#                 layer_dirs_dict[f'{layer}-{emb_d}'] = njoin(models_root, layer_dir)
+#             layers.append(layer)
+#             emb_ds.append(emb_d)
+#     layers = np.array(sorted(list(set(layers)))); layers = layers[layers < 4]
+#     emb_ds = np.array(sorted(list(set(emb_ds)))); emb_ds = emb_ds[emb_ds < 65]    
+#     assert layer in layers, f'{layer} does not exist!'
+
+#     # get all model dirs
+#     pattern = re.compile(r"model=\d+$")  # seed paths
+#     all_model_dirs = [str(p) for p in models_root.rglob("*") if p.is_dir() and pattern.search(str(p))]    
+#     model_dirs = []
+#     fns_type = manifold + 'fns' + MODEL_SUFFIX
+#     other_type = 'dp'+MODEL_SUFFIX
+#     if is_op:
+#         fns_type = 'op' + fns_type
+#         other_type = 'op' + other_type
+#     model_types_to_plot = [fns_type, other_type]
+#     for model_dir in all_model_dirs:
+#         is_fns = f'/{fns_type}' in model_dir
+#         if is_fns:
+#             for alpha in selected_alphas:
+#                 if f'alpha={float(alpha)}' in model_dir:
+#                     break
+
+#         if model_dir is not None and isfile(njoin(model_dir, 'ckpt.pt'))\
+#              and not isfile(njoin(model_dir, fname)):
+#             model_dirs.append(model_dir)
+
+#     nrows, ncols = len(qk_shares), len(emb_ds)
+#     figsize = (3*ncols,3*nrows)
+#     fig, axs = plt.subplots(nrows,ncols,figsize=figsize,sharex=True,sharey=True)  # layout='constrained'
+#     axs = matrixify_axs(axs, nrows, ncols)
+#     label_axs(fig, axs)
+
+#     metrics_dynamic = np.zeros([len(selected_alphas)+1, emb_ds, ])
+#     for model_dir in model_dirs:
+#         for model_type in model_types_to_plot:
+#             is_fns = f'/{fns_type}' in model_dir
+#             if f'/{model_type}' in model_dir:
+#                 break            
+#             if is_fns :
+#                 for alpha in selected_alphas:
+#                     if f'alpha={alpha}' in model_dir:
+#                         break
+#             else:
+
+#     for alpha_idx, alpha in enumerate(alphas):
+#         acc_mean = np.nanmean(metric_dynamic[alpha_idx,0,:,:],-1)
+#         acc_std = np.nanstd(metric_dynamic[alpha_idx,0,:,:],-1)
+#         loss_mean = np.nanmean(metric_dynamic[alpha_idx,1,:,:],-1)
+#         loss_std = np.nanstd(metric_dynamic[alpha_idx,1,:,:],-1)
+
+#         c_hyp = HYP_CMAP(HYP_CNORM(alpha))                            
+#         axs[0,0].plot(controlled_variables, acc_mean,
+#                     marker=marker, markersize=MARKERSIZE,
+#                     c=c_hyp, linestyle=LINESTYLE_DICT[args.fns_type])
+#         axs[0,1].plot(controlled_variables, loss_mean,
+#                     marker=marker, markersize=MARKERSIZE,
+#                     c=c_hyp, linestyle=LINESTYLE_DICT[args.fns_type])      
+
+#         # axs[0,0].fill_between(controlled_variables,  acc_mean - acc_std, acc_mean + acc_std,
+#         #                       color=c_hyp, alpha=1/2)                        
+#         # axs[0,1].fill_between(controlled_variables, loss_mean - loss_std, loss_mean + loss_std,
+#         #                       color=c_hyp, alpha=1/2)          
+        
+#     if is_eval_dp:
+#         acc_mean = np.nanmean(dp_metric_dynamic[0,0,:,:],-1)
+#         acc_std = np.nanstd(dp_metric_dynamic[0,0,:,:],-1)
+#         loss_mean = np.nanmean(dp_metric_dynamic[0,1,:,:],-1)
+#         loss_std = np.nanstd(dp_metric_dynamic[0,1,:,:],-1)
+
+#         c_hyp = HYP_CMAP(HYP_CNORM(alpha))                            
+#         axs[0,0].plot(controlled_variables, acc_mean,
+#                     marker=marker, markersize=MARKERSIZE,
+#                     c=OTHER_COLORS_DICT[other_types[0]],
+#                     linestyle=LINESTYLE_DICT[other_types[0]])
+#         axs[0,1].plot(controlled_variables, loss_mean,
+#                     marker=marker, markersize=MARKERSIZE,
+#                     c=OTHER_COLORS_DICT[other_types[0]],
+#                     linestyle=LINESTYLE_DICT[other_types[0]])        
+
+#     # legends
+#     for alpha_idx, alpha in enumerate(alphas):
+#         c_hyp = HYP_CMAP(HYP_CNORM(alpha))   
+#         axs[0,0].plot([], [], marker=marker, c=c_hyp, linestyle=LINESTYLE_DICT[args.fns_type],
+#                     label=rf'$\alpha$ = {alpha}')    
+#     if is_eval_dp:
+#         axs[0,0].plot([], [],
+#                     marker=marker, c=OTHER_COLORS_DICT[other_types[0]],
+#                     linestyle=LINESTYLE_DICT[other_types[0]])                      
+                        
+#     #axs[0,0].invert_xaxis(); axs[0,1].invert_xaxis()    
+
+#     axs[0,0].set_title('Accuracy'); axs[0,1].set_title('Loss')
+#     if args.is_dist_based:
+#         axs[0,0].set_xlabel('Distance threshold'); axs[0,1].set_xlabel('Distance threshold')
+#         axs[0,0].set_xscale('log'); axs[0,1].set_xscale('log')
+#     else:
+#         axs[0,0].set_xlabel('Removal probability'); axs[0,1].set_xlabel('Removal probability')
+#     axs[0,0].legend(frameon=False)
+#     # Adjust layout
+#     plt.tight_layout(rect=[0, 0, 0.93, 1])  # Leave space for the right label   
+
+#     dataset = main_args['dataset_name']
+#     dataset_name_short = ''
+#     if isinstance(dataset,str):
+#         if '_' in dataset:
+#             for s in dataset.split('_'):
+#                 dataset_name_short += s[0]
+#         else:
+#             dataset_name_short += dataset
+
+#     if 'L-hidden' in args.models_root.split('/')[1]:
+#         SAVE_DIR = njoin(FIGS_DIR, 'nlp-task', args.models_root.split('/')[1])
+#     else:
+#         SAVE_DIR = njoin(FIGS_DIR, 'nlp-task', args.models_root.split('/')[1], 
+#                         args.models_root.split('/')[2])
+#     if not isdir(SAVE_DIR): makedirs(SAVE_DIR)    
+#     qkv = 'qqv' if qk_share else 'qkv'
+#     if args.is_dist_based:           
+#         fig_file = f'dynamic_inference_dist.pdf'
+#     else:
+#         fig_file = f'dynamic_inference_prob.pdf'
+#     plt.savefig(njoin(SAVE_DIR, fig_file))            
+#     print(f'Figure saved in {njoin(SAVE_DIR, fig_file)}')        
 
 # ---------------------------------------- END -----------------------------------------------------
 

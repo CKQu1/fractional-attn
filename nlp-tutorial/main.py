@@ -364,8 +364,9 @@ if __name__ == '__main__':
     else:
         config['num_classes'] = len(tokenized_train_dataset['label'].unique())
 
-    attn_setup = {'qk_share': args.qk_share, 'qkv_bias': args.qkv_bias, 'is_op': args.is_op,
-                  'fix_embed': args.fix_embed, 
+    attn_setup = {'seed': args.seed,
+                  'qk_share': args.qk_share, 'qkv_bias': args.qkv_bias, 
+                  'is_op': args.is_op, 'fix_embed': args.fix_embed, 
                   'dataset_name': args.dataset_name}        
 
     if args.fix_embed:

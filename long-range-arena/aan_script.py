@@ -20,7 +20,7 @@ dataset_obj.cache_dir = Path(cache_dir) / name
 dataset_obj.setup()
 
 seed = 42
-train_bs = 32
+train_bs = eval_bs = 32
 
 trn_loader = make_data_loader(dataset_obj.dataset_train, dataset_obj, seed=seed, batch_size=train_bs)
 #val_loader = make_data_loader(dataset_obj.dataset_val, dataset_obj, seed=seed, batch_size=eval_bs, drop_last=False, shuffle=False)

@@ -34,11 +34,11 @@ def find_subdirs(root_dir, matching_str):
                 matches.append(dirpath)
     return matches
 
-def get_instance(dir, *args):  # for enumerating each instance of training
-    #global start, end, instances, s_part
+def get_seed(dir, *args):  # for enumerating each seed of training
+    #global start, end, seeds, s_part
 
     if isdir(dir):
-        instances = []
+        seeds = []
         dirnames = next(os.walk(dir))[1]
         if len(dirnames) > 0:
             for dirname in dirnames:        
@@ -52,17 +52,17 @@ def get_instance(dir, *args):  # for enumerating each instance of training
                     #for s_part in dirname.split(s):
                     assert "model=" in dirname, f'str model= not in {dirname}'
                     start = dirname.find("model=")
-                    instances.append(int(dirname[start+6:]))
+                    seeds.append(int(dirname[start+6:]))
                     #except:
                     #    pass       
-            #print(instances)  # delete
-            return max(instances) + 1 if len(instances) > 0 else 0
+            #print(seeds)  # delete
+            return max(seeds) + 1 if len(seeds) > 0 else 0
         else:
             return 0
     else:
         return 0
 
-# create model_dir which determines the instance for the specific model/training setting
+# create model_dir which determines the seed for the specific model/training setting
 def create_model_dir(model_root_dir, **kwargs):
     model_name = kwargs.get('model_name')  # , 'fnsformer'
     dataset_name = kwargs.get('dataset_name')  # , 'cifar10'
@@ -89,10 +89,10 @@ def create_model_dir(model_root_dir, **kwargs):
         n_it = kwargs.get("n_it", 1)        
         dirname += f'-n_it={n_it}-eps={bandwidth}'        
     models_dir = njoin(model_root_dir, dirname)
-    instance = kwargs.get('instance', None)
-    if instance is None:
-        instance = get_instance(models_dir, 'model=')
-    model_dir = njoin(models_dir, f'model={instance}')    
+    seed = kwargs.get('seed')
+    # if seed is None:
+    #     seed = get_seed(models_dir, 'model=')
+    model_dir = njoin(models_dir, f'model={seed}')    
     #if not os.path.isdir(models_dir): os.makedirs(models_dir)
     #if not os.path.isdir(model_dir): os.makedirs(model_dir)     
        

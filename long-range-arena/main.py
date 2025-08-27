@@ -360,7 +360,7 @@ if __name__ == '__main__':
     config["vocab_size"] = vocab_size
     config["padding_idx"] = 0
     
-    attn_setup = {'qk_share': args.qk_share, 'qkv_bias': args.qkv_bias, 'instance': args.seed,
+    attn_setup = {'qk_share': args.qk_share, 'qkv_bias': args.qkv_bias, 'seed': args.seed,
                   'is_op': args.is_op, 'is_preln': args.is_preln}  
     attn_setup['dataset_name'] = args.dataset_name    
     if 'fnsformer' in model_name:

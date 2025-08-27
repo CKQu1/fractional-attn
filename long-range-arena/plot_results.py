@@ -67,7 +67,7 @@ def load_seed_runs(model_dir, seeds, metric):
     runs = []
     for seed in seeds:
         seed_path = njoin(model_dir, f'model={seed}')
-        print(f'seed_path: {seed_path}')
+        #print(f'seed_path: {seed_path}')
         fpath = njoin(seed_path, 'run_performance.csv')
         if not isfile(fpath):
             fpath = njoin(seed_path, '_run_performance.csv')
@@ -212,17 +212,18 @@ def phase_ensembles(models_root, selected_dataset='pathfinder-classification',
                     ax.fill_between(epochs, metric_curves[0], metric_curves[2], color=color, alpha=TRANSP/2)                                                                        
 
                     # results of the final epoch
-                    row_stats.append([alpha] + final_epoch_stats(run_perf_all,metric) + [counter])
-                    summary_stats = pd.DataFrame(data=row_stats, columns=['alpha'] + stats_colnames)
-
-                    # print message
-                    print(model_type if alpha is None else model_type + f', alpha = {alpha}')
-                    print(metric)
-                    print(f'is_op = {is_op}, qk_share = {qk_share}')
-                    print(summary_stats)
-                    print('\n')     
+                    row_stats.append([model_type] + [alpha] +\
+                                     final_epoch_stats(run_perf_all,metric) + [counter])    
                 if not is_fns:
                     break  # only do once if model is not FNS type
+
+        summary_stats = pd.DataFrame(data=row_stats, columns=['model_type','alpha']+stats_colnames)
+
+        # print message
+        print(metric)
+        print(f'is_op = {is_op}, qk_share = {qk_share}')
+        print(summary_stats)
+        print('\n') 
 
         ax.grid()      
     # axs[0,0].set_ylim([75,85])

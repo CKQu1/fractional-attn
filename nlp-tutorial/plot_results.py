@@ -18,7 +18,7 @@ from time import time
 from tqdm import tqdm
 from constants import *
 from UTILS.mutils import njoin, str2bool, str2ls, create_model_dir, convert_train_history
-from UTILS.mutils import collect_model_dirs, find_subdirs
+from UTILS.mutils import collect_model_dirs, find_subdirs, load_model_files
 from UTILS.figure_utils import matrixify_axs, label_axs
 
 import re
@@ -1054,7 +1054,7 @@ def hyperparam_effects(models_root, fns_manifold='rd', is_rescale_dist=True,
                        metric='val_acc', selected_dataset='imdb',
                        is_op=True):
 
-    global metric_matrix, counter_matrix, average_metric_matrix, run_perf_all
+    global metric_matrix, counter_matrix, nan_counter_matrix, average_metric_matrix, run_perf_all
     global other_model_type, fns_type, layers
 
     linestyles = ['-', '--', '-.', ':']
@@ -1109,6 +1109,7 @@ def hyperparam_effects(models_root, fns_manifold='rd', is_rescale_dist=True,
     average_metric_matrix[:] = np.nan
     std_metric_matrix[:] = np.nan
     counter_matrix = np.zeros([nrows, N_model_types, len(layers), len(emb_ds)])
+    nan_counter_matrix = np.zeros([nrows, N_model_types, len(layers), len(emb_ds)])
     model_types_plotted = []
     for (qk_ii,qk_share),(layer_idx,layer),(emb_d_idx,emb_d) in\
          product(enumerate(qk_shares),enumerate(layers),enumerate(emb_ds)):
@@ -1168,10 +1169,13 @@ def hyperparam_effects(models_root, fns_manifold='rd', is_rescale_dist=True,
                 if run_perf_all is not None:
                     average_metric_matrix[qk_ii,alpha_idx,layer_idx,emb_d_idx] =\
                         np.nanmean(run_perf_all.loc[run_perf_all.index[-1]:,metric])
+                        #np.nanmedian(run_perf_all.loc[run_perf_all.index[-1]:,metric])                                                
                     std_metric_matrix[qk_ii,alpha_idx,layer_idx,emb_d_idx] =\
                         np.nanstd(run_perf_all.loc[run_perf_all.index[-1]:,metric])
                     counter_matrix[qk_ii,alpha_idx,layer_idx,emb_d_idx] =\
                         (~np.isnan(run_perf_all.loc[run_perf_all.index[-1]:,metric].to_numpy())).sum()                        
+                    nan_counter_matrix[qk_ii,alpha_idx,layer_idx,emb_d_idx] =\
+                        (np.isnan(run_perf_all.loc[run_perf_all.index[-1]:,metric].to_numpy())).sum()
 
                 if not is_fns:
                     break  # only do once if model is not FNS type                            
@@ -1204,13 +1208,13 @@ def hyperparam_effects(models_root, fns_manifold='rd', is_rescale_dist=True,
                 ax.plot(emb_ds[mask], average_metrics[mask], 
                         c=color, linestyle=linestyle, label=legend_label)
                                 
-                ax.fill_between(emb_ds[mask], 
-                                average_metrics[mask] - std_metrics[mask], 
-                                average_metrics[mask] + std_metrics[mask],
-                                color=color, alpha=1/2) # linestyle=linestyle, 
+                # ax.fill_between(emb_ds[mask], 
+                #                 average_metrics[mask] - std_metrics[mask], 
+                #                 average_metrics[mask] + std_metrics[mask],
+                #                 color=color, alpha=1/2) # linestyle=linestyle, 
 
                 if (row,col,aidx) == (0,0,0):
-                    axs[0,1].plot([],[],
+                    axs[0,0].plot([],[],
                                   linestyle=LINESTYLE_DICT[model_type],c='k',
                                   label=NAMES_DICT[model_type])
 
@@ -1218,7 +1222,8 @@ def hyperparam_effects(models_root, fns_manifold='rd', is_rescale_dist=True,
                 ax.set_xticklabels(list(emb_ds))    
                 ax.xaxis.set_minor_formatter(NullFormatter())                          
 
-    axs[0,1].legend(frameon=False,ncols=2)
+    axs[0,0].legend(frameon=False,ncols=2)
+    #axs[0,0].set_ylim([70,85.5])
 
     for col in range(ncols):
         #axs[0,col].set_title(rf'{NAMES_DICT[fns_type]} ($\alpha = {selected_alphas[col]}$)')
@@ -1270,158 +1275,152 @@ def hyperparam_effects(models_root, fns_manifold='rd', is_rescale_dist=True,
 
 
 # for plotting dynamic inference
-# def dynamic_inference(models_root, layer=1,
-#                       fns_type='fns', manifold='rd', is_rescale_dist=True, selected_alphas=[1.2, 2.0],
-#                       is_op=True, qk_shares=[False,True], metric='test_acc',
-#                       batch_size=64, is_dist_based=False):
+def dynamic_inference(models_root, n_layer=1,
+                      fns_type='fns', manifold='rd', is_rescale_dist=True, selected_alphas=[1.2, 2.0],
+                      is_op=True, qk_shares=[False,True], metric='test_acc',
+                      batch_size=64, is_dist_based=False):
 
-#     # general setting
-#     batch_size = int(batch_size)
-#     is_dist_based = str2bool(is_dist_based)    
-#     fname = 'dist' if is_dist_based else 'prob'
-#     fname += f'-bs={batch_size}-inference.csv'
+    global model_dirs, emb_ds
 
-#     # get layers, emb_ds
-#     pattern = r"\d+L-hidden=\d+-max_len=512"
-#     if is_rescale_dist:            
-#         pattern += "-rescaled"
+    # general setting
+    batch_size = int(batch_size)
+    is_dist_based = str2bool(is_dist_based)    
+    fname = 'dist' if is_dist_based else 'prob'
+    fname += f'-bs={batch_size}-inference.csv'
 
-#     # Extract matching subfolders
-#     layer_dirs_dict = {}
-#     layers, emb_ds = [], []
-#     for layer_dir in os.listdir(models_root):
-#         is_match = re.fullmatch(pattern, layer_dir)
-#         if is_match:
-#             #layer, emb_d = int(is_match.group(1)), int(is_match.group(2))
-#             layer = int(layer_dir.split('L')[0])          
-#             #emb_d = int(layer_dir.split('-')[1].split('=')[1])
-#             emb_d = int(layer_dir.split('-')[1].split('=')[1])  
-#             if isdir(njoin(models_root, layer_dir)):
-#                 layer_dirs_dict[f'{layer}-{emb_d}'] = njoin(models_root, layer_dir)
-#             layers.append(layer)
-#             emb_ds.append(emb_d)
-#     layers = np.array(sorted(list(set(layers)))); layers = layers[layers < 4]
-#     emb_ds = np.array(sorted(list(set(emb_ds)))); emb_ds = emb_ds[emb_ds < 65]    
-#     assert layer in layers, f'{layer} does not exist!'
+    # get layers, emb_ds
+    pattern = r"\d+L-hidden=\d+-max_len=512"
+    if is_rescale_dist:            
+        pattern += "-rescaled"
 
-#     # get all model dirs
-#     pattern = re.compile(r"model=\d+$")  # seed paths
-#     all_model_dirs = [str(p) for p in models_root.rglob("*") if p.is_dir() and pattern.search(str(p))]    
-#     model_dirs = []
-#     fns_type = manifold + 'fns' + MODEL_SUFFIX
-#     other_type = 'dp'+MODEL_SUFFIX
-#     if is_op:
-#         fns_type = 'op' + fns_type
-#         other_type = 'op' + other_type
-#     model_types_to_plot = [fns_type, other_type]
-#     for model_dir in all_model_dirs:
-#         is_fns = f'/{fns_type}' in model_dir
-#         if is_fns:
-#             for alpha in selected_alphas:
-#                 if f'alpha={float(alpha)}' in model_dir:
-#                     break
+    # Extract matching subfolders
+    layer_dirs_dict = {}
+    layers, emb_ds = [], []
+    for layer_dir in os.listdir(models_root):
+        is_match = re.fullmatch(pattern, layer_dir)
+        if is_match:
+            #layer, emb_d = int(is_match.group(1)), int(is_match.group(2))
+            layer = int(layer_dir.split('L')[0])          
+            #emb_d = int(layer_dir.split('-')[1].split('=')[1])
+            emb_d = int(layer_dir.split('-')[1].split('=')[1])  
+            if isdir(njoin(models_root, layer_dir)):
+                layer_dirs_dict[f'{n_layer}-{emb_d}'] = njoin(models_root, layer_dir)
+            layers.append(layer)
+            emb_ds.append(emb_d)
+    layers = np.array(sorted(list(set(layers)))); layers = layers[layers < 4]
+    emb_ds = np.array(sorted(list(set(emb_ds)))); emb_ds = emb_ds[emb_ds < 65]    
+    assert n_layer in layers, f'{n_layer} does not exist!'
 
-#         if model_dir is not None and isfile(njoin(model_dir, 'ckpt.pt'))\
-#              and not isfile(njoin(model_dir, fname)):
-#             model_dirs.append(model_dir)
+    # get all model dirs
+    pattern = re.compile(r"model=\d+$")  # seed paths
+    all_model_dirs = [str(p) for p in Path(models_root).rglob("*") if p.is_dir() and pattern.search(str(p))]    
+    model_dirs = []
+    fns_type = manifold + 'fns' + MODEL_SUFFIX
+    other_type = 'dp'+MODEL_SUFFIX
+    if is_op:
+        fns_type = 'op' + fns_type
+        other_type = 'op' + other_type
+    model_types_to_plot = [fns_type, other_type]
+    for model_dir in all_model_dirs:
+        is_fns = f'/{fns_type}' in model_dir
+        is_dp = f'/{other_type}' in model_dir
+        if is_fns:
+            for alpha in selected_alphas:
+                if f'alpha={float(alpha)}' in model_dir:
+                    if model_dir is not None and isfile(njoin(model_dir, fname)):
+                        model_dirs.append(model_dir)
+        elif is_dp:
+            if model_dir is not None and isfile(njoin(model_dir, fname)):
+                model_dirs.append(model_dir)
 
-#     nrows, ncols = len(qk_shares), len(emb_ds)
-#     figsize = (3*ncols,3*nrows)
-#     fig, axs = plt.subplots(nrows,ncols,figsize=figsize,sharex=True,sharey=True)  # layout='constrained'
-#     axs = matrixify_axs(axs, nrows, ncols)
-#     label_axs(fig, axs)
+    # number of controlled variables
+    inference = pd.read_csv(njoin(model_dirs[0], fname))
+    controlled_vars = inference.loc[:,'controlled_variable']
+    N_control_var = len(controlled_vars)
+    ensembles = 5  # figure out how to extract this
 
-#     metrics_dynamic = np.zeros([len(selected_alphas)+1, emb_ds, ])
-#     for model_dir in model_dirs:
-#         for model_type in model_types_to_plot:
-#             is_fns = f'/{fns_type}' in model_dir
-#             if f'/{model_type}' in model_dir:
-#                 break            
-#             if is_fns :
-#                 for alpha in selected_alphas:
-#                     if f'alpha={alpha}' in model_dir:
-#                         break
-#             else:
+    nrows, ncols = len(qk_shares), len(emb_ds)
+    figsize = (3*ncols,3*nrows)
+    fig, axs = plt.subplots(nrows,ncols,figsize=figsize,sharex=True,sharey=True)  # layout='constrained'
+    axs = matrixify_axs(axs, nrows, ncols)
+    label_axs(fig, axs)
 
-#     for alpha_idx, alpha in enumerate(alphas):
-#         acc_mean = np.nanmean(metric_dynamic[alpha_idx,0,:,:],-1)
-#         acc_std = np.nanstd(metric_dynamic[alpha_idx,0,:,:],-1)
-#         loss_mean = np.nanmean(metric_dynamic[alpha_idx,1,:,:],-1)
-#         loss_std = np.nanstd(metric_dynamic[alpha_idx,1,:,:],-1)
+    metrics_dynamic = np.zeros([len(selected_alphas)+1, len(qk_shares), 
+                                len(emb_ds), N_control_var, ensembles])
+    metrics_dynamic[:] = np.nan
+    for model_dir in model_dirs:
+        # load config
+        attn_setup, config, run_performance, train_setting = load_model_files(model_dir)
+        seed, model_name, qk_share = attn_setup['seed'], attn_setup['model_name'],\
+              attn_setup['qk_share']
+        hidden = config['hidden']
+        is_fns = model_name[-9:] == 'fns' + MODEL_SUFFIX
+        if is_fns:
+            alpha = attn_setup['alpha']
+            alpha_idx = selected_alphas.index(alpha)
+        else:
+            alpha_idx = len(selected_alphas)
+        inference = pd.read_csv(njoin(model_dir, fname))
+        metrics_dynamic[alpha_idx, qk_shares.index(qk_share), list(emb_ds).index(hidden), :, seed] =\
+              inference.loc[:,metric]
 
-#         c_hyp = HYP_CMAP(HYP_CNORM(alpha))                            
-#         axs[0,0].plot(controlled_variables, acc_mean,
-#                     marker=marker, markersize=MARKERSIZE,
-#                     c=c_hyp, linestyle=LINESTYLE_DICT[args.fns_type])
-#         axs[0,1].plot(controlled_variables, loss_mean,
-#                     marker=marker, markersize=MARKERSIZE,
-#                     c=c_hyp, linestyle=LINESTYLE_DICT[args.fns_type])      
+    for sidx, didx, alpha_idx in\
+          product(range(len(qk_shares)), range(len(emb_ds)), range(len(selected_alphas)+1)):
+        is_fns = alpha_idx < len(selected_alphas)
+        if is_fns:
+            alpha = selected_alphas[alpha_idx]
+            color = HYP_CMAP(HYP_CNORM(alpha))
+        else:
+            color = OTHER_COLORS_DICT[other_type]
 
-#         # axs[0,0].fill_between(controlled_variables,  acc_mean - acc_std, acc_mean + acc_std,
-#         #                       color=c_hyp, alpha=1/2)                        
-#         # axs[0,1].fill_between(controlled_variables, loss_mean - loss_std, loss_mean + loss_std,
-#         #                       color=c_hyp, alpha=1/2)          
-        
-#     if is_eval_dp:
-#         acc_mean = np.nanmean(dp_metric_dynamic[0,0,:,:],-1)
-#         acc_std = np.nanstd(dp_metric_dynamic[0,0,:,:],-1)
-#         loss_mean = np.nanmean(dp_metric_dynamic[0,1,:,:],-1)
-#         loss_std = np.nanstd(dp_metric_dynamic[0,1,:,:],-1)
+        metric_mean = np.nanmean(metrics_dynamic[alpha_idx,sidx,didx,:,:],-1)
+        metric_std = np.nanstd(metrics_dynamic[alpha_idx,sidx,didx,:,:],-1)
+                            
+        axs[sidx,didx].plot(controlled_vars, metric_mean,
+                            markersize=MARKERSIZE,
+                            c=color, linestyle=LINESTYLE_DICT[fns_type])  
 
-#         c_hyp = HYP_CMAP(HYP_CNORM(alpha))                            
-#         axs[0,0].plot(controlled_variables, acc_mean,
-#                     marker=marker, markersize=MARKERSIZE,
-#                     c=OTHER_COLORS_DICT[other_types[0]],
-#                     linestyle=LINESTYLE_DICT[other_types[0]])
-#         axs[0,1].plot(controlled_variables, loss_mean,
-#                     marker=marker, markersize=MARKERSIZE,
-#                     c=OTHER_COLORS_DICT[other_types[0]],
-#                     linestyle=LINESTYLE_DICT[other_types[0]])        
+        # axs[sidx,didx].fill_between(controlled_vars,  metric_mean - metric_std, metric_mean + metric_std,
+        #                             color=color, alpha=1/2)                           
 
-#     # legends
-#     for alpha_idx, alpha in enumerate(alphas):
-#         c_hyp = HYP_CMAP(HYP_CNORM(alpha))   
-#         axs[0,0].plot([], [], marker=marker, c=c_hyp, linestyle=LINESTYLE_DICT[args.fns_type],
-#                     label=rf'$\alpha$ = {alpha}')    
-#     if is_eval_dp:
-#         axs[0,0].plot([], [],
-#                     marker=marker, c=OTHER_COLORS_DICT[other_types[0]],
-#                     linestyle=LINESTYLE_DICT[other_types[0]])                      
+    # legends
+    for alpha_idx, alpha in enumerate(selected_alphas):
+        c_hyp = HYP_CMAP(HYP_CNORM(alpha))   
+        axs[0,0].plot([], [], c=c_hyp, linestyle=LINESTYLE_DICT[fns_type],
+                    label=rf'$\alpha$ = {alpha}')    
+    
+    axs[0,0].plot([], [], c=OTHER_COLORS_DICT[other_type],
+                  linestyle=LINESTYLE_DICT[other_type])                      
                         
-#     #axs[0,0].invert_xaxis(); axs[0,1].invert_xaxis()    
+    control_var_name = 'Distance threshold' if is_dist_based else 'Removal probability'
+    for ncol in range(ncols):
+        axs[0,ncol].set_title(rf'$d = {emb_ds[ncol]}$')
+        axs[-1,ncol].set_xlabel(control_var_name)
+    for nrow in range(nrows):
+        axs[nrow,0].set_ylabel(r'$Q = K$' if qk_shares[nrow] else r'$Q \neq K$')
+    axs[0,0].legend(frameon=False)
+    # Adjust layout
+    plt.tight_layout(rect=[0, 0, 0.93, 1])  # Leave space for the right label   
 
-#     axs[0,0].set_title('Accuracy'); axs[0,1].set_title('Loss')
-#     if args.is_dist_based:
-#         axs[0,0].set_xlabel('Distance threshold'); axs[0,1].set_xlabel('Distance threshold')
-#         axs[0,0].set_xscale('log'); axs[0,1].set_xscale('log')
-#     else:
-#         axs[0,0].set_xlabel('Removal probability'); axs[0,1].set_xlabel('Removal probability')
-#     axs[0,0].legend(frameon=False)
-#     # Adjust layout
-#     plt.tight_layout(rect=[0, 0, 0.93, 1])  # Leave space for the right label   
+    dataset = attn_setup['dataset_name']
+    dataset_name_short = ''
+    if isinstance(dataset,str):
+        if '_' in dataset:
+            for s in dataset.split('_'):
+                dataset_name_short += s[0]
+        else:
+            dataset_name_short += dataset
 
-#     dataset = main_args['dataset_name']
-#     dataset_name_short = ''
-#     if isinstance(dataset,str):
-#         if '_' in dataset:
-#             for s in dataset.split('_'):
-#                 dataset_name_short += s[0]
-#         else:
-#             dataset_name_short += dataset
-
-#     if 'L-hidden' in args.models_root.split('/')[1]:
-#         SAVE_DIR = njoin(FIGS_DIR, 'nlp-task', args.models_root.split('/')[1])
-#     else:
-#         SAVE_DIR = njoin(FIGS_DIR, 'nlp-task', args.models_root.split('/')[1], 
-#                         args.models_root.split('/')[2])
-#     if not isdir(SAVE_DIR): makedirs(SAVE_DIR)    
-#     qkv = 'qqv' if qk_share else 'qkv'
-#     if args.is_dist_based:           
-#         fig_file = f'dynamic_inference_dist.pdf'
-#     else:
-#         fig_file = f'dynamic_inference_prob.pdf'
-#     plt.savefig(njoin(SAVE_DIR, fig_file))            
-#     print(f'Figure saved in {njoin(SAVE_DIR, fig_file)}')        
+    SAVE_DIR = njoin(FIGS_DIR, 'nlp-task')
+    if not isdir(SAVE_DIR): makedirs(SAVE_DIR)    
+    qkv = 'qqv' if qk_share else 'qkv'
+    fig_file = f'{n_layer}L-{metric}-'
+    if is_dist_based:           
+        fig_file += f'dynamic_inference_dist.pdf'
+    else:
+        fig_file += f'dynamic_inference_prob.pdf'
+    plt.savefig(njoin(SAVE_DIR, fig_file))            
+    print(f'Figure saved in {njoin(SAVE_DIR, fig_file)}')        
 
 # ---------------------------------------- END -----------------------------------------------------
 

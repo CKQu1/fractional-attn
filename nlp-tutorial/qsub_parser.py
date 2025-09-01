@@ -219,14 +219,16 @@ def job_setup(script_name, kwargss, **kwargs):
     commands, script_names, pbs_array_trues, kwargs_qsubs = [], [], [], []
     for idx, pidx in enumerate(perm):
         pbs_array_true = pbss[idx]        
-        kwargs_qsub = {"path":        kwargs.get("job_path"),  # acts as PBSout                       
-                       "ngpus":       ngpus, 
+        kwargs_qsub = {"path":        kwargs.get("job_path"),  # acts as PBSout                        
                        "ncpus":       ncpus, 
                        "select":      select,
                        "walltime":    walltime,
                        "mem":         mem,
                        "nstack":      nstack                       
                        }        
+
+        if ngpus > 0:
+            kwargs_qsub["ngpus"] = ngpus
 
         kwargs_command = kwargs_qsub; del kwargs_command["path"]
         kwargs_command["cluster"] = cluster

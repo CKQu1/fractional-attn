@@ -9,7 +9,7 @@ import numpy as np
 import torch
 from torch.nn import functional as F  
 from UTILS.mutils import njoin, str2bool, collect_model_dirs, AttrDict, load_model_files, dist_to_score
-from constants import HYP_CMAP, HYP_CNORM, FIGS_DIR, MODEL_SUFFIX
+from constants import HYP_CMAP, HYP_CNORM, MODEL_SUFFIX, DROOT
 from models.rdfnsformer import RDFNSformer
 from models.dpformer import DPformer
 from torchtext.data.utils import get_tokenizer
@@ -19,17 +19,6 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 import networkx as nx
 import torch.nn as nn
-
-# ----- Global Variables -----
-MARKERSIZE = 4
-BIGGER_SIZE = 10
-plt.rc('font', size=BIGGER_SIZE)          # controls default text sizes
-plt.rc('axes', titlesize=BIGGER_SIZE)     # fontsize of the axes title
-plt.rc('axes', labelsize=BIGGER_SIZE)    # fontsize of the x and y labels
-plt.rc('xtick', labelsize=BIGGER_SIZE)    # fontsize of the tick labels
-plt.rc('ytick', labelsize=BIGGER_SIZE)    # fontsize of the tick labels
-plt.rc('legend', fontsize=BIGGER_SIZE-2)    # legend fontsize
-plt.rc('figure', titlesize=BIGGER_SIZE)  # fontsize of the figure title
 
 def count_trailing_zeros(tensor):
     # Reverse the tensor and find the first non-zero element
@@ -79,12 +68,7 @@ if __name__ == '__main__':
     # parser.add_argument('--models_root', default='', help='Pretrained models root')
     # parser.add_argument('--fns_type', default='rdfnsformer')  # 'spopfns'+MODEL_SUFFIX
     parser.add_argument('--model_dir', default='', help='Pretrained models seed dir')
-    parser.add_argument('--is_use_mask', type=str2bool, nargs='?', const=True, default=False)
     parser.add_argument('--use_same_token', type=str2bool, nargs='?', const=True, default=False)
-    parser.add_argument('--layers', type=int, default=8, help='Number of layers')
-
-    parser.add_argument('--is_3d', type=str2bool, nargs='?', const=True, default=False)
-    parser.add_argument('--wandb_log', default=False, type=bool)
 
     args = parser.parse_args()   
 
@@ -106,11 +90,13 @@ if __name__ == '__main__':
     is_fns = attn_setup['model_name'][-9:] == 'fns' + MODEL_SUFFIX
     is_dp = attn_setup['model_name'][-9:] == 'dp' + MODEL_SUFFIX
 
+    seed = attn_setup ['seed']
     fix_embed = attn_setup['fix_embed']
     pretrained_model_name = config['pretrained_model_name'] if fix_embed else False
 
     config['dataset_name'] = attn_setup['dataset_name']
     config['max_len'] = config['seq_len']
+    #d = config['head_dim']
     # manifold = attn_setup['manifold']
     # if 'is_rescale_dist' not in config.keys():
     #     # maybe add prompt
@@ -173,7 +159,7 @@ if __name__ == '__main__':
     
     is_fns = attn_setup['model_name'][-9:] == 'fns' + MODEL_SUFFIX 
     if not is_fns: # opdpformer
-        model = DPformer(config)
+        model = DPformer(config, is_return_dist=True)
     else: # rdfnsformer
         model = RDFNSformer(config, is_return_dist=True) 
 
@@ -236,17 +222,20 @@ if __name__ == '__main__':
     if is_fns:
         alpha, bandwidth, a = attn_setup['alpha'], attn_setup['bandwidth'], attn_setup['a']
         fns_type = attn_setup['model_name']
-        spectrum_file = f'attn_graph-{fns_type}-eps={eps}-pretrained_embd={pretrained_model_name}-same_token={args.use_same_token}-alpha={alpha}_{args.layers}.npz'
-        eval_file = f'evaluate-{fns_type}-eps={eps}-pretrained_embd={pretrained_model_name}-alpha={alpha}_{args.layers}.npz'
+        spectrum_file = f'attn_graph-{fns_type}-seed={seed}-alpha={alpha}-pretrained_embd={pretrained_model_name}-same_token={args.use_same_token}.npz'
+        eval_file = f'evaluate-{fns_type}-seed={seed}-alpha={alpha}-pretrained_embd={pretrained_model_name}.npz'
     else:
-        spectrum_file = f'attn_graph-dpformer_{args.layers}.npz'
-        eval_file = f'evaluate-dpformer_{args.layers}.npz'
-    if 'L-hidden' in args.models_root.split('/')[1]:
-        SAVE_DIR = njoin(FIGS_DIR, 'pretrained_analysis', args.models_root.split('/')[1])
-    else:
-        SAVE_DIR = njoin(FIGS_DIR, 'pretrained_analysis', args.models_root.split('/')[1], 
-                        args.models_root.split('/')[2])
-    if not isdir(SAVE_DIR): makedirs(SAVE_DIR)    
+        spectrum_file = f'attn_graph-dpformer-seed={seed}.npz'
+        eval_file = f'evaluate-dpformer-seed={seed}.npz'
+    ii = 0
+    model_dir_split = args.model_dir.split('/')
+    while ii < len(model_dir_split):
+        ss = model_dir_split[ii]
+        if ss == '.droot':
+            break
+        ii += 1
+    SAVE_DIR = njoin(DROOT, 'pretrained_data', model_dir_split[ii+1], 
+                     model_dir_split[ii+2])
 
     if not isdir(SAVE_DIR): makedirs(SAVE_DIR)               
     np.savez(njoin(SAVE_DIR, spectrum_file), spectrum=spectrum, left_eigvecs=top_left_eigvecs, dist_matrices=dist_matrices, hop_matrices=hop_matrices, all_weights=all_weights, X_lens=X_lens)

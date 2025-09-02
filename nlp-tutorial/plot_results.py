@@ -534,6 +534,9 @@ def hyperparam_effects(models_root, fns_manifold='rd', is_rescale_dist=True,
 
 
 # for plotting dynamic inference
+"""
+python -i plot_results.py dynamic_inference .droot/L-d-grid/
+"""
 def dynamic_inference(models_root, n_layer=1,
                       fns_type='fns', manifold='rd', is_rescale_dist=True, selected_alphas=[1.2, 2.0],
                       is_op=True, qk_shares=[False,True], metric='test_acc',

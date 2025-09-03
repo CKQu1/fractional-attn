@@ -20,7 +20,7 @@ else:
 
 # ----- GADI -----
 GADI_PROJECTS = ['uu69']
-GADI_SOURCE = '/scratch/uu69/cq5024/myenvs/fsa/'
+GADI_SOURCE = '/scratch/uu69/cq5024/myenvs/fsa/bin/activate'
 # -------------------
 
 # ----- PHYSICS -----

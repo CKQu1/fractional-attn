@@ -15,23 +15,27 @@ if __name__ == '__main__':
     date_str = datetime.today().strftime('%Y-%m-%d')    
     batch_script_name = "batch_main.py"
     script_name = 'dynamic_inference.py'
-    nstack = 175
+    nstack = 16
 
     #CLUSTER = 'PHYSICS'  # can manually enter here too
-    q = 'l40s'  # 'l40s', 'taiji'   
+    q = 'taiji'  # 'l40s', 'taiji'   
 
     # resources
     is_use_gpu = False
     select = 1
     (ngpus,ncpus) = (1,1) if is_use_gpu else (0,1)                               
     walltime = '23:59:59'
-    mem = '6GB'      
+    mem = '4GB'      
 
     # extract model_dir
     models_root = Path(njoin(DROOT, 'L-d-grid')) 
     job_path = njoin(models_root, 'inference_jobs_all')
     pattern = re.compile(r"model=\d+$")
     all_model_dirs = [str(p) for p in models_root.rglob("*") if p.is_dir() and pattern.search(str(p))]
+
+    # isolate layers
+    n_layers = 1
+    all_model_dirs = [model_dir for model_dir in all_model_dirs if f'{n_layers}L-hidden' in model_dir]
 
     # general setting
     is_dist_based = False
@@ -52,6 +56,7 @@ if __name__ == '__main__':
     for model_dir in all_model_dirs:
         is_fns = f'/{fns_type}' in model_dir
         if is_fns:
+            # isolate alphas from SELECTED_ALPHAS
             for alpha in SELECTED_ALPHAS:
                 if f'alpha={float(alpha)}' in model_dir:
                     break

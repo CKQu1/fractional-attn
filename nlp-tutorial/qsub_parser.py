@@ -255,9 +255,9 @@ def job_setup(script_name, kwargss, **kwargs):
     
     pbs_array_data = get_pbs_array_data(kwargss)     
     if cluster == 'GADI':   
-        perm, pbss = job_divider(pbs_array_data, len(PROJECTS))    
+        perm, pbss = job_divider(pbs_array_data, len(GADI_PROJECTS))    
     elif cluster == 'ARTEMIS':   
-        perm, pbss = job_divider(pbs_array_data, len(PROJECTS))
+        perm, pbss = job_divider(pbs_array_data, len(ARTEMIS_PROJECTS))
     else:
         perm, pbss = job_divider(pbs_array_data, 1)  # projects not needed
 
@@ -287,6 +287,12 @@ def job_setup(script_name, kwargss, **kwargs):
             if select * max(ncpus, ngpus) > 1:
                 # master_port += 1            
                 HOST_NODE_ADDR += 1
+
+            if ngpus >= 1:
+                kwargs_qsub["q"] = 'gpuvolta'
+            else:
+                #kwargs_qsub["q"] = 'yossarian'                
+                kwargs_qsub["q"] = 'normal'
 
             # kwargs_command["HOST_NODE_ADDR"] = HOST_NODE_ADDR
             # kwargs_command["singularity_path"] = SPATH

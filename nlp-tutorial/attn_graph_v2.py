@@ -62,7 +62,7 @@ def eval_model(model):
 
 if __name__ == '__main__':
 
-    # Training options
+    # Configs
     parser = argparse.ArgumentParser(description='nlp-tutorial/fdm.py arguments')    
     # parser.add_argument('--train_with_ddp', default=False, type=bool, help='to use DDP or not')
     # parser.add_argument('--models_root', default='', help='Pretrained models root')
@@ -218,6 +218,36 @@ if __name__ == '__main__':
             X_lens[res_idx] = X_len
             res_idx += 1
     
+    # ----- result_retrieval.py part 1 -----
+    max_len = config['max_len']
+    attn_weights = np.zeros((max_len, max_len))
+    shortest_path = np.zeros((max_len, max_len))    
+    # Get results for first full-length sequence
+    idx = np.where(X_lens == X_lens.max())[0][0]
+    attn_weights[:, :] = all_weights[idx, :, :] # Attention weights
+    shortest_path[:, :] = hop_matrices[idx, :, :] # Shortest path    
+    # locate the particular sequence
+    seq_idx = sample_idxs[idx] # Sequence index
+    X, Y = train_dataset[seq_idx] # Should be the corresponding sequence    
+
+    # ------ result_retrieval.py part 2 -----
+    mean_spectral_gaps = []
+    mean_shortest_paths = []    
+
+    spectral_gap = spectrum[:, -1] - spectrum[:, -2]
+    mean_spectral_gap = np.mean(spectral_gap)
+    mean_spectral_gaps.append(mean_spectral_gap)
+    # Find mean shortest path
+    total, n_tokens = 0, 0
+    for idx, X_len in enumerate(X_lens):
+        X_len = int(X_len)    
+        shortest_path = hop_matrices[idx, :X_len, :X_len]
+        np.fill_diagonal(shortest_path, np.nan)
+        total += np.nansum(shortest_path)
+        n_tokens += X_len * (X_len - 1)
+        # print(f'total = {total}, n_tokens = {n_tokens}')
+    mean_shortest_paths.append(total / n_tokens)
+
     ##### Save #####
     if is_fns:
         alpha, bandwidth, a = attn_setup['alpha'], attn_setup['bandwidth'], attn_setup['a']
@@ -227,15 +257,27 @@ if __name__ == '__main__':
     else:
         spectrum_file = f'attn_graph-dpformer-seed={seed}.npz'
         eval_file = f'evaluate-dpformer-seed={seed}.npz'
-    ii = 0
-    model_dir_split = args.model_dir.split('/')
-    while ii < len(model_dir_split):
-        ss = model_dir_split[ii]
-        if ss == '.droot':
-            break
-        ii += 1
-    SAVE_DIR = njoin(DROOT, 'pretrained_data', model_dir_split[ii+1], 
-                     model_dir_split[ii+2])
+    # ii = 0
+    # model_dir_split = args.model_dir.split('/')
+    # while ii < len(model_dir_split):
+    #     ss = model_dir_split[ii]
+    #     if ss == '.droot':
+    #         break
+    #     ii += 1
+    # SAVE_DIR = njoin(DROOT, 'pretrained_data', model_dir_split[ii+1], 
+    #                  model_dir_split[ii+2])
+    # if not isdir(SAVE_DIR): makedirs(SAVE_DIR)       
 
-    if not isdir(SAVE_DIR): makedirs(SAVE_DIR)               
-    np.savez(njoin(SAVE_DIR, spectrum_file), spectrum=spectrum, left_eigvecs=top_left_eigvecs, dist_matrices=dist_matrices, hop_matrices=hop_matrices, all_weights=all_weights, X_lens=X_lens)
+    # njoin(SAVE_DIR, spectrum_file)
+
+    # ----- file 1 -----
+    np.savez(njoin(args.model_dir, spectrum_file), spectrum=spectrum, left_eigvecs=top_left_eigvecs, 
+             dist_matrices=dist_matrices, hop_matrices=hop_matrices, all_weights=all_weights, X_lens=X_lens)
+
+    # ----- file 2 -----
+    np.savez(njoin(args.model_dir, "andrew_results_1.npz"), attn_weights=attn_weights, 
+             shortest_path=shortest_path, sequence=X) # Check that sequence = X would work?              
+
+    # ----- file 3 -----             
+    np.savez(njoin(args.model_dir, "andrew_results_2.npz"), mean_spectral_gaps=np.array(mean_spectral_gaps), 
+             mean_shortest_paths=np.array(mean_shortest_paths)) 

@@ -10,7 +10,7 @@ FIGS_DIR = njoin(DROOT, 'figs_dir')
 SCRIPT_DIR = njoin(DROOT, 'submitted_scripts')
 
 #CLUSTER = 'ARTEMIS' if 'project' in DROOT else 'PHYSICS' if 'taiji1' in DROOT else 'FUDAN_BRAIN'
-if '/g/data' in DROOT:
+if 'uu69' in DROOT:
     CLUSTER = 'GADI' 
 elif 'taiji1' in DROOT:
     CLUSTER = 'PHYSICS'
@@ -20,7 +20,7 @@ else:
 
 # ----- GADI -----
 GADI_PROJECTS = ['uu69']
-GADI_SOURCE = '/g/data/uu69/venvs/fsa/'
+GADI_SOURCE = '/scratch/uu69/cq5024/myenvs/fsa/'
 # -------------------
 
 # ----- PHYSICS -----
@@ -33,7 +33,7 @@ FUDAN_CONDA = 'frac_attn'
 # -------------------
 
 # ----- ARTEMIS -----
-PROJECTS = ['phys_DL','PDLAI','dnn_maths','dyson','vortex_dl','frac_attn', 'ddl']
+ARTEMIS_PROJECTS = ['phys_DL','PDLAI','dnn_maths','dyson','vortex_dl','frac_attn', 'ddl']
 BPATH = njoin('/project')  # path for binding to singularity container
 #SPATH = njoin('/project/frac_attn/built_containers/FaContainer_v5.sif')  # singularity container path
 SPATH = njoin('/project/frac_attn/built_containers/pydl.img')

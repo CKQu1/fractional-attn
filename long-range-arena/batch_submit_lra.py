@@ -13,16 +13,23 @@ torchrun --nnodes=1 --nproc_per_node=2 ddp_main.py --max_iters=5 --eval_interval
 
 if __name__ == '__main__':
       
-    script_name = "batch_main.py"
+    batch_script_name = "batch_main.py"
+    script_name = 'attn_graph_v2.py'      
     nstack = 1
     is_use_gpu = True
 
     select = 1 
     if is_use_gpu:
-        ngpus, ncpus = 1, 1  # GPU
+        if CLUSTER == 'GADI':
+            q = 'gpuvolta'
+            ngpus, ncpus = 1, 12  # GPU            
+        else:
+            ngpus, ncpus = 1, 1  # GPU
         #mem = '12GB' if n_layer >= 4 else '8GB'
         mem = '10GB'
     else:
+        if CLUSTER == 'GADI':
+            q = 'normal'
         ngpus, ncpus = 0, 1  # CPU                            
         #mem = '48GB' if n_layer >= 4 else '24GB'
         mem = '48GB'
@@ -118,12 +125,12 @@ if __name__ == '__main__':
         arg_strss = ''
         for kwargs in kwargss:
             arg_strss += ",".join("=".join((str(k),str(v))) for k,v in kwargs.items()) + ';'
-        batch_kwargss_all.append({'arg_strss': arg_strss[:-1]})
+        batch_kwargss_all.append({'arg_strss': arg_strss[:-1], 'script': script_name})
 
     print(f'Batched Total jobs: {len(batch_kwargss_all)} \n')
 
-    commands, script_names, pbs_array_trues, kwargs_qsubs =\
-            job_setup(script_name, batch_kwargss_all,
+    commands, batch_script_names, pbs_array_trues, kwargs_qsubs =\
+            job_setup(batch_script_name, batch_kwargss_all,
                     ncpus=ncpus,
                     ngpus=ngpus,
                     select=select, 
@@ -134,4 +141,4 @@ if __name__ == '__main__':
                     cluster=CLUSTER)
     
     for i in range(len(commands)):
-        qsub(f'{commands[i]} {script_names[i]}', pbs_array_trues[i], path=job_path,**kwargs_qsubs[i])         
+        qsub(f'{commands[i]} {batch_script_name[i]}', pbs_array_trues[i], path=job_path,**kwargs_qsubs[i])         

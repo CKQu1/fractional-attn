@@ -4,7 +4,7 @@ from itertools import product
 from os.path import isfile, isdir
 from pathlib import Path
 
-from constants import DROOT, MODEL_SUFFIX
+from constants import DROOT, MODEL_SUFFIX, CLUSTER
 from UTILS.mutils import njoin, collect_model_dirs, load_model_files, structural_model_root
 from qsub_parser import add_common_kwargs
 
@@ -19,7 +19,7 @@ def train_exps():
     nstack = 1
     MEM_DICT = {1: '4GB', 2: '8GB', 3: '8GB', 4: '8GB', 5: '10GB', 6: '12GB'}
     #CLUSTER = 'PHYSICS'  # can manually enter here too
-    q = 'l40s'  # 'l40s', 'taiji', 'h100'        
+    #q = 'l40s'  # 'l40s', 'taiji', 'h100'        
 
     # ensembles
     seeds = list(range(1))
@@ -68,9 +68,22 @@ def train_exps():
 
     # resources
     is_use_gpu = True
-    select = 1
-    (ngpus,ncpus) = (1,1) if is_use_gpu else (0,1)                               
-    walltime = '23:59:59'
+    if is_use_gpu:
+        if CLUSTER == 'GADI':
+            q = 'gpuvolta'
+            ngpus, ncpus = 1, 12  # GPU       
+        elif CLUSTER == 'PHYSICS':
+            q = 'l40s'
+            ngpus, ncpus = 1, 1  # GPU
+    else:
+        if CLUSTER == 'GADI':
+            q = 'normal'
+        elif CLUSTER == 'PHYSICS':
+            q = 'taiji'         
+        ngpus, ncpus = 0, 1  # CPU             
+
+    select = 1                           
+    walltime = '01:14:59'
     mem = MEM_DICT[n_layers]   
 
     # models

@@ -58,29 +58,37 @@ END""")
     # Submit array job.
     print(f"Submitting {len(pbs_array_data)} subjobs")
     
-    # ---------- begin{ARTEMIS} ----------
-    if cluster == 'ARTEMIS':
-        MAX_SUBJOBS = 1000
+    # ---------- begin{GADI} ----------
+    if cluster == 'GADI':
+        #MAX_SUBJOBS = 1000
+        MAX_SUBJOBS = 1
         # PBS array jobs are limited to 1000 subjobs by default
         pbs_array_data_chunks = [pbs_array_data[x:x+MAX_SUBJOBS]
                                 for x in range(0, len(pbs_array_data), MAX_SUBJOBS)]
-        if len(pbs_array_data_chunks[-1]) == 1:  # array jobs must have length >1
-            pbs_array_data_chunks[-1].insert(0, pbs_array_data_chunks[-2].pop())
+        # if len(pbs_array_data_chunks[-1]) == 1:  # array jobs must have length >1
+        #     pbs_array_data_chunks[-1].insert(0, pbs_array_data_chunks[-2].pop())
+        #args=($(python3 -c "import sys;print(' '.join(map(str, {pbs_array_data_chunk}[int(sys.argv[1])-{MAX_SUBJOBS*i}])))" $PBS_ARRAY_INDEX))
         for i, pbs_array_data_chunk in enumerate(pbs_array_data_chunks):
 
+            #print(f'i = {i}')  # delete
             PBS_SCRIPT = f"""<<'END'
 #!/bin/bash
 #PBS -N {kwargs.get('N', sys.argv[0] or 'job')}
 #PBS -P {kwargs.get('P',"''")}
-#PBS -q {kwargs.get('q','defaultQ')}
-#PBS -V
-#PBS -m n
-##PBS -o {path}job -e {path}job
-#PBS -o {path}/{job_dir} -e {path}/{job_dir}
-#PBS -l select={kwargs.get('select',1)}:ncpus={kwargs.get('ncpus',1)}:mem={kwargs.get('mem','1GB')}{':ngpus='+str(kwargs['ngpus']) if 'ngpus' in kwargs else ''}
+#PBS -q {kwargs.get('q','normal')}
+#PBS -o {path}{job_dir} -e {path}{job_dir}
+#PBS -l ncpus={kwargs.get('ncpus',1)}
+#PBS -l mem={kwargs.get('mem','1GB')}
+#PBS -l jobfs={kwargs.get('mem','1GB')}
+{'#PBS -l ngpus='+str(kwargs['ngpus']) if 'ngpus' in kwargs else ''}
+#PBS -l storage=gdata/{kwargs.get('P',"''")}+scratch/{kwargs.get('P',"''")}
 #PBS -l walltime={kwargs.get('walltime','23:59:00')}
-#PBS -J {MAX_SUBJOBS*i}-{MAX_SUBJOBS*i + len(pbs_array_data_chunk)-1}
-args=($(python -c "import sys;print(' '.join(map(str, {pbs_array_data_chunk}[int(sys.argv[1])-{MAX_SUBJOBS*i}])))" $PBS_ARRAY_INDEX))
+#PBS -l wd
+##PBS -J {MAX_SUBJOBS*i}-{MAX_SUBJOBS*i + len(pbs_array_data_chunk)-1}
+# module purge
+# module load git/2.39.2 intel-mkl/2023.2.0 pbs python3/3.9.2
+# module list
+args=($(python3 -c "import sys;print(' '.join(map(str, {pbs_array_data_chunk}[0])))"))
 cd {kwargs.get('cd', '$PBS_O_WORKDIR')}
 echo "pbs_array_args = ${{args[*]}}"
 {source_activate}
@@ -91,7 +99,7 @@ END"""
             os.system(f'qsub {PBS_SCRIPT}')
             #print(PBS_SCRIPT)
 
-    # ---------- end{ARTEMIS} ----------
+    # ---------- end{GADI} ----------
 
     # ---------- begin{PHYSICSX} ---------- for bash shell
     elif cluster == 'PHYSICS':
@@ -116,7 +124,7 @@ END"""
 #PBS -l select={kwargs.get('select',1)}:ncpus={kwargs.get('ncpus',1)}:mem={kwargs.get('mem','1GB')}{':ngpus='+str(kwargs['ngpus']) if 'ngpus' in kwargs else ''}
 #PBS -l walltime={kwargs.get('walltime','23:59:00')}                       
 #PBS -J {MAX_SUBJOBS*i}-{MAX_SUBJOBS*i + len(pbs_array_data_chunk)-1}
-args=($(python -c "import sys;print(' '.join(map(str, {pbs_array_data_chunk}[int(sys.argv[1])-{MAX_SUBJOBS*i}])))" $PBS_ARRAY_INDEX))
+args=($(python3 -c "import sys;print(' '.join(map(str, {pbs_array_data_chunk}[int(sys.argv[1])-{MAX_SUBJOBS*i}])))" $PBS_ARRAY_INDEX))
 cd {kwargs.get('cd', '$PBS_O_WORKDIR')}
 echo "pbs_array_args = ${{args[*]}}"    
 #export CONDA_PKGS_DIRS=~/.conda/pkgs
@@ -156,7 +164,7 @@ END"""
 #SBATCH --array={MAX_SUBJOBS*i}-{MAX_SUBJOBS*i + len(pbs_array_data_chunk)-1}
 
 #SBATCH
-args=($(python -c "import sys;print(' '.join(map(str, {pbs_array_data_chunk}[int(sys.argv[1])-{MAX_SUBJOBS*i}])))" $SLURM_ARRAY_TASK_ID))
+args=($(python3 -c "import sys;print(' '.join(map(str, {pbs_array_data_chunk}[int(sys.argv[1])-{MAX_SUBJOBS*i}])))" $SLURM_ARRAY_TASK_ID))
 
 cd {kwargs.get('cd', '$SLURM_SUBMIT_DIR')}
 echo "pbs_array_args = ${{args[*]}}"
@@ -172,6 +180,41 @@ END"""
 
     # ---------- end{FUDAN_BRAIN} ----------
 
+    # ---------- begin{ARTEMIS} ----------
+    if cluster == 'ARTEMIS':
+        MAX_SUBJOBS = 1000
+        # PBS array jobs are limited to 1000 subjobs by default
+        pbs_array_data_chunks = [pbs_array_data[x:x+MAX_SUBJOBS]
+                                for x in range(0, len(pbs_array_data), MAX_SUBJOBS)]
+        if len(pbs_array_data_chunks[-1]) == 1:  # array jobs must have length >1
+            pbs_array_data_chunks[-1].insert(0, pbs_array_data_chunks[-2].pop())
+        for i, pbs_array_data_chunk in enumerate(pbs_array_data_chunks):
+
+            PBS_SCRIPT = f"""<<'END'
+#!/bin/bash
+#PBS -N {kwargs.get('N', sys.argv[0] or 'job')}
+#PBS -P {kwargs.get('P',"''")}
+#PBS -q {kwargs.get('q','defaultQ')}
+#PBS -V
+#PBS -m n
+##PBS -o {path}job -e {path}job
+#PBS -o {path}/{job_dir} -e {path}/{job_dir}
+#PBS -l select={kwargs.get('select',1)}:ncpus={kwargs.get('ncpus',1)}:mem={kwargs.get('mem','1GB')}{':ngpus='+str(kwargs['ngpus']) if 'ngpus' in kwargs else ''}
+#PBS -l walltime={kwargs.get('walltime','23:59:00')}
+#PBS -J {MAX_SUBJOBS*i}-{MAX_SUBJOBS*i + len(pbs_array_data_chunk)-1}
+args=($(python3 -c "import sys;print(' '.join(map(str, {pbs_array_data_chunk}[int(sys.argv[1])-{MAX_SUBJOBS*i}])))" $PBS_ARRAY_INDEX))
+cd {kwargs.get('cd', '$PBS_O_WORKDIR')}
+echo "pbs_array_args = ${{args[*]}}"
+{source_activate}
+{conda_activate}
+{command} ${{args[*]}} {additional_command} {post_command}
+END"""        
+
+            os.system(f'qsub {PBS_SCRIPT}')
+            #print(PBS_SCRIPT)
+
+    # ---------- end{ARTEMIS} ----------
+
     # ---------- begin{PHYSICS0} ---------- perhaps can use for SBATCH
     # elif cluster == 'PHYSICS':
     #     MAX_SUBJOBS = 1000
@@ -181,7 +224,7 @@ END"""
     #     for i, pbs_array_data_point in enumerate(pbs_array_data):
 
     #         # old args
-    #         # args=($(python -c "import sys;print(' '.join(map(str, {pbs_array_data_point})))"))
+    #         # args=($(python3 -c "import sys;print(' '.join(map(str, {pbs_array_data_point})))"))
     #         # echo "pbs_array_args = ${{args[*]}}"
     #         # {command} ${{args}} {additional_command} {post_command}
 
@@ -211,7 +254,9 @@ def job_setup(script_name, kwargss, **kwargs):
     mem = kwargs.get('mem', '8GB')            
     
     pbs_array_data = get_pbs_array_data(kwargss)     
-    if cluster == 'ARTEMIS':   
+    if cluster == 'GADI':   
+        perm, pbss = job_divider(pbs_array_data, len(PROJECTS))    
+    elif cluster == 'ARTEMIS':   
         perm, pbss = job_divider(pbs_array_data, len(PROJECTS))
     else:
         perm, pbss = job_divider(pbs_array_data, 1)  # projects not needed
@@ -233,18 +278,19 @@ def job_setup(script_name, kwargss, **kwargs):
         kwargs_command = kwargs_qsub; del kwargs_command["path"]
         kwargs_command["cluster"] = cluster
 
-        # ----- ARTEMIS -----
-        if cluster == 'ARTEMIS':            
+        # ----- GADI -----
+        if cluster == 'GADI':            
             # project names
-            kwargs_qsub["P"] = PROJECTS[pidx]
-            print(PROJECTS[pidx])
+            kwargs_qsub["P"] = GADI_PROJECTS[pidx]
+            print(GADI_PROJECTS[pidx])
 
             if select * max(ncpus, ngpus) > 1:
                 # master_port += 1            
                 HOST_NODE_ADDR += 1
 
-            kwargs_command["HOST_NODE_ADDR"] = HOST_NODE_ADDR
-            kwargs_command["singularity_path"] = SPATH
+            # kwargs_command["HOST_NODE_ADDR"] = HOST_NODE_ADDR
+            # kwargs_command["singularity_path"] = SPATH
+            kwargs_qsub["source"] = GADI_SOURCE
         # -------------------
 
         # ----- PHYSICS -----
@@ -268,6 +314,20 @@ def job_setup(script_name, kwargss, **kwargs):
 
             kwargs_qsub["conda"] = FUDAN_CONDA
         # -------------------        
+
+        # ----- ARTEMIS -----
+        elif cluster == 'ARTEMIS':            
+            # project names
+            kwargs_qsub["P"] = ARTEMIS_PROJECTS[pidx]
+            print(ARTEMIS_PROJECTS[pidx])
+
+            if select * max(ncpus, ngpus) > 1:
+                # master_port += 1            
+                HOST_NODE_ADDR += 1
+
+            kwargs_command["HOST_NODE_ADDR"] = HOST_NODE_ADDR
+            kwargs_command["singularity_path"] = SPATH
+        # -------------------
 
         command, additional_command = command_setup_ddp(**kwargs_command)                
 
@@ -350,9 +410,9 @@ def command_setup_ddp(**kwargs):
 
     additional_command = ''
     if max(ngpus, ncpus) <= 1:
-        command += " python"
+        command += " python3"
     elif ngpus > 1:
-        #command += f" CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.launch --nproc_per_node={ngpus}"
+        #command += f" CUDA_VISIBLE_DEVICES=0,1 python3 -m torch.distributed.launch --nproc_per_node={ngpus}"
         #additional_command = 'run --backend=nccl'
         if select == 1:
             # command += f" torchrun --rdzv-backend=c10d --rdzv-endpoint=localhost:0"
@@ -365,7 +425,7 @@ def command_setup_ddp(**kwargs):
             # command += f" --rdzv-backend=c10d --rdzv-endpoint=$HOST_NODE_ADDR"
             command += f" torchrun --nnodes={select} --nproc_per_node={ncpus}"
     elif ngpus == 0 and ncpus > 1:
-        #python -m torch.distributed.launch --nproc_per_node=4 --use_env train_classification_imdb.py run --backend=gloo
+        #python3 -m torch.distributed.launch --nproc_per_node=4 --use_env train_classification_imdb.py run --backend=gloo
         #additional_command = 'run --backend=gloo'
         if select == 1:
             # 1.
@@ -429,7 +489,7 @@ def write_script(full_command, **kwargs):
 # module load cmake
 # module load cuda
 
-# python ./one_expe.py %s
+# python3 ./one_expe.py %s
 # ''' % (name, name, name, args_string))
     # ---------------------------------------------------
 

@@ -1,8 +1,236 @@
+import os
+import re
+from itertools import product
 from os.path import isfile, isdir
+from pathlib import Path
 
 from constants import DROOT, MODEL_SUFFIX
-from UTILS.mutils import njoin, collect_model_dirs, load_model_files
+from UTILS.mutils import njoin, collect_model_dirs, load_model_files, structural_model_root
+from qsub_parser import add_common_kwargs
 
+"""
+The following are all the experiments to be run from `batch_submit_main.py`
+"""
+
+# ----- model training experiments -----
+def train_exps():
+
+    script_name = 'main.py'
+    nstack = 1
+    MEM_DICT = {1: '4GB', 2: '8GB', 3: '8GB', 4: '8GB', 5: '10GB', 6: '12GB'}
+    #CLUSTER = 'PHYSICS'  # can manually enter here too
+    q = 'l40s'  # 'l40s', 'taiji', 'h100'        
+
+    # ensembles
+    seeds = list(range(1))
+    # dataset
+    DATASET_NAMES = ['imdb']  # 'imdb', 'glue-sst2', 'ag_news', 'emotion', 'yelp_polarity'
+    # embeddings
+    fix_embed = False
+    if fix_embed:
+        pretrained_model_name = 'glove'  # glove, distilbert-base-uncased, albert-base-v2
+    # special masks
+    train_mask_type = None  # 'longformer', None
+    # architecture
+    is_rescale_dist = True
+    is_resnet_scale = False
+    max_len = 512
+
+    # -------------------- CHANGE HERE --------------------
+    n_layers = 6  
+    # -----------------------------------------------------
+
+    if n_layers < 4:
+        hiddens = [8, 16 ,32 ,64]
+        #hiddens = [64]
+        n_attn_heads = 1
+
+        is_ops = [True]
+        qk_shares = [True, False]
+
+        # model root dir
+        ROOT = njoin(DROOT, 'L-d-grid')
+        job_path = njoin(ROOT, 'jobs_all')        
+    else:                
+        hiddens = [256] 
+        n_attn_heads = 8    
+
+        is_ops = [False, True]
+        qk_shares = [False]
+
+        # model root dir
+        ROOT = njoin(DROOT, 'full_models')
+        job_path = njoin(ROOT, 'jobs_all')          
+    # training
+    lr_scheduler_type = 'binary'  # 'constant'
+    if lr_scheduler_type == 'binary':
+        binary_ratio = 3/4  # for L-d-grid study and 6 layered models
+
+    # resources
+    is_use_gpu = True
+    select = 1
+    (ngpus,ncpus) = (1,1) if is_use_gpu else (0,1)                               
+    walltime = '23:59:59'
+    mem = MEM_DICT[n_layers]   
+
+    # models
+    is_force_train = False
+    # FNS
+    #alphas = [1, 1.2, 1.4, 1.6, 1.8, 2] 
+    alphas = [1.2, 2]
+    bandwidths = [1]  # 'median'      
+    manifolds = ['rd']  # 'rd', 'v2_rd', 'sphere'       
+    # other types
+    is_train_others = True          
+
+    kwargss_all = []    
+    for seed, dataset_name in product(seeds, DATASET_NAMES):                                                                                                         
+        for hidden, qk_share, is_op in product(hiddens, qk_shares, is_ops):
+            # setting up directories
+            f_prefix = f'{n_layers}L'
+            if is_resnet_scale:
+                f_prefix += '-RR'            
+
+            MODELS_ROOT = njoin(ROOT, f'{f_prefix}-hidden={hidden}-max_len={max_len}')
+            if fix_embed:
+                MODELS_ROOT += f'-{pretrained_model_name}'
+            if train_mask_type is not None:
+                MODELS_ROOT += f'-mask={train_mask_type}'        
+            if is_rescale_dist:
+                MODELS_ROOT += '-rescaled'                    
+
+            common_kwargs = {                                  
+                "seed":              seed,
+                "qk_share":          qk_share,
+                'is_op':             is_op,
+                "is_rescale_dist":   is_rescale_dist,   
+                "is_resnet_scale":   is_resnet_scale,    
+                'lr_scheduler_type': lr_scheduler_type, 
+                'binary_ratio':      binary_ratio if lr_scheduler_type=='binary' else None,                                                                                                                        
+                "weight_decay":      0,
+                'n_layers':          n_layers,
+                'hidden':            hidden,
+                'n_attn_heads':      n_attn_heads                             
+            }  
+            #common_kwargs['max_len'] = MAX_LENS_DICT[dataset_name] if max_len is None else max_len                        
+            common_kwargs['max_len'] = max_len
+            common_kwargs['fix_embed'] = fix_embed
+            if fix_embed:
+                common_kwargs["pretrained_model_name"] = pretrained_model_name
+            if train_mask_type is not None:
+                common_kwargs["train_mask_type"] = train_mask_type                
+
+            if n_layers > 3:
+                common_kwargs["epochs"] = 20
+                common_kwargs["max_lr"] = 1e-4                            
+                common_kwargs["min_lr"] = 1e-5
+                common_kwargs["train_bs"] = 32
+            else:
+                if dataset_name.lower() in ['imdb', 'rotten_tomatoes', 'ag_news']:
+                    common_kwargs["epochs"] = 25
+                else:
+                    common_kwargs["epochs"] = 35                                                            
+                # common_kwargs["max_lr"] = 1e-3
+                # common_kwargs["min_lr"] = 1e-4
+                common_kwargs["max_lr"] = 1e-3
+                common_kwargs["min_lr"] = 2e-4
+                common_kwargs["train_bs"] = 16
+
+            # ----- add more settings here -----                                           
+            model_root_dirname = structural_model_root(dataset_name=dataset_name, **common_kwargs)                                                  
+            model_root = njoin(MODELS_ROOT, 'config_qqv' if qk_share else 'config_qkv', dataset_name, model_root_dirname)
+
+            kwargss = []
+            qkv = 'qqv' if qk_share else 'qkv'
+            # FNS
+            for alpha, bandwidth, manifold in product(alphas, bandwidths, manifolds):
+                model_name = manifold + 'fns' +  MODEL_SUFFIX
+                model_name = 'op' + model_name if is_op else model_name
+                model_dir = njoin(model_root,
+                f'{model_name}-{dataset_name}-{qkv}-alpha={float(alpha)}-eps={float(bandwidth)}',
+                f'model={seed}')
+                if not isfile(njoin(model_dir, 'run_performance.csv')) or is_force_train:
+                    kwargss.append({'model_name':'fnsformer','alpha':alpha,'a': 0,
+                                    'bandwidth':bandwidth,'manifold':manifold})
+            
+            # Other models
+            if is_train_others:
+                model_name = 'dp' + MODEL_SUFFIX
+                model_name = 'op' + model_name if is_op else model_name
+                model_dir = njoin(model_root,f'{model_name}-{dataset_name}-{qkv}',f'model={seed}')                
+                if not isfile(njoin(model_dir, 'run_performance.csv')) or is_force_train:
+                    kwargss.append({'model_name':'dpformer'})
+                # for n_it in [3]:
+                #     kwargss.append({'model_name':'sinkformer','n_it':n_it,'is_op': is_op})              
+
+            for idx in range(len(kwargss)):
+                # function automatically creates dir
+                kwargss[idx]["dataset"] = dataset_name    
+                kwargss[idx]['model_root'] = model_root
+            
+            kwargss = add_common_kwargs(kwargss, common_kwargs)
+            kwargss_all += kwargss
+
+    return kwargss_all, script_name, q, ncpus, ngpus, select, walltime, mem, job_path, nstack
+
+
+# ----- dynamic inference for pretrained models -----
+def dynamic_inference_exps():
+    script_name = 'dynamic_inference.py'
+    nstack = 16
+
+    #CLUSTER = 'PHYSICS'  # can manually enter here too
+    q = 'taiji'  # 'l40s', 'taiji'   
+
+    # resources
+    is_use_gpu = False
+    select = 1
+    (ngpus,ncpus) = (1,1) if is_use_gpu else (0,1)                               
+    walltime = '23:59:59'
+    mem = '4GB'      
+
+    # extract model_dir
+    models_root = Path(njoin(DROOT, 'L-d-grid')) 
+    job_path = njoin(models_root, 'inference_jobs_all')
+    pattern = re.compile(r"model=\d+$")
+    all_model_dirs = [str(p) for p in models_root.rglob("*") if p.is_dir() and pattern.search(str(p))]
+
+    # isolate layers
+    n_layers = 1
+    all_model_dirs = [model_dir for model_dir in all_model_dirs if f'{n_layers}L-hidden' in model_dir]
+
+    # general setting
+    is_dist_based = False
+    batch_size = 64
+    fname = 'dist' if is_dist_based else 'prob'
+    fname += f'-bs={batch_size}-inference.csv'
+    # FNS setting
+    is_op = True
+    manifold = 'rd'
+
+    SELECTED_ALPHAS = [1.2, 2.0]    
+    #SELECTED_EPSS = [1.0]  
+
+    kwargss_all = []
+    fns_type = manifold + 'fns' + MODEL_SUFFIX
+    if is_op:
+        fns_type = 'op' + fns_type
+    for model_dir in all_model_dirs:
+        is_fns = f'/{fns_type}' in model_dir
+        if is_fns:
+            # isolate alphas from SELECTED_ALPHAS
+            for alpha in SELECTED_ALPHAS:
+                if f'alpha={float(alpha)}' in model_dir:
+                    break
+
+        if model_dir is not None and isfile(njoin(model_dir, 'ckpt.pt'))\
+             and not isfile(njoin(model_dir, fname)):
+            kwargss_all.append({'model_dir': model_dir, 'batch_size': batch_size})    
+
+    return kwargss_all, script_name, q, ncpus, ngpus, select, walltime, mem, job_path, nstack
+
+
+# ----- attention graphs for pretrained models -----
 def attn_graph_exps():
 
     script_name = 'attn_graph_v2.py'

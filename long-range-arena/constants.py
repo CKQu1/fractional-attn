@@ -21,6 +21,7 @@ else:
 # ----- GADI -----
 GADI_PROJECTS = ['uu69']
 GADI_SOURCE = '/g/data/uu69/venvs/fsa/'
+# -------------------
 
 # ----- PHYSICS -----
 PHYSICS_SOURCE = '/usr/physics/python/Anaconda3-2022.10/etc/profile.d/conda.sh'

@@ -162,3 +162,15 @@ def datasets_create_examples(args, tokenized_train_dataset, tokenized_test_datas
     test_loader = DataLoader(tokenized_test_dataset, batch_size=batch_size, shuffle=True,
                              collate_fn=collate_fn)    
     return train_loader, test_loader
+
+# ---------- dataset utility ----------
+ 
+def count_trailing_zeros(tensor):
+    # Reverse the tensor and find the first non-zero element
+    reversed_tensor = torch.flip(tensor, dims=[0])
+    nonzero_indices = torch.nonzero(reversed_tensor, as_tuple=True)[0]
+    
+    if len(nonzero_indices) == 0:  # All elements are zero
+        return len(tensor)
+    else:  # Count zeros from the end
+        return nonzero_indices[0].item()    

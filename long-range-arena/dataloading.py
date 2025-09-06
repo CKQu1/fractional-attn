@@ -1,9 +1,12 @@
 """Adapted from https://github.com/lindermanlab/S5/blob/main/s5/dataloaders/lra.py"""
 
+import os
 import torch
 from pathlib import Path
-import os
 from typing import Callable, Optional, TypeVar, Tuple, Union
+from os.path import isfile
+from constants import DROOT
+from mutils import njoin
 
 DEFAULT_CACHE_DIR_ROOT = Path('./cache_dir/')
 
@@ -14,6 +17,13 @@ ReturnType = Tuple[DataLoader, DataLoader, DataLoader, int, int, int, int, int]
 # Custom loading functions must therefore have the template.
 dataset_fn = Callable[[str, Optional[int], Optional[int], Optional[int]], ReturnType]
 
+##### CHANGE IF NEEDED #####
+#RAW_DATA_PATH = './.raw_datasets'  # old case
+if isfile(njoin(DROOT, 'jobfs_path.txt')):
+	with open(njoin(DROOT, 'jobfs_path.txt')) as f:
+		RAW_DATA_PATH = f.read().strip()
+else:
+	RAW_DATA_PATH = ''
 
 # Example interface for making a loader.
 def custom_loader(cache_dir: str,
@@ -101,7 +111,7 @@ def create_lra_listops_classification_dataset(cache_dir: Union[str, Path] = DEFA
 	print("[*] Generating LRA-listops Classification Dataset")
 	from dataloaders.lra import ListOps
 	name = 'listops'
-	dir_name = './.raw_datasets/lra_release/lra_release/listops-1000'
+	dir_name = f'{RAW_DATA_PATH}/lra_release/lra_release/listops-1000'
 
 	dataset_obj = ListOps(name, data_dir=dir_name)
 	dataset_obj.cache_dir = Path(cache_dir) / name
@@ -133,7 +143,7 @@ def create_lra_path32_classification_dataset(cache_dir: Union[str, Path] = DEFAU
 	from dataloaders.lra import PathFinder
 	name = 'pathfinder'
 	resolution = 32
-	dir_name = f'./.raw_datasets/lra_release/lra_release/pathfinder{resolution}'
+	dir_name = f'{RAW_DATA_PATH}/lra_release/lra_release/pathfinder{resolution}'
 
 	kwargs = {'tokenize': True}  # Tokenize into vocabulary of 256 values.
 	dataset_obj = PathFinder(name, data_dir=dir_name, resolution=resolution, **kwargs)
@@ -168,7 +178,7 @@ def create_lra_pathx_classification_dataset(cache_dir: Union[str, Path] = DEFAUL
 	from dataloaders.lra import PathFinder
 	name = 'pathfinder'
 	resolution = 128
-	dir_name = f'./.raw_datasets/lra_release/lra_release/pathfinder{resolution}'
+	dir_name = f'{RAW_DATA_PATH}/lra_release/lra_release/pathfinder{resolution}'
 
 	dataset_obj = PathFinder(name, data_dir=dir_name, resolution=resolution)
 	dataset_obj.cache_dir = Path(cache_dir) / name
@@ -239,7 +249,7 @@ def create_lra_aan_classification_dataset(cache_dir: Union[str, Path] = DEFAULT_
 	from dataloaders.lra import AAN
 	name = 'aan'
 
-	dir_name = './.raw_datasets/lra_release/lra_release/tsv_data'
+	dir_name = f'{RAW_DATA_PATH}/lra_release/lra_release/tsv_data'
 
 	kwargs = {
 		'n_workers': 1,  # Multiple workers seems to break AAN.

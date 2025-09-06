@@ -19,16 +19,6 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 import networkx as nx
 import torch.nn as nn
-
-def count_trailing_zeros(tensor):
-    # Reverse the tensor and find the first non-zero element
-    reversed_tensor = torch.flip(tensor, dims=[0])
-    nonzero_indices = torch.nonzero(reversed_tensor, as_tuple=True)[0]
-    
-    if len(nonzero_indices) == 0:  # All elements are zero
-        return len(tensor)
-    else:  # Count zeros from the end
-        return nonzero_indices[0].item()
     
 def eval_model(model):
     _loss = 0

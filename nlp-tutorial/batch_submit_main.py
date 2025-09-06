@@ -20,13 +20,20 @@ if __name__ == '__main__':
     date_str = datetime.today().strftime('%Y-%m-%d')    
     batch_script_name = "batch_main.py"
 
-    DICT_EXP_CONFIGS = {'exp1': train_exps(),                 # training
-                        'exp2': dynamic_inference_exps(),     # dynamic inference  
-                        'exp3': attn_graph_exps()            # attn graph from pretrained models
-    }
+    # DICT_EXP_CONFIGS = {'exp1': train_exps(),                 # training
+    #                     'exp2': dynamic_inference_exps(),     # dynamic inference  
+    #                     'exp3': attn_graph_exps()            # attn graph from pretrained models
+    # }
 
     exp_type = 'exp1'
-    kwargss_all, script_name, q, ncpus, ngpus, select, walltime, mem, job_path, nstack = DICT_EXP_CONFIGS[exp_type]
+    if exp_type == 'exp1':
+        EXPS_TO_RUN = train_exps()
+    elif exp_type == 'exp2':
+        EXPS_TO_RUN = dynamic_inference_exps()
+    elif exp_type == 'exp3':
+        EXPS_TO_RUN = attn_graph_exps()
+    
+    kwargss_all, script_name, q, ncpus, ngpus, select, walltime, mem, job_path, nstack = EXPS_TO_RUN
 
     # ----- submit jobs -----
     print(f'Total jobs: {len(kwargss_all)} \n')      

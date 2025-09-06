@@ -8,7 +8,7 @@ if __name__ == '__main__':
     #parser.add_argument('--train_with_ddp', default=True, type=bool, help='to use DDP or not')
     parser.add_argument('--arg_strss', type=str)
     parser.add_argument('--script', default='main.py', type=str)
-    parser.add_argument('--script_command', default='python', type=str)
+    parser.add_argument('--script_command', default='python3', type=str)
 
     args = parser.parse_args()    
 

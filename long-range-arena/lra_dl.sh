@@ -4,10 +4,10 @@
 #PBS -q copyq
 #PBS -o /scratch/uu69/cq5024/projects/fractional-attn/long-range-arena/.PBSout -e /scratch/uu69/cq5024/projects/fractional-attn/long-range-arena/.PBSout
 #PBS -l ncpus=1
-#PBS -l mem=4GB
-#PBS -l jobfs=35GB
+#PBS -l mem=64GB
+#PBS -l jobfs=60GB
 #PBS -l storage=gdata/uu69+scratch/uu69
-#PBS -l walltime=02:00:00
+#PBS -l walltime=04:00:00
 ##PBS -l walltime=00:02:00
 #PBS -l wd
 
@@ -22,7 +22,7 @@
 # echo $PBS_JOBFS > .droot/jobfs_path.txt
 # source /scratch/uu69/cq5024/myenvs/fsa/bin/activate
 # cd /scratch/uu69/cq5024/projects/fractional-attn/long-range-arena
-# python3 aan_script.py
+# python3 _lra_preprocess.py
 
 # ----- DOWNLOAD DATASET -----
 echo $PBS_JOBFS > .droot/jobfs_path.txt
@@ -31,7 +31,10 @@ wget -c https://storage.googleapis.com/long-range-arena/lra_release.gz -O - | ta
 
 cd /scratch/uu69/cq5024/projects/fractional-attn/long-range-arena
 source /scratch/uu69/cq5024/myenvs/fsa/bin/activate
-python3 aan_script.py  --name=aan
-python3 aan_script.py  --name=pathfinder
+
+python3 _lra_preprocess.py  --name=aan
+echo '---------- AAN complete! ----------'
+python3 _lra_preprocess.py  --name=pathfinder
+echo '---------- PATHFINDER complete! ----------'
 
 exit

@@ -16,13 +16,13 @@ The following are all the experiments to be run from `batch_submit_main.py`
 def train_exps():
 
     script_name = 'main.py'
-    nstack = 1
+    nstack = 5
     MEM_DICT = {1: '4GB', 2: '8GB', 3: '8GB', 4: '8GB', 5: '10GB', 6: '12GB'}
     #CLUSTER = 'PHYSICS'  # can manually enter here too
     #q = 'l40s'  # 'l40s', 'taiji', 'h100'        
 
     # ensembles
-    seeds = list(range(1))
+    seeds = list(range(5))
     # dataset
     DATASET_NAMES = ['imdb']  # 'imdb', 'glue-sst2', 'ag_news', 'emotion', 'yelp_polarity'
     # embeddings
@@ -37,7 +37,7 @@ def train_exps():
     max_len = 512
 
     # -------------------- CHANGE HERE --------------------
-    n_layers = 6  
+    n_layers = 6  # 1, 2, 3
     # -----------------------------------------------------
 
     if n_layers < 4:
@@ -83,7 +83,8 @@ def train_exps():
         ngpus, ncpus = 0, 1  # CPU             
 
     select = 1                           
-    walltime = '01:14:59'
+    #walltime = '01:29:59'  # for nstack = 1
+    walltime = '07:29:59'
     mem = MEM_DICT[n_layers]   
 
     # models

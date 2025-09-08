@@ -24,6 +24,7 @@ from torchtext.data.utils import get_tokenizer
 from torchtext.vocab import GloVe
 from UTILS.data_utils import glove_create_examples
 from UTILS.dataloader import load_dataset_and_tokenizer
+from UTILS.figure_utils import matrixify_axs, label_axs
 
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
@@ -81,11 +82,7 @@ if __name__ == '__main__':
     dp_types = [model_type for model_type in model_types if 'dp' in model_type]
 
     #SELECTED_ALPHAS = None
-    #SELECTED_ALPHAS = [1.2,2.0]
-    #SELECTED_ALPHAS = [1,2]
     SELECTED_ALPHAS = [1.2, 1.6, 2]
-    #EXCLUDED_EPSS = None
-    #EXCLUDED_EPSS = [100, 10, 0.1, 0.01, 0.001]
     SELECTED_EPSS = [1]
     for model_type in model_types:
         if args.fns_type in model_type:            
@@ -122,9 +119,8 @@ if __name__ == '__main__':
     figsize = (3*ncols,3*nrows)
     fig, axs = plt.subplots(nrows,ncols,figsize=figsize,
                             sharex=False,sharey=False)  
-
-    if nrows == 1:
-       axs = np.expand_dims(axs, axis=0) if ncols > 1 else np.expand_dims(axs, axis=[0,1])
+    axs = matrixify_axs(axs, nrows, ncols)  # make axs 2D array
+    label_axs(fig, axs)                     # alphabetically label figures
 
     # Create figure and GridSpec layout
     # fig = plt.figure(figsize=(12, 6))  
@@ -137,17 +133,6 @@ if __name__ == '__main__':
     # axs = np.array([[ax1, ax2], [ax3, ax4]])
     # # Create large subfigure (taking up 2 rows)
     # ax5 = fig.add_subplot(gs[:, 2])  # Spans both rows (large plot)
-
-    adjusted_bandwidth = 0.1
-
-    total_figs = 0        
-    for row in range(nrows):
-        for col in range(ncols):
-            axs[row,col].text(
-        0.0, 1.0, f'({ascii_lowercase[total_figs]})', transform=(
-            axs[row,col].transAxes + ScaledTranslation(-20/72, +7/72, fig.dpi_scale_trans)),
-        va='bottom')
-            total_figs += 1
 
     t1 = time()
     #print(f'Time 1: {t1 - t0}s')
@@ -164,7 +149,6 @@ if __name__ == '__main__':
                 #attn_setup, config, _, _ = load_model_files(model_dir)
         print(f'Bandwidth: {eps}, seed selected: {seed}')
 
-        models = []  # delete
         model_dirs = sorted(model_dirs)
         g_distss, attn_scoress, attention_weightss = [], [], []
         for model_idx, model_dir in enumerate(model_dirs):
@@ -176,22 +160,15 @@ if __name__ == '__main__':
             pretrained_model_name = config['pretrained_model_name'] if fix_embed else False
 
             config['dataset_name'] = attn_setup['dataset_name']
-            if config['dataset_name'] == 'imdb' and 'num_classes' not in config.keys():
-                config['num_classes'] = 2
             config['max_len'] = config['seq_len']
-            manifold = attn_setup['manifold']
-            # if 'is_rescale_dist' not in config.keys():
-            #     # maybe add prompt
-            #     config['is_rescale_dist'] = args.is_rescale_dist  # manual setup            
+            manifold = attn_setup['manifold']      
 
             model = RDFNSformer(config, is_return_dist=True)     
-            checkpoint = njoin(model_dir, 'ckpt.pt')
+            checkpoint = njoin(model_dir, 'ckpt.pt')  # assuming model's is trained
             ckpt = torch.load(checkpoint)
             model.load_state_dict(ckpt['model'])
             model.eval()
-            models.append(model)  # delete
 
-            # load dataset
             if model_idx == 0:  
                 main_args = AttrDict(config)
                 #batch_size = int(train_setting.loc[0,'batch_size'])
@@ -217,7 +194,6 @@ if __name__ == '__main__':
                 max_len_idxs = np.where(np.array(X_lens) == config['max_len'])[0]
                 idx = 0
                 X, Y = train_loader.dataset[max_len_idxs[idx]]
-                #X, Y = train_loader.dataset[idx]
                 X_len = config['max_len'] - count_trailing_zeros(X)
                 print(f'Data sequence length: {X_len}')
 
@@ -233,8 +209,7 @@ if __name__ == '__main__':
             attention_scores = []            
             for lidx, g_dist in enumerate(g_dists):
 
-                # ----------------------------------------
-
+                # --------------------------------------------------------------------------------
                 pad_id = 0
                 positions = torch.arange(X[None].size(1), device=X[None].device, dtype=X[None].dtype).repeat(X[None].size(0), 1) + 1
                 position_pad_mask = X[None].eq(pad_id)
@@ -262,19 +237,9 @@ if __name__ == '__main__':
                     K_x, K_y = pca_results.T  
                 else:       
                     pca_results = pca.fit_transform(data[0])
-                    x, y = pca_results.T                    
-                                                                            
-                # plot based on PCs
-                # rad = 3.5
-                # center = [x.mean(), y.mean()]
-                # far_xy_idxs = []
-                # for ii in range(len(x)):
-                #     if (x[ii] - center[0])**2 + (y[ii] - center[1])**2 >= rad**2:
-                #         far_xy_idxs.append(ii)
-                # close_xy_idxs = np.array(list(set(list(range(X_len))) - set(far_xy_idxs)))
-                # far_xy_idxs = np.array(far_xy_idxs)
+                    x, y = pca_results.T                                                                                            
 
-                # plot based on actual embeddings
+                # plot based on embeddings
                 if fix_embed:
                     if pretrained_model_name == 'glove':
                         rad = 6.1  # glove                        
@@ -291,7 +256,6 @@ if __name__ == '__main__':
 
                 else:
                     rad = 5.95
-
                     txts = tokenizer.convert_ids_to_tokens(list(X[None][0].detach().numpy()))
 
                 center = data[0].mean(0)
@@ -303,21 +267,17 @@ if __name__ == '__main__':
                         close_xy_idxs.append(ii)
                 close_xy_idxs = np.array(close_xy_idxs)
                 far_xy_idxs = np.array(far_xy_idxs)                    
-
-                # ----------------------------------------
+                # --------------------------------------------------------------------------------
 
                 if args.is_include_pad_mask:
                     g_dist = g_dist[:,:,:X_len,:X_len]
                 else:
                     g_dist = g_dist[:,:,:,:]
                     X_len = config['max_len']                
-                # print('g_dist')
-                # print(g_dist)  # delete
                 if 'v2_' not in manifold:
                     attn_score = dist_to_score(g_dist, alpha, bandwidth, d_intrinsic=d_intrinsic)
                 else:
                     attn_score = dist_to_score(g_dist, alpha, bandwidth, d_intrinsic=1)
-                #attn_score = dist_to_score(g_dist, alpha, adjusted_bandwidth, d_intrinsic=d_intrinsic)
                 attention_scores.append(attn_score)
 
                 # determine furthest distance and coordinates in embedding space
@@ -445,15 +405,16 @@ if __name__ == '__main__':
 
                 else:    
 
+                    # shortest path 
                     # for idx in range(len(shortest_path[:-1])):
                     #     i, j = shortest_path[idx:idx+2]
                     #     axs[0,alphas.index(alpha)].plot([x[i], x[j]], [y[i], y[j]], 
                     #             c='grey', alpha=0.6, linewidth=10*scale * attention_weight[i,j].item(), 
                     #             linestyle='--')                       
 
-                    # for i in range(X_len):
+                    # for i in range(X_len):               ##### if you want all tokens #####
                     #     for j in range(X_len):
-                    for i in far_xy_idxs:
+                    for i in far_xy_idxs:                  ###### if you want tokens that are 'further' apart ######
                         for j in far_xy_idxs:                
                             # attention score
                             # if attn_score[0,0,i,j] > thresh and i!=j:
@@ -561,8 +522,6 @@ if __name__ == '__main__':
                     kernel_values = fdm_kernel(dists, alpha, d_intrinsic_kernel, 
                                             bandwidth=config['bandwidth'], 
                                             dist_scale=dist_scale)
-                                            #is_rescaled_dist=False)  # already rescaled in forward prop
-                                            #is_rescaled_dist=config['is_rescale_dist'])
                     axs[2,alphas.index(alpha)].plot(dists, kernel_values, c=c_hyp)
 
                     # index vs distance

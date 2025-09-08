@@ -14,15 +14,16 @@ from os import makedirs
 from os.path import isdir
 
 from constants import HYP_CMAP, HYP_CNORM, FIGS_DIR, MODEL_SUFFIX
-from utils.mutils import njoin, str2bool, collect_model_dirs, AttrDict, load_model_files, dist_to_score
-from utils.mutils import dijkstra_matrix, fdm_kernel
+from UTILS.mutils import njoin, str2bool, collect_model_dirs, AttrDict, load_model_files, dist_to_score
+from UTILS.mutils import dijkstra_matrix, fdm_kernel
 from models.rdfnsformer import RDFNSformer
 from models.dpformer import DPformer
 
 from torch.utils.data import DataLoader
 from torchtext.data.utils import get_tokenizer
 from torchtext.vocab import GloVe
-from utils.data_utils import glove_create_examples
+from UTILS.data_utils import glove_create_examples
+from UTILS.dataloader import load_dataset_and_tokenizer
 
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
@@ -183,8 +184,6 @@ if __name__ == '__main__':
             #     # maybe add prompt
             #     config['is_rescale_dist'] = args.is_rescale_dist  # manual setup            
 
-            main_args = AttrDict(config)
-
             model = RDFNSformer(config, is_return_dist=True)     
             checkpoint = njoin(model_dir, 'ckpt.pt')
             ckpt = torch.load(checkpoint)
@@ -193,87 +192,32 @@ if __name__ == '__main__':
             models.append(model)  # delete
 
             # load dataset
-            if model_idx == 0:                
+            if model_idx == 0:  
+                main_args = AttrDict(config)
                 #batch_size = int(train_setting.loc[0,'batch_size'])
-                batch_size = 1    
-                if fix_embed:            
-                    if pretrained_model_name == 'glove':
-                        from constants import GLOVE_DIMS
-                        for glove_dim in GLOVE_DIMS:
-                            if glove_dim >= config['hidden']:
-                                break                
-                        tokenizer = get_tokenizer("basic_english")
-                        glove = GloVe(name='6B', dim=glove_dim)
-                        vocab_size = len(glove.stoi)   
-
-                    elif pretrained_model_name == 'distilbert-base-uncased':
-                        from transformers import AutoTokenizer, DistilBertModel
-                        from utils.data_utils import create_examples
-                        #tokenizer = AutoTokenizer.from_pretrained(f'distilbert/{args.pretrained_model_name}')
-                        tokenizer = AutoTokenizer.from_pretrained(f'distilbert/distilbert-base-uncased')
-                        pretrained_model = DistilBertModel.from_pretrained("distilbert-base-uncased")
-                        vocab_size, pretrained_model_hidden =\
-                            pretrained_model.embeddings.word_embeddings.weight.shape
-                        pretrained_seq_len, _ = pretrained_model.embeddings.position_embeddings.weight.shape
-
-                    elif pretrained_model_name == 'albert-base-v2':
-                        from transformers import AlbertTokenizer, AlbertModel
-                        from utils.data_utils import create_examples
-                        tokenizer = AlbertTokenizer.from_pretrained('albert-base-v2')
-                        pretrained_model = AlbertModel.from_pretrained("albert-base-v2")                
-                        vocab_size, pretrained_model_hidden =\
-                            pretrained_model.embeddings.word_embeddings.weight.shape
-                        pretrained_seq_len, _ = pretrained_model.embeddings.position_embeddings.weight.shape
-
-                    if config['dataset_name'] != 'imdb':
-                        from transformers import AutoTokenizer
-                        from utils.data_utils import get_datasets, datasets_create_examples
-                        # Load a tokenizer (Example: BERT)
-                        tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
-                        main_args.train_bs = batch_size
-                        tokenized_train_dataset, tokenized_test_dataset = get_datasets(main_args, tokenizer)    
-                        train_loader, test_loader = datasets_create_examples(main_args, 
-                                                                            tokenized_train_dataset, 
-                                                                            tokenized_test_dataset)  
-
-                    else:
-                        train_dataset = create_examples(main_args, tokenizer, mode='train')
-                        test_dataset = create_examples(main_args, tokenizer, mode='test')    
-
-                else:
-                    if config['dataset_name'] != 'imdb':
-                        from transformers import AutoTokenizer
-                        from utils.data_utils import get_datasets, datasets_create_examples
-                        # Load a tokenizer (Example: BERT)
-                        tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
-                        main_args.train_bs = batch_size
-                        tokenized_train_dataset, tokenized_test_dataset = get_datasets(main_args, tokenizer)        
-                        train_loader, test_loader = datasets_create_examples(main_args, 
-                                                                            tokenized_train_dataset, 
-                                                                            tokenized_test_dataset)  
-
-                    else:
-                        from tokenization import Tokenizer, PretrainedTokenizer
-                        from utils.data_utils import create_examples
-                        tokenizer = PretrainedTokenizer(pretrained_model='wiki.model', vocab_file='wiki.vocab')
-                        train_dataset = create_examples(main_args, tokenizer, mode='train')
-                        test_dataset = create_examples(main_args, tokenizer, mode='test')                    
-
-                train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-                test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)  
+                batch_size = 1                    
+                # ---------------------------------------- poor man's data loader ----------------------------------------
+                # tokenizer_name is hard set in main.py for the following case
+                if main_args.dataset_name == 'imdb' and not main_args.fix_embed:
+                    main_args.tokenizer_name = 'sentencepiece'  
+                    main_args.pretrained_model = 'wiki.model'
+                    main_args.vocab_file = 'wiki.vocab'
+                tokenizer, train_loader, test_loader, train_size, eval_size, steps_per_epoch, num_classes =\
+                    load_dataset_and_tokenizer(main_args, batch_size)          
+                # --------------------------------------------------------------------------------------------------------                          
 
                 t2 = time()
                 #print(f'Time 2: {t2 - t1}s')
 
                 # record length of sequences
                 X_lens = []
-                for ii in tqdm(range(len(train_dataset))):
-                    X, Y = train_dataset[ii]
+                for ii in tqdm(range(len(train_loader.dataset))):
+                    X, Y = train_loader.dataset[ii]
                     X_lens.append(config['max_len'] - count_trailing_zeros(X) )
                 max_len_idxs = np.where(np.array(X_lens) == config['max_len'])[0]
                 idx = 0
-                X, Y = train_dataset[max_len_idxs[idx]]
-                #X, Y = train_dataset[idx]
+                X, Y = train_loader.dataset[max_len_idxs[idx]]
+                #X, Y = train_loader.dataset[idx]
                 X_len = config['max_len'] - count_trailing_zeros(X)
                 print(f'Data sequence length: {X_len}')
 

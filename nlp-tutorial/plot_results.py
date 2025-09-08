@@ -99,12 +99,14 @@ python -i plot_results.py phase_ensembles frac_attn/fractional-attn/nlp-tutorial
 python -i plot_results.py phase_ensembles frac_attn/fractional-attn/nlp-tutorial/droot/6L-v4-hidden=256-max_len=512-rescaled (to be trained and plotted)
 """
 def phase_ensembles(models_root, selected_dataset='imdb',
-                    fns_manifold='rd', qk_share=True, selected_alphas='1,2',
+                    fns_manifold='rd', qk_share=False, selected_alphas='1.2,2',
                     metrics='val_acc,val_loss',
-                    is_ops = [True],  # [False,True]
+                    is_ops = [False,True],  # [False,True]
                     cbar_separate=False, display=False):
+    pd.set_option('display.max_rows', None)
+    pd.set_option('display.max_columns', None)
 
-    global qk_shares
+    global qk_shares, summary_stats
 
     assert fns_manifold in ['sp', 'rd', 'v2_rd'], f'{fns_manifold} does not exist!'
     qk_share, cbar_separate, display = map(str2bool, (qk_share, cbar_separate, display))
@@ -587,10 +589,9 @@ def dynamic_inference(models_root, n_layer=1,
         is_fns = f'/{fns_type}' in model_dir
         is_dp = f'/{other_type}' in model_dir
         if is_fns:
-            for alpha in selected_alphas:
-                if f'alpha={float(alpha)}' in model_dir:
-                    if model_dir is not None and isfile(njoin(model_dir, fname)):
-                        model_dirs.append(model_dir)
+            # isolate alphas from SELECTED_ALPHAS
+            if not any(f'alpha={float(alpha)}' in model_dir for alpha in SELECTED_ALPHAS):
+                continue    
         elif is_dp:
             if model_dir is not None and isfile(njoin(model_dir, fname)):
                 model_dirs.append(model_dir)
@@ -683,6 +684,176 @@ def dynamic_inference(models_root, n_layer=1,
         fig_file += f'dynamic_inference_prob.pdf'
     plt.savefig(njoin(SAVE_DIR, fig_file))            
     print(f'Figure saved in {njoin(SAVE_DIR, fig_file)}')        
+
+
+"""
+python -i plot_results.py len_inference .droot/L-d-grid/
+"""
+def len_inference(models_root, n_layer=1,
+                  fns_type='fns', manifold='rd', is_rescale_dist=True, selected_alphas=[1.2, 2.0],
+                  is_op=True, qk_shares=[False,True], metric='test_acc'):
+
+    global model_dirs, emb_ds, metric_plot, metrics_all, inference
+
+    # general setting
+    if metric == 'test_acc':
+        fname = 'bs=1-test_inference.csv'
+    elif metric == 'train_acc':
+        fname = 'bs=1-train_inference.csv'
+
+    # get layers, emb_ds from regular expression
+    pattern = r"\d+L-hidden=\d+-max_len=512"
+    if is_rescale_dist:            
+        pattern += "-rescaled"
+
+    # Extract matching subfolders
+    layer_dirs_dict = {}
+    layers, emb_ds = [], []
+    for layer_dir in os.listdir(models_root):
+        is_match = re.fullmatch(pattern, layer_dir)
+        if is_match:
+            #layer, emb_d = int(is_match.group(1)), int(is_match.group(2))
+            layer = int(layer_dir.split('L')[0])          
+            #emb_d = int(layer_dir.split('-')[1].split('=')[1])
+            emb_d = int(layer_dir.split('-')[1].split('=')[1])  
+            if isdir(njoin(models_root, layer_dir)):
+                layer_dirs_dict[f'{n_layer}-{emb_d}'] = njoin(models_root, layer_dir)
+            layers.append(layer)
+            emb_ds.append(emb_d)
+    layers = np.array(sorted(list(set(layers)))); layers = layers[layers < 4]
+    emb_ds = np.array(sorted(list(set(emb_ds)))); emb_ds = emb_ds[emb_ds < 65]    
+    assert n_layer in layers, f'{n_layer} does not exist!'
+
+    # get all model dirs
+    pattern = re.compile(r"model=\d+$")  # seed paths
+    all_model_dirs = [str(p) for p in Path(models_root).rglob("*") if p.is_dir() and pattern.search(str(p))]    
+    model_dirs = []
+    fns_type = manifold + 'fns' + MODEL_SUFFIX
+    other_type = 'dp'+MODEL_SUFFIX
+    if is_op:
+        fns_type = 'op' + fns_type
+        other_type = 'op' + other_type
+    model_types_to_plot = [fns_type, other_type]
+    for model_dir in all_model_dirs:
+        is_fns = f'/{fns_type}' in model_dir
+        is_dp = f'/{other_type}' in model_dir
+        if is_fns:
+            # isolate alphas from SELECTED_ALPHAS
+            if not any(f'alpha={float(alpha)}' in model_dir for alpha in selected_alphas):
+                continue               
+        # elif is_dp:
+        if model_dir is not None and isfile(njoin(model_dir, fname)):
+            model_dirs.append(model_dir)
+
+    # number of controlled variables
+    inference = pd.read_csv(njoin(model_dirs[0], fname))
+    seq_lens = inference.loc[:,'seq_len']
+    _, config, _, _ = load_model_files(model_dir)    
+    thresholds = []
+    ii = 6
+    while 2**ii <= config['seq_len']:
+        thresholds.append(2**ii)
+        ii += 1    
+
+    ensembles = 5  # figure out how to extract this
+
+    nrows, ncols = len(qk_shares), len(emb_ds)
+    figsize = (3*ncols,3*nrows)
+    fig, axs = plt.subplots(nrows,ncols,figsize=figsize,sharex=True,sharey=True)  # layout='constrained'
+    axs = matrixify_axs(axs, nrows, ncols)
+    label_axs(fig, axs)
+
+    metrics_all = np.zeros([2, len(selected_alphas)+1, len(qk_shares), 
+                                len(emb_ds), len(thresholds), ensembles])
+    metrics_all[:] = np.nan
+    for model_dir in model_dirs:
+        # load config
+        attn_setup, config, run_performance, train_setting = load_model_files(model_dir)
+        seed, model_name, qk_share = attn_setup['seed'], attn_setup['model_name'],\
+              attn_setup['qk_share']
+        hidden = config['hidden']
+        is_fns = model_name[-9:] == 'fns' + MODEL_SUFFIX
+        if is_fns:
+            alpha = attn_setup['alpha']
+            alpha_idx = selected_alphas.index(alpha)
+        else:
+            alpha_idx = len(selected_alphas)
+        #if isfile(njoin(model_dir, fname)):
+        inference = pd.read_csv(njoin(model_dir, fname))
+        for tidx, threshold in enumerate(thresholds):
+            if tidx == 0:
+                mask = inference["seq_len"] <= threshold
+            else:
+                mask = (thresholds[tidx-1] < inference["seq_len"]) & (inference["seq_len"] <= threshold)
+            metrics_all[:, alpha_idx, qk_shares.index(qk_share), list(emb_ds).index(hidden), tidx, seed] =\
+                [inference.loc[mask, "is_correct"].sum(), mask.sum()]                
+
+            # print(f'threshold = {threshold}')
+            # print([inference.loc[mask, "is_correct"].sum(), mask.sum()])
+
+    # accuracy is count / total
+    metric_plot = metrics_all[0,:] / metrics_all[1,:]
+    for sidx, didx, alpha_idx in\
+          product(range(len(qk_shares)), range(len(emb_ds)), range(len(selected_alphas)+1)):
+        is_fns = alpha_idx < len(selected_alphas)
+        if is_fns:
+            alpha = selected_alphas[alpha_idx]
+            color = HYP_CMAP(HYP_CNORM(alpha))
+        else:
+            color = OTHER_COLORS_DICT[other_type]
+
+        metric_mean = np.nanmean(metric_plot[alpha_idx,sidx,didx,:,:],-1)
+        metric_std = np.nanstd(metric_plot[alpha_idx,sidx,didx,:,:],-1)
+                            
+        axs[sidx,didx].plot(thresholds, metric_mean,
+                            markersize=MARKERSIZE,
+                            c=color, linestyle=LINESTYLE_DICT[fns_type])  
+
+        # error bars
+        # axs[sidx,didx].fill_between(controlled_vars,  metric_mean - metric_std, metric_mean + metric_std,
+        #                             color=color, alpha=1/2)                           
+
+    # legends
+    for alpha_idx, alpha in enumerate(selected_alphas):
+        c_hyp = HYP_CMAP(HYP_CNORM(alpha))   
+        axs[0,0].plot([], [], c=c_hyp, linestyle=LINESTYLE_DICT[fns_type],
+                    label=rf'$\alpha$ = {alpha}')    
+    axs[0,0].plot([],[], c=OTHER_COLORS_DICT[other_type],linestyle=LINESTYLE_DICT[other_type])                      
+                            
+    # log x-axis
+    axs[0,0].set_xscale('log')                            
+
+    for ncol in range(ncols):
+        axs[0,ncol].set_title(rf'$d = {emb_ds[ncol]}$')
+        axs[-1,ncol].set_xlabel('Sequence length')        
+        # tick labels
+        axs[-1,ncol].set_xticks(thresholds)
+        axs[-1,ncol].set_xticklabels(thresholds)
+        # remove minor ticks
+        axs[-1,ncol].xaxis.set_minor_formatter(NullFormatter()) 
+        axs[-1,ncol].xaxis.minorticks_off() 
+    for nrow in range(nrows):
+        axs[nrow,0].set_ylabel(r'$Q = K$' if qk_shares[nrow] else r'$Q \neq K$')
+    axs[0,0].legend(frameon=False)
+    
+    plt.tight_layout(rect=[0, 0, 0.93, 1])   
+
+    # abbreviate dataset_name
+    dataset = attn_setup['dataset_name']
+    dataset_name_short = ''
+    if isinstance(dataset,str):
+        if '_' in dataset:
+            for s in dataset.split('_'):
+                dataset_name_short += s[0]
+        else:
+            dataset_name_short += dataset
+
+    SAVE_DIR = njoin(FIGS_DIR, 'nlp-task')
+    if not isdir(SAVE_DIR): makedirs(SAVE_DIR)    
+    qkv = 'qqv' if qk_share else 'qkv'
+    fig_file = f'{n_layer}L-{metric}-len_inference.pdf'
+    plt.savefig(njoin(SAVE_DIR, fig_file))            
+    print(f'Figure saved in {njoin(SAVE_DIR, fig_file)}')  
 
 
 if __name__ == '__main__':

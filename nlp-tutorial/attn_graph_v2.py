@@ -14,7 +14,8 @@ from models.rdfnsformer import RDFNSformer
 from models.dpformer import DPformer
 from torchtext.data.utils import get_tokenizer
 from torchtext.vocab import GloVe
-from UTILS.data_utils import glove_create_examples
+from UTILS.data_utils import glove_create_examples, count_trailing_zeros
+from UTILS.dataloader import load_dataset_and_tokenizer
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 import networkx as nx
@@ -97,55 +98,16 @@ if __name__ == '__main__':
     # load dataset               
     #batch_size = int(train_setting.loc[0,'batch_size'])
     batch_size = 1    
-    if fix_embed:            
-        if pretrained_model_name == 'glove':
-            from constants import GLOVE_DIMS
-            for glove_dim in GLOVE_DIMS:
-                if glove_dim >= config['hidden']:
-                    break                
-            tokenizer = get_tokenizer("basic_english")
-            glove = GloVe(name='6B', dim=glove_dim)
-            vocab_size = len(glove.stoi)   
-            train_dataset = glove_create_examples(main_args, glove_dim, tokenizer, mode='train')
-            test_dataset = glove_create_examples(main_args, glove_dim, tokenizer, mode='test')  
 
-        elif pretrained_model_name == 'distilbert-base-uncased':
-            from transformers import AutoTokenizer, DistilBertModel
-            from UTILS.data_utils import create_examples
-            #tokenizer = AutoTokenizer.from_pretrained(f'distilbert/{args.pretrained_model_name}')
-            tokenizer = AutoTokenizer.from_pretrained(f'distilbert/distilbert-base-uncased')
-            pretrained_model = DistilBertModel.from_pretrained("distilbert-base-uncased")
-            vocab_size, pretrained_model_hidden =\
-                pretrained_model.embeddings.word_embeddings.weight.shape
-            pretrained_seq_len, _ = pretrained_model.embeddings.position_embeddings.weight.shape
-
-            train_dataset = create_examples(main_args, tokenizer, mode='train')
-            test_dataset = create_examples(main_args, tokenizer, mode='test')
-
-        elif pretrained_model_name == 'albert-base-v2':
-            from transformers import AlbertTokenizer, AlbertModel
-            from UTILS.data_utils import create_examples
-            tokenizer = AlbertTokenizer.from_pretrained('albert-base-v2')
-            pretrained_model = AlbertModel.from_pretrained("albert-base-v2")                
-            vocab_size, pretrained_model_hidden =\
-                pretrained_model.embeddings.word_embeddings.weight.shape
-            pretrained_seq_len, _ = pretrained_model.embeddings.position_embeddings.weight.shape
-
-            train_dataset = create_examples(main_args, tokenizer, mode='train')
-            test_dataset = create_examples(main_args, tokenizer, mode='test')    
-
-    else:
-        from tokenization import Tokenizer, PretrainedTokenizer
-        from UTILS.data_utils import create_examples
-        tokenizer = PretrainedTokenizer(pretrained_model='wiki.model', vocab_file='wiki.vocab')
-
-        train_dataset = create_examples(main_args, tokenizer, mode='train')
-        test_dataset = create_examples(main_args, tokenizer, mode='test')                    
-
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)  
-
-    # --------------------------------------------------------------
+    # ---------------------------------------- poor man's data loader ----------------------------------------
+    # tokenizer_name is hard set in main.py for the following case
+    if main_args.dataset_name == 'imdb' and not main_args.fix_embed:
+        main_args.tokenizer_name = 'sentencepiece'  
+        main_args.pretrained_model = 'wiki.model'
+        main_args.vocab_file = 'wiki.vocab'
+    tokenizer, train_loader, test_loader, train_size, eval_size, steps_per_epoch, num_classes =\
+        load_dataset_and_tokenizer(main_args, batch_size)          
+    # --------------------------------------------------------------------------------------------------------   
     
     is_fns = attn_setup['model_name'][-9:] == 'fns' + MODEL_SUFFIX 
     if not is_fns: # opdpformer
@@ -160,7 +122,7 @@ if __name__ == '__main__':
     # Random downsample
     np.random.seed(0)
     N_sample = 100
-    sample_idxs = np.random.choice(len(train_dataset), N_sample, replace=False)
+    sample_idxs = np.random.choice(len(train_loader.dataset), N_sample, replace=False)
     # Results
     X_lens = np.zeros(len(sample_idxs))
     spectrum = np.zeros((len(sample_idxs), config['max_len']))
@@ -169,10 +131,10 @@ if __name__ == '__main__':
     hop_matrices = np.zeros((len(sample_idxs), config['max_len'], config['max_len']))
     all_weights = np.zeros((len(sample_idxs), config['max_len'], config['max_len']))
     res_idx = 0
-    for ii in tqdm(range(len(train_dataset))):
+    for ii in tqdm(range(len(train_loader.dataset))):
         if ii not in sample_idxs:
             continue
-        X, Y = train_dataset[ii]
+        X, Y = train_loader.dataset[ii]
         X_len = config['max_len'] - count_trailing_zeros(X)
         if is_dp: # opdpformer
             _, attention_weights = model(X[None])  
@@ -218,7 +180,7 @@ if __name__ == '__main__':
     shortest_path[:, :] = hop_matrices[idx, :, :] # Shortest path    
     # locate the particular sequence
     seq_idx = sample_idxs[idx] # Sequence index
-    X, Y = train_dataset[seq_idx] # Should be the corresponding sequence    
+    X, Y = train_loader.dataset[seq_idx] # Should be the corresponding sequence    
 
     # ------ result_retrieval.py part 2 -----
     mean_spectral_gaps = []

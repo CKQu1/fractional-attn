@@ -20,17 +20,14 @@ if __name__ == '__main__':
     date_str = datetime.today().strftime('%Y-%m-%d')    
     batch_script_name = "batch_main.py"
 
-    # DICT_EXP_CONFIGS = {'exp1': train_exps(),                 # training
-    #                     'exp2': dynamic_inference_exps(),     # dynamic inference  
-    #                     'exp3': attn_graph_exps()            # attn graph from pretrained models
-    # }
-
-    exp_type = 'exp1'
-    if exp_type == 'exp1':
-        EXPS_TO_RUN = train_exps()
-    elif exp_type == 'exp2':
+    exp_type = 'exp2'
+    if exp_type == 'exp1':                           # train full-sized models
+        EXPS_TO_RUN = train_exps_full()
+    if exp_type == 'exp2':                           # train models of depth 1, 2 and 3
+        EXPS_TO_RUN = train_exps_hyperparam()        
+    elif exp_type == 'exp3':                         # dynamic inference
         EXPS_TO_RUN = dynamic_inference_exps()
-    elif exp_type == 'exp3':
+    elif exp_type == 'exp4':                         # attn graph from pretrained models
         EXPS_TO_RUN = attn_graph_exps()
     
     kwargss_all, script_name, q, ncpus, ngpus, select, walltime, mem, job_path, nstack = EXPS_TO_RUN

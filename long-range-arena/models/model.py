@@ -115,7 +115,7 @@ class DualClassifierHead(nn.Module):
             encoded = torch.sum(encoded*attention_mask.squeeze().unsqueeze(-1), dim=1)
         elif self.pooling_mode == 'FLATTEN':
             encoded = encoded.reshape((encoded.shape[0], -1)) # 2*B x (L*H)
-        elif self.pooling_mode == 'CLS':
+        elif self.pooling_mode == 'CLS':            
             encoded = encoded[:,0,:]
         else:
             raise NotImplementedError('Must pool.')
@@ -159,7 +159,7 @@ class RetrievalModel(nn.Module): # CHECK
         # Expand attention mask if CLS is prepended
         if self.pooling_mode == 'CLS':
             # B x 1 x 1 x L+1
-            attention_mask = torch.cat([torch.ones(attention_mask.shape[0], 1, 1, 1), attention_mask], dim=-1)
+            attention_mask = torch.cat([torch.ones(attention_mask.shape[0], 1, 1, 1).to(x.device), attention_mask], dim=-1)
         # Calculate encoder output for both inputs
         x, all_attentions = self.encoder(
             x, attention_mask=attention_mask, output_attentions=output_attentions

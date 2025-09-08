@@ -71,6 +71,8 @@ if __name__ == '__main__':
 
     t0 = time()
     # ----- set up -----
+    device = f'cuda' if torch.cuda.is_available() else "cpu"
+    print(f'device: {device} \n')
 
     # Get model setting from dir
     models_root = args.models_root.replace('\\','')
@@ -164,8 +166,9 @@ if __name__ == '__main__':
             manifold = attn_setup['manifold']      
 
             model = RDFNSformer(config, is_return_dist=True)     
+            model = model.to(device)
             checkpoint = njoin(model_dir, 'ckpt.pt')  # assuming model's is trained
-            ckpt = torch.load(checkpoint)
+            ckpt = torch.load(checkpoint, map_location=torch.device(device))
             model.load_state_dict(ckpt['model'])
             model.eval()
 
@@ -201,7 +204,7 @@ if __name__ == '__main__':
             alpha, bandwidth, a = attn_setup['alpha'], attn_setup['bandwidth'], attn_setup['a']
             d_intrinsic = attn_setup['d_intrinsic'] if alpha < 2 else None
 
-            outputs, attention_weights, g_dists = model(X[None])       
+            outputs, attention_weights, g_dists = model(X[None].to(device))       
              
             t3 = time()
             #print(f'Time 3: {t3 - t2}s')
@@ -481,12 +484,13 @@ if __name__ == '__main__':
                                 config_other['num_classes'] = 2
                             config_other['max_len'] = config_other['seq_len']
 
-                            model_other = DPformer(config_other, is_return_dist=True)     
+                            model_other = DPformer(config_other, is_return_dist=True)  
+                            model_other = model_other.to(device)   
                             checkpoint_other = njoin(model_dir_other, 'ckpt.pt')
-                            ckpt_other = torch.load(checkpoint_other)
+                            ckpt_other = torch.load(checkpoint_other, map_location=torch.device(device))
                             model_other.load_state_dict(ckpt_other['model'])
                             model_other.eval()    
-                            outputs_other, attention_weights_other, g_dists_other = model_other(X[None])   
+                            outputs_other, attention_weights_other, g_dists_other = model_other(X[None].to(device))   
                             g_dist_other = g_dists_other[0]              
                             attention_weight_other = attention_weights_other[0]
 

@@ -105,6 +105,7 @@ if __name__ == '__main__':
     parser.add_argument('--seed', default=0, type=int)    
     # parser.add_argument('--debug', default=False, type=bool)  # for debuggin
     parser.add_argument('--lr_scheduler_type', default='constant', type=str)
+    parser.add_argument('--binary_ratio', default=2/3, type=float)
     # parser.add_argument('--do_train', default=True, type=bool)
     # parser.add_argument('--do_eval', default=True, type=bool)
 
@@ -157,6 +158,7 @@ if __name__ == '__main__':
         args.pooling_model = None
     elif args.dataset_name == 'aan-classification':
         args.pooling_mode = 'CLS'
+        #args.pooling_mode = 'FLATTEN'
         args.interaction = 'NLI'        
     elif args.dataset_name == 'lra-cifar-classification':
         args.pooling_mode = 'MEAN'
@@ -184,8 +186,10 @@ if __name__ == '__main__':
         elif args.dataset_name == 'aan-classification':
             args.hidden_size = 128 # IMMUTABLE            
             args.num_heads = 4
-            args.num_encoder_layers = 4 # IMMUTABLE
-            args.intermediate_size = 512 # IMMUTABLE
+            # args.num_encoder_layers = 4 # IMMUTABLE
+            # args.intermediate_size = 512 # IMMUTABLE
+            args.num_encoder_layers = 2 # IMMUTABLE
+            args.intermediate_size = 128 # IMMUTABLE            
             args.max_iters = 5000 # Can probably change this
             args.eval_interval = 10
             args.log_interval = 10            
@@ -457,22 +461,24 @@ if __name__ == '__main__':
     lr_decay_iters = max_iters # should be ~= max_iters per Chinchilla
 
     # save train settings
-    train_settings = pd.DataFrame(columns=["max_lr", "min_lr", "batch_size", "beta1", "beta2",
-                                           "train_size", "eval_size", "steps_per_epoch",
-                                           "max_iters", "weight_decay", "grad_clip", "decay_lr",
-                                           "lr_scheduler_type",
-                                           "eval_interval", "log_interval", "eval_iters", "eval_only", "always_save_checkpoint",                         
-                                           "warmup_iters",
-                                           "device_name"
-                                           ], index=range(1))
-    train_settings.iloc[0] = [args.max_lr, args.min_lr, args.train_bs, args.beta1, args.beta2,
-                              train_size, eval_size, steps_per_epoch,
-                              max_iters, args.weight_decay, args.grad_clip, args.decay_lr,
-                              args.lr_scheduler_type,
-                              eval_interval, log_interval, args.eval_iters, args.eval_only, args.always_save_checkpoint,
-                              args.warmup_iters,
-                              device_name
-                              ]
+    col_names = ["max_lr", "min_lr", "batch_size", "beta1", "beta2",
+                 "train_size", "eval_size", "steps_per_epoch",
+                 "max_iters", "weight_decay", "grad_clip", "decay_lr",
+                 "lr_scheduler_type"]
+    row_data = [args.max_lr, args.min_lr, args.train_bs, args.beta1, args.beta2,
+                train_size, eval_size, steps_per_epoch,
+                max_iters, args.weight_decay, args.grad_clip, args.decay_lr,
+                args.lr_scheduler_type]                    
+    if args.lr_scheduler_type == 'binary':  # only case to add binary_ratio
+        col_names.append("binary_ratio")
+        row_data.append(args.binary_ratio)
+    col_names += ["eval_interval", "log_interval", "eval_iters", "eval_only", "always_save_checkpoint",                         
+                 "warmup_iters", "device_name"]
+    row_data += [eval_interval, log_interval, args.eval_iters, args.eval_only, args.always_save_checkpoint,
+                 args.warmup_iters, device_name]
+
+    train_settings = pd.DataFrame(columns=col_names, index=range(1))
+    train_settings.iloc[0] = row_data
     train_settings.to_csv(njoin(out_dir, "train_setting.csv")) 
 
     # ----- Message -----
@@ -587,12 +593,13 @@ if __name__ == '__main__':
     #fb_train_indices = fb_indices('train')
     if not is_wandb_log:
         metrics_ls = []    
+    model.train()
     while True:
         # determine and set the learning rate for this iteration
         if args.lr_scheduler_type == 'cosine':
             lr = get_lr(iter_num) if decay_lr else learning_rate
         elif args.lr_scheduler_type == 'binary':
-            if iter_num < max_iters * 2/3:
+            if iter_num < max_iters * args.binary_ratio:
                 lr = learning_rate
             else:
                 lr = min_lr  

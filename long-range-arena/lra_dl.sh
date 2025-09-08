@@ -5,7 +5,7 @@
 #PBS -o /scratch/uu69/cq5024/projects/fractional-attn/long-range-arena/.PBSout -e /scratch/uu69/cq5024/projects/fractional-attn/long-range-arena/.PBSout
 #PBS -l ncpus=1
 #PBS -l mem=64GB
-#PBS -l jobfs=60GB
+#PBS -l jobfs=60WGB
 #PBS -l storage=gdata/uu69+scratch/uu69
 #PBS -l walltime=04:00:00
 ##PBS -l walltime=00:02:00

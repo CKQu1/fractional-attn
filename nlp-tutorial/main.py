@@ -393,6 +393,7 @@ if __name__ == '__main__':
 
     #model = torch.nn.DataParallel(model)
     model.to(device)
+    # freeze pretrained embeddings during training
     if args.fix_embed:
         if config['pretrained_model_name'] == 'glove':
             if not torch.is_tensor(pretrained_word_embeddings):

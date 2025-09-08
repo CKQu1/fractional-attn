@@ -1,10 +1,11 @@
+import argparse
 import os
 from datetime import datetime
 from itertools import product
 from os.path import isfile, isdir
 from time import sleep
 from constants import DROOT, CLUSTER, PHYSICS_CONDA
-from mutils import njoin, get_instance, structural_model_root, str2bool
+from mutils import njoin, get_seed, structural_model_root, str2bool
 from qsub_parser import job_setup, qsub, add_common_kwargs
 """
 torchrun --nnodes=1 --nproc_per_node=2 ddp_main.py --max_iters=5 --eval_interval=5\
@@ -13,8 +14,12 @@ torchrun --nnodes=1 --nproc_per_node=2 ddp_main.py --max_iters=5 --eval_interval
 
 if __name__ == '__main__':
       
+    parser = argparse.ArgumentParser(description='batch_submit_main.py args')   
+    parser.add_argument('--is_qsub', type=str2bool, nargs='?', const=True, default=False) 
+    args = parser.parse_args()
+
     batch_script_name = "batch_main.py"
-    script_name = 'attn_graph_v2.py'      
+    script_name = 'main.py'      
     nstack = 1
     is_use_gpu = True
 
@@ -33,7 +38,7 @@ if __name__ == '__main__':
         ngpus, ncpus = 0, 1  # CPU                            
         #mem = '48GB' if n_layer >= 4 else '24GB'
         mem = '48GB'
-    walltime = '23:59:59'                                                              
+    walltime = '8:59:59'                                                              
     num_proc = ngpus if ngpus > 1 else ncpus
 
     # add or change datasets here        
@@ -44,24 +49,31 @@ if __name__ == '__main__':
     #seeds = list(range(5))        
     seeds = [0]
 
+    # architecture settings
     qk_shares = [False]
-    is_ops = [False]
+    is_ops = [False,True]
     manifolds = ['rd']
     alphas = [1.2, 2]
     is_rescale_dist = True
-    is_preln = False
+    #is_preln = False
+    is_preln = True
     
+    # train settings
+    lr_scheduler_type = 'binary'
+    if lr_scheduler_type == 'binary':
+        binary_ratio = 3/4
+
     # for n_layer in n_layers:
     ROOT = njoin(DROOT, 'exps_preLN' if is_preln else 'exps_postLN')
     job_path = njoin(ROOT, 'jobs_all')
 
     kwargss_all = []    
     for seed, dataset_name in product(seeds,DATASET_NAMES):
-        for qk_share, is_op in product(qk_share, is_ops):
+        for qk_share, is_op in product(qk_shares, is_ops):
             kwargss = []
 
             # ----- dpformer -----
-            kwargss.append({'model_name':'dpformer'})
+            # kwargss.append({'model_name':'dpformer'})
 
             # ----- fnsformer -----                                           
             for alpha in alphas:
@@ -87,10 +99,16 @@ if __name__ == '__main__':
                             }  
 
             if apples_to_apples:
-                common_kwargs['lr_scheduler_type'] = 'constant'
+                # common_kwargs['lr_scheduler_type'] = 'constant'
+                # #common_kwargs['max_lr'] = 2e-4
+                # common_kwargs['max_lr'] = 2.5e-4
+
+                common_kwargs['lr_scheduler_type'] = lr_scheduler_type
+                if lr_scheduler_type == 'binary':
+                    common_kwargs['binary_ratio'] = binary_ratio
                 #common_kwargs['max_lr'] = 2e-4
                 common_kwargs['max_lr'] = 2.5e-4
-                #common_kwargs['min_lr'] = 4e-4
+                common_kwargs['max_lr'] = 5e-5
 
                 common_kwargs['train_bs'] = common_kwargs['eval_bs'] = 128                     
 
@@ -102,9 +120,8 @@ if __name__ == '__main__':
             # model_root_dirname = structural_model_root(qk_share=qk_share, num_encoder_layers=common_kwargs['num_encoder_layers'],
             #                                            n_attn_heads=common_kwargs['num_attention_heads']
             #                                            )  
-            model_root_dirname = structural_model_root(qk_share=qk_share, 
-                                                        num_encoder_layers='default',
-                                                        n_attn_heads='default')                           
+            model_root_dirname = structural_model_root(qk_share=qk_share, num_encoder_layers='default',
+                                                       n_attn_heads='default')                           
             model_root = njoin(ROOT, 'config_qqv' if qk_share else 'config_qkv', 
                                 dataset_name, model_root_dirname)
         
@@ -117,6 +134,7 @@ if __name__ == '__main__':
             kwargss = add_common_kwargs(kwargss, common_kwargs)
             kwargss_all += kwargss
 
+    # ----- submit jobs -----
     print(f'Total jobs: {len(kwargss_all)} \n')      
 
     batch_kwargss_all = []
@@ -131,14 +149,17 @@ if __name__ == '__main__':
 
     commands, batch_script_names, pbs_array_trues, kwargs_qsubs =\
             job_setup(batch_script_name, batch_kwargss_all,
+                    q=q,
                     ncpus=ncpus,
                     ngpus=ngpus,
                     select=select, 
                     walltime=walltime,
-                    mem=mem,
+                    mem=mem,                    
                     job_path=job_path,
                     nstack=nstack,
                     cluster=CLUSTER)
     
-    for i in range(len(commands)):
-        qsub(f'{commands[i]} {batch_script_name[i]}', pbs_array_trues[i], path=job_path,**kwargs_qsubs[i])         
+    if args.is_qsub:
+        print(f'----- SUBMITTING ----- \n')
+        for i in range(len(commands)):
+            qsub(f'{commands[i]} {batch_script_names[i]}', pbs_array_trues[i], path=job_path, **kwargs_qsubs[i])             

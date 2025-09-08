@@ -10,7 +10,7 @@ FIGS_DIR = njoin(DROOT, 'figs_dir')
 SCRIPT_DIR = njoin(DROOT, 'submitted_scripts')
 
 #CLUSTER = 'ARTEMIS' if 'project' in DROOT else 'PHYSICS' if 'taiji1' in DROOT else 'FUDAN_BRAIN'
-if '/g/data' in DROOT:
+if 'uu69' in DROOT:
     CLUSTER = 'GADI' 
 elif 'taiji1' in DROOT:
     CLUSTER = 'PHYSICS'
@@ -20,7 +20,7 @@ else:
 
 # ----- GADI -----
 GADI_PROJECTS = ['uu69']
-GADI_SOURCE = '/g/data/uu69/venvs/fsa/'
+GADI_SOURCE = '/scratch/uu69/cq5024/myenvs/fsa/bin/activate'
 # -------------------
 
 # ----- PHYSICS -----

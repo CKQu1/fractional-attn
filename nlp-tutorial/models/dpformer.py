@@ -293,33 +293,20 @@ class DPformer(nn.Module):
         if not self.fix_embed:
             self.sinusoid_table = self.get_sinusoid_table(self.seq_len+1, self.d_model) # (seq_len+1, d_model)
             self.embedding = nn.Embedding(self.vocab_size, self.d_model)
+            #self.pos_embedding = nn.Embedding(self.vocab_size, self.d_model)
             self.pos_embedding = nn.Embedding.from_pretrained(self.sinusoid_table, freeze=True)
         elif (self.fix_embed and config['pretrained_model_name'] == 'glove'):
             self.sinusoid_table = self.get_sinusoid_table(self.seq_len+1, self.d_model) # (seq_len+1, d_model)
-            self.pos_embedding = nn.Embedding.from_pretrained(self.sinusoid_table, freeze=True)
-
-            # from torchtext.vocab import GloVe
-            # glove = GloVe(name='6B', dim=self.d_model)
-            # method 1
-            # self.embedding = nn.Embedding(self.vocab_size, self.d_model)            
-            # self.embedding.weight = nn.Parameter(glove.vectors) 
-            # method 2
-            #self.embedding = nn.Embedding.from_pretrained(nn.Parameter(glove.vectors), freeze=True)  
-            # method 3
-            #self.embedding.requires_grad_(False)          
-            #self.embedding.weight.requires_grad = False
-            # self.embedding = nn.Embedding.from_pretrained(GloVe(name='6B', dim=self.d_model).vectors, 
-            #                                                 freeze=True)                                                      
-
+            self.pos_embedding = nn.Embedding.from_pretrained(self.sinusoid_table, freeze=True)                                             
             # change method to executing this in main.py
             self.embedding = nn.Embedding(self.vocab_size, self.d_model)
-        elif (self.fix_embed and config['pretrained_model_name']\
-             in ['distilbert-base-uncased', 'albert-base-v2']):
+        elif (self.fix_embed and config['pretrained_model_name'] in\
+             ['distilbert-base-uncased', 'albert-base-v2']):
             self.pos_embedding = nn.Embedding(self.seq_len+1, self.d_model)
-            self.embedding = nn.Embedding(self.vocab_size, self.d_model)            
+            self.embedding = nn.Embedding(self.vocab_size, self.d_model)
         elif (self.fix_embed and config['pretrained_model_name'] == 'gpt2'):
             self.pos_embedding = nn.Embedding(self.seq_len+1, self.d_model)
-            self.embedding = nn.Embedding(self.vocab_size, self.d_model)                 
+            self.embedding = nn.Embedding(self.vocab_size, self.d_model)                  
 
         # layers        
         self.layers = nn.ModuleList([EncoderLayer(config, self.is_return_dist) for _ in range(self.n_layers)])

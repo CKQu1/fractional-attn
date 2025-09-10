@@ -1,6 +1,6 @@
 import matplotlib as mpl
 import os
-from mutils import njoin
+from UTILS.mutils import njoin
 from matplotlib.cm import get_cmap
 
 # ----- GENERAL -----
@@ -63,11 +63,15 @@ NAMES_DICT.update({'cifar10': 'CIFAR10', 'mnist': 'MNIST',
                    'train_loss': 'Train Loss', 'train_acc': 'Train Acc.'}
                    )               
 
-# color for model hyperparameters
-#HYP_CM = 'gist_ncar'
+# ----- COLORS -----
+
 HYP_CM = 'turbo'
 HYP_CMAP = get_cmap(HYP_CM)
 HYP_CNORM = mpl.colors.Normalize(vmin=1, vmax=2)
+
+OTHER_COLORS = ['m', 'dimgray']
+OTHER_COLORS_DICT = {'sink'+MODEL_SUFFIX: OTHER_COLORS[0], 'dp'+MODEL_SUFFIX: OTHER_COLORS[1],
+                     'opsink'+MODEL_SUFFIX: OTHER_COLORS[0], 'opdp'+MODEL_SUFFIX: OTHER_COLORS[1]}
 
 def HYP_TRANS(alpha):
     min_trans, max_trans = 0.5, 1

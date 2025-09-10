@@ -1,9 +1,9 @@
 import torch
 from torch import nn
-from vit_model.model_utils import NewGELUActivation, PatchEmbeddings, Embeddings, MLP
-from vit_model.att_dp import MultiHeadAttention  
-from vit_model.att_rdfns import RDFNSMultiHeadAttention
-from vit_model.att_spfns import SPFNSMultiHeadAttention
+from vit_models.model_utils import NewGELUActivation, PatchEmbeddings, Embeddings, MLP
+from vit_models.att_dp import MultiHeadAttention  
+from vit_models.att_rdfns import RDFNSMultiHeadAttention
+from vit_models.att_spfns import SPFNSMultiHeadAttention
 
 
 class Block(nn.Module):

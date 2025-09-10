@@ -5,7 +5,7 @@ import random
 from datetime import datetime
 from os.path import isdir, isfile
 from constants import *
-from mutils import njoin
+from UTILS.mutils import njoin
 
 def qsub(command, pbs_array_data, **kwargs):
     global pbs_array_data_chunks

@@ -75,6 +75,7 @@ if __name__ == '__main__':
     parser.add_argument('--beta2', default=0.95, type=float)       
 
     parser.add_argument('--lr_scheduler_type', default='constant', type=str, help='constant | cosine | binary')     
+    parser.add_argument('--binary_ratio', default=2/3, type=float)
 
     # log settings
     parser.add_argument('--epochs', default=None)
@@ -308,10 +309,15 @@ if __name__ == '__main__':
     #print(f'backend = {backend}')
     print('-'*25 + '\n')           
 
-    #torch.manual_seed(1337 + seed_offset)
-    #torch.manual_seed(1337 + args.seed)
+    ##### SET SEED #####
     torch.manual_seed(args.seed)
     if torch.cuda.is_available():
+        ##### GPU SET SEED #####
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False        
+        torch.cuda.manual_seed(args.seed)
+        torch.cuda.manual_seed_all(args.seed)
+
         torch.backends.cuda.matmul.allow_tf32 = True # allow tf32 on matmul
         torch.backends.cudnn.allow_tf32 = True # allow tf32 on cudnn
     # else:
@@ -390,7 +396,7 @@ if __name__ == '__main__':
     train_size = len(trainloader.dataset)
     eval_size = len(testloader.dataset)                      
     steps_per_epoch = len(trainloader)
-
+    
     epochs = args.epochs
     if epochs is not None:  
         epochs = int(epochs)
@@ -405,22 +411,23 @@ if __name__ == '__main__':
         eval_iters = args.eval_iters
 
     # save train settings
-    train_settings = pd.DataFrame(columns=["max_lr", "min_lr", "batch_size", "beta1", "beta2",
-                                            "train_size", "eval_size", "steps_per_epoch",
-                                            "max_iters", "weight_decay", "grad_clip", "decay_lr",
-                                            "lr_scheduler_type",
-                                            "eval_interval", "log_interval", "eval_iters", "eval_only", "always_save_checkpoint",                         
-                                            "warmup_iters",
-                                            "device_name"
-                                            ], index=range(1))
-    train_settings.iloc[0] = [args.max_lr, args.min_lr, args.train_bs, args.beta1, args.beta2,
-                              train_size, eval_size, steps_per_epoch,
-                              max_iters, args.weight_decay, args.grad_clip, args.decay_lr,
-                              args.lr_scheduler_type,
-                              eval_interval, log_interval, eval_iters, args.eval_only, args.always_save_checkpoint,
-                              args.warmup_iters,
-                              device_name
-                              ]         
+    col_names = ["max_lr", "min_lr", "batch_size", "beta1", "beta2",
+                "train_size", "eval_size", "steps_per_epoch",
+                "max_iters", "weight_decay", "grad_clip", "decay_lr",
+                "lr_scheduler_type"]
+    row_data = [args.max_lr, args.min_lr, args.train_bs, args.beta1, args.beta2,
+                train_size, eval_size, steps_per_epoch,
+                max_iters, args.weight_decay, args.grad_clip, args.decay_lr,
+                args.lr_scheduler_type]
+    if args.lr_scheduler_type == 'binary':  # only case to add binary_ratio
+        col_names.append("binary_ratio")
+        row_data.append(args.binary_ratio)        
+    col_names += ["eval_interval", "log_interval", "eval_iters", "eval_only", "always_save_checkpoint",                         
+                 "warmup_iters", "device_name"]        
+    row_data += [eval_interval, log_interval, eval_iters, args.eval_only, args.always_save_checkpoint,
+                 args.warmup_iters, device_name]                 
+    train_settings = pd.DataFrame(columns=col_names, index=range(1))
+    train_settings.iloc[0] = row_data      
 
     def get_batch(split):
         if split == 'train':
@@ -458,21 +465,28 @@ if __name__ == '__main__':
         # init a new model from scratch
         print(f'Initializing a new {model_name} from scratch \n')
 
-        if model_name == 'dpvit':
-            from vit_models.vit import ViTForClassfication
-            model = ViTForClassfication(config)       
-        elif model_name == 'rdfnsvit':
-            from vit_models.rdfns_vit import RDFNSViTForClassfication
-            model = RDFNSViTForClassfication(config)               
-        elif model_name == 'spfnsvit':
-            from vit_models.spfns_vit import SPFNSViTForClassfication
-            model = SPFNSViTForClassfication(config)                      
-        elif model_name == 'sinkvit':
-            from vit_pytorch.sink_vit import SINKViTForClassfication
-            model = SINKViTForClassfication(config)      
-        elif model_name == 'opsinkvit':
-            from vit_pytorch.opsink_vit import OPSINKViTForClassfication
-            model = OPSINKViTForClassfication(config)    
+        # pass in model_name without 'op' 
+        config['model_name'] = model_name
+
+        # current only supports dp, rdfns, spfns
+        from vit_models.model import ViTForClassfication
+        model = ViTForClassfication(config) 
+
+        # if model_name == 'dpvit':
+        #     from vit_models.vit import ViTForClassfication
+        #     model = ViTForClassfication(config)       
+        # elif model_name == 'rdfnsvit':
+        #     from vit_models.rdfns_vit import RDFNSViTForClassfication
+        #     model = RDFNSViTForClassfication(config)               
+        # elif model_name == 'spfnsvit':
+        #     from vit_models.spfns_vit import SPFNSViTForClassfication
+        #     model = SPFNSViTForClassfication(config)                      
+        # elif model_name == 'sinkvit':
+        #     from vit_pytorch.sink_vit import SINKViTForClassfication
+        #     model = SINKViTForClassfication(config)      
+        # elif model_name == 'opsinkvit':
+        #     from vit_pytorch.opsink_vit import OPSINKViTForClassfication
+        #     model = OPSINKViTForClassfication(config)    
 
         model_name = 'op' + model_name if args.is_op else model_name
         attn_setup['model_name'] = model_name
@@ -614,6 +628,7 @@ if __name__ == '__main__':
             epoch_val_accuracy += acc / len(testloader)
             epoch_val_loss += val_loss / len(testloader)  
 
+        model.train()
         return epoch_val_accuracy, epoch_val_loss
 
     # learning rate decay scheduler (cosine with warmup)    
@@ -652,30 +667,25 @@ if __name__ == '__main__':
     dt = None
     iter_num = 0
     metric_cols = ['iter', 'lr', 'train_loss', 'val_loss', 'train_acc', 'val_acc','secs_per_eval']
-    #for epoch in range(epochs):
+
+    model.train()    
     for epoch in tqdm(range(epochs)):
         print('epoch: ', epoch)
         epoch_loss = 0
-        epoch_accuracy = 0
+        epoch_accuracy = 0      
 
-        if epoch == 16:  # delete
-            if args.detect_anomaly is True:
-                torch.autograd.set_detect_anomaly(True)            
-
-        #for data, label in trainloader:
-        #for batch in tqdm(trainloader):
         for batch in trainloader:
 
             if args.dataset_name in ['cifar10', 'mnist']:
                 data, label = batch
             else:
                 data, label, _ = batch
+            # for dataset with more than one channel like cifar10
             if data.ndim == 3:
                 data = data[:,None]                
             data = data.to(device)
             label = label.to(device)
 
-            #output = model(data)
             logits, _ = model(data)
             loss = loss_fn(logits, label)
 
@@ -729,19 +739,20 @@ if __name__ == '__main__':
             df = pd.DataFrame(metrics_ls, columns=metric_cols)
             df.to_csv(njoin(out_dir, '_run_performance.csv'))               
 
-        if epoch_val_loss < best_val_loss or always_save_checkpoint:
-            best_val_loss = epoch_val_loss
-            if iter_num > 0:
-                checkpoint = {
-                    'model': raw_model.state_dict(),
-                    'optimizer': optimizer.state_dict(),
-                    #'model_args': model_args,
-                    'iter_num': iter_num,
-                    'best_val_loss': best_val_loss,
-                    'config': config,
-                }
-                print(f"saving checkpoint to {out_dir}")
-                torch.save(checkpoint, os.path.join(out_dir, 'ckpt.pt'))
+        # save model with lowest val_loss
+        # if epoch_val_loss < best_val_loss or always_save_checkpoint:
+        #     best_val_loss = epoch_val_loss            
+        #     if iter_num > 0:
+        #         checkpoint = {
+        #             'model': raw_model.state_dict(),
+        #             'optimizer': optimizer.state_dict(),
+        #             #'model_args': model_args,
+        #             'iter_num': iter_num,
+        #             'best_val_loss': best_val_loss,
+        #             'config': config,
+        #         }
+        #         print(f"saving checkpoint to {out_dir}")
+        #         torch.save(checkpoint, os.path.join(out_dir, 'ckpt.pt'))
 
         print(
             f"Epoch : {epoch+1} - loss : {epoch_loss:.4f} - acc: {epoch_accuracy:.4f} - val_loss : {epoch_val_loss:.4f} - val_acc: {epoch_val_accuracy:.4f}\n"
@@ -751,6 +762,15 @@ if __name__ == '__main__':
         t1 = time.time()
         dt = t1 - t0
         t0 = t1
+
+    # ----- save model at the end -----
+    checkpoint = {
+        'model': raw_model.state_dict(),
+        'optimizer': optimizer.state_dict(),
+        'config': config,
+    }
+    print(f"saving checkpoint to {out_dir}")
+    torch.save(checkpoint, os.path.join(out_dir, 'ckpt.pt'))    
 
     if not wandb_log:
         if isfile(njoin(out_dir, '_run_performance.csv')):

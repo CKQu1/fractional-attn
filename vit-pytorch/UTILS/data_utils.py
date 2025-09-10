@@ -4,7 +4,7 @@ import torchvision
 import torchvision.transforms as transforms
 
 from constants import *
-from mutils import njoin
+from UTILS.mutils import njoin
 
 
 def prepare_cifar10_data(batch_size=4, num_workers=2, train_sample_size=None, test_sample_size=None):

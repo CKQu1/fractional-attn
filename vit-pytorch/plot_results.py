@@ -93,7 +93,7 @@ def final_epoch_stats(run_perf_all, metric):
 
 
 # Plots average of metrics over ensembles (assumption 1 and 2 possibilities for full-sized models)
-def phase_ensembles(models_root, selected_dataset='imdb',
+def phase_ensembles(models_root, selected_dataset='cifar10',
                     fns_manifold='rd', qk_share=False, selected_alphas='1.2,2',
                     metrics='val_acc,val_loss',
                     is_ops = [False,True],  # [False,True]
@@ -101,7 +101,7 @@ def phase_ensembles(models_root, selected_dataset='imdb',
     pd.set_option('display.max_rows', None)
     pd.set_option('display.max_columns', None)
 
-    global qk_shares, summary_stats
+    global qk_shares, summary_stats, model_info
 
     assert fns_manifold in ['sp', 'rd', 'v2_rd'], f'{fns_manifold} does not exist!'
     qk_share, cbar_separate, display = map(str2bool, (qk_share, cbar_separate, display))
@@ -202,7 +202,7 @@ def phase_ensembles(models_root, selected_dataset='imdb',
                     model_info = model_info[condition]
                 # get aggregated training curves
                 if model_info.shape[0] > 0:
-                    seeds, qk_share = (model_info[k].item() for k in ('seeds', 'qk_share'))                
+                    seeds, qk_share = (model_info[k].item() for k in ('instances', 'qk_share'))                
                     epochs, run_perf_all = load_seed_runs(model_info['model_dir'].item(), seeds, metric)   
                 else:
                     continue

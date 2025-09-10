@@ -9,14 +9,18 @@ DROOT = njoin(RT, '.droot')
 FIGS_DIR = njoin(DROOT, 'figs_dir')
 SCRIPT_DIR = njoin(DROOT, 'submitted_scripts')
 
-CLUSTER = 'ARTEMIS' if 'project' in DROOT else 'PHYSICS' if 'taiji1' in DROOT else 'FUDAN_BRAIN'
+# CLUSTER = 'ARTEMIS' if 'project' in DROOT else 'PHYSICS' if 'taiji1' in DROOT else 'FUDAN_BRAIN'
+if 'uu69' in DROOT:
+    CLUSTER = 'GADI' 
+elif 'taiji1' in DROOT:
+    CLUSTER = 'PHYSICS'
+else:
+    CLUSTER = None
 # -------------------
 
-# ----- ARTEMIS -----
-PROJECTS = ['phys_DL','PDLAI','dnn_maths','dyson','vortex_dl','frac_attn', 'ddl']
-BPATH = njoin('/project')  # path for binding to singularity container
-#SPATH = njoin('/project/frac_attn/built_containers/FaContainer_v5.sif')  # singularity container path
-SPATH = njoin('/project/frac_attn/built_containers/pydl.img')
+# ----- GADI -----
+GADI_PROJECTS = ['uu69']
+GADI_SOURCE = '/scratch/uu69/cq5024/myenvs/fsa/bin/activate'
 # -------------------
 
 # ----- PHYSICS -----
@@ -27,6 +31,13 @@ PHYSICS_CONDA = '/taiji1/chqu7424/myenvs/pydl' if 'chqu7424' in RT else '~/conda
 
 # ----- FUDAN-BRAIN -----
 FUDAN_CONDA = 'frac_attn'
+# -------------------
+
+# ----- ARTEMIS -----
+PROJECTS = ['phys_DL','PDLAI','dnn_maths','dyson','vortex_dl','frac_attn', 'ddl']
+BPATH = njoin('/project')  # path for binding to singularity container
+#SPATH = njoin('/project/frac_attn/built_containers/FaContainer_v5.sif')  # singularity container path
+SPATH = njoin('/project/frac_attn/built_containers/pydl.img')
 # -------------------
 
 # ----- MODELS -----

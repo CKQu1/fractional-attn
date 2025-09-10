@@ -31,11 +31,19 @@ def str2ls(s):
         else: 
             return [s]
 
-def get_instance(dir, *args):  # for enumerating each instance of training
-    #global start, end, instances, s_part
+def find_subdirs(root_dir, matching_str):
+    matches = []
+    for dirpath, dirnames, _ in os.walk(root_dir):
+        for dirname in dirnames:
+            if matching_str in dirname.lower() and dirpath not in matches:
+                matches.append(dirpath)
+    return matches
+
+def get_seed(dir, *args):  # for enumerating each instance of training
+    #global start, end, seeds, s_part
 
     if isdir(dir):
-        instances = []
+        seeds = []
         dirnames = next(os.walk(dir))[1]
         if len(dirnames) > 0:
             for dirname in dirnames:        
@@ -49,17 +57,17 @@ def get_instance(dir, *args):  # for enumerating each instance of training
                     #for s_part in dirname.split(s):
                     assert "model=" in dirname, f'str model= not in {dirname}'
                     start = dirname.find("model=")
-                    instances.append(int(dirname[start+6:]))
+                    seeds.append(int(dirname[start+6:]))
                     #except:
                     #    pass       
-            #print(instances)  # delete
-            return max(instances) + 1 if len(instances) > 0 else 0
+            #print(seeds)  # delete
+            return max(seeds) + 1 if len(seeds) > 0 else 0
         else:
             return 0
     else:
         return 0
 
-# create model_dir which determines the instance for the specific model/training setting
+# create model_dir which determines the seed for the specific model/training setting
 def create_model_dir(model_root_dir, **kwargs):
     model_name = kwargs.get('model_name', 'fnsvit')    
     dataset_name = kwargs.get('dataset_name', 'cifar10')
@@ -89,8 +97,8 @@ def create_model_dir(model_root_dir, **kwargs):
         dirname += f'-n_it={n_it}-eps={bandwidth}'
 
     models_dir = njoin(model_root_dir, dirname)    
-    instance = kwargs.get('instance')
-    model_dir = njoin(models_dir, f'model={instance}')        
+    seed = kwargs.get('seed')
+    model_dir = njoin(models_dir, f'model={seed}')        
        
     return models_dir, model_dir      
 
@@ -152,21 +160,21 @@ def collect_model_dirs(models_root, **kwargs):
         cols_config = ['num_attention_heads', 'num_hidden_layers', 'patch_size', 'hidden_size', 'is_op',]
         cols_train = ['steps_per_epoch']
         #cols_train = []
-        cols_other = ['ensembles', 'instances', 'model_dir']
+        cols_other = ['ensembles', 'seeds', 'model_dir']
         cols +=  cols_attn + metrics + cols_config + cols_train + cols_other
 
         df = pd.DataFrame(columns=cols)
         model_dir_dct = {}
         for model_dir in cur_model_dirs:
             ensembles = 0
-            instances = []            
-            for instance_dir in os.listdir(model_dir):
-                if 'model=' in instance_dir:
-                    fpath = njoin(model_dir, instance_dir)
-                    instance = int(instance_dir.split('=')[-1])
+            seeds = []            
+            for seed_dir in os.listdir(model_dir):
+                if 'model=' in seed_dir:
+                    fpath = njoin(model_dir, seed_dir)
+                    seed = int(seed_dir.split('=')[-1])
                     if isfile(njoin(fpath, 'train_setting.csv')):
                         ensembles += 1
-                        instances.append(instance)  
+                        seeds.append(seed)  
                         if isfile(njoin(fpath, 'run_performance.csv')):
                             run_perf = pd.read_csv(njoin(fpath, 'run_performance.csv'), index_col=False)                         
                             for metric in metrics:
@@ -210,6 +218,25 @@ def collect_model_dirs(models_root, **kwargs):
         DCT_ALL[model_name] = df
 
     return DCT_ALL
+
+def load_model_files(model_dir):
+    train_setting = pd.read_csv(njoin(model_dir, 'train_setting.csv'))
+    if os.path.isdir(njoin(model_dir, 'run_performance.csv')):
+        run_performance = pd.read_csv(njoin(model_dir, 'run_performance.csv'))
+    else:
+        run_performance = None
+    if isfile(njoin(model_dir, 'train_setting.csv')):
+        train_setting = pd.read_csv(njoin(model_dir, 'train_setting.csv'))
+    else:
+        train_setting = None
+    f = open(njoin(model_dir,'config.json'))
+    config = json.load(f)
+    f.close()
+    f = open(njoin(model_dir,'attn_setup.json'))
+    attn_setup = json.load(f)
+    f.close()      
+
+    return attn_setup, config, run_performance, train_setting 
 
 # -------------------- Main utils --------------------        
 

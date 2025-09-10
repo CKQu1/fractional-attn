@@ -20,9 +20,9 @@ from torch.distributed import init_process_group, destroy_process_group
 #from model import GPTConfig, GPT
 
 from constants import *
-from mutils import njoin, create_model_dir, convert_train_history, structural_model_root
-from mutils import str2bool, str2ls
-from data_utils import prepare_cifar10_data, prepare_mnist_data
+from UTILS.mutils import njoin, create_model_dir, convert_train_history, structural_model_root
+from UTILS.mutils import str2bool, str2ls
+from UTILS.data_utils import prepare_cifar10_data, prepare_mnist_data
 
 from torch.optim import AdamW
 
@@ -195,7 +195,7 @@ if __name__ == '__main__':
         "is_preln": args.is_preln
     }
 
-    attn_setup = {'qk_share': args.qk_share, 'qkv_bias': args.qkv_bias, 'instance': args.seed,
+    attn_setup = {'qk_share': args.qk_share, 'qkv_bias': args.qkv_bias, 'seed': args.seed,
                   'is_op': args.is_op, 'is_preln': args.is_preln}    
     attn_setup['dataset_name'] = args.dataset_name    
     if 'fns' in model_name:

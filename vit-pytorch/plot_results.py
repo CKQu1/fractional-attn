@@ -1,1290 +1,256 @@
-import matplotlib as mpl
+import json
+import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcl
+import math
 import numpy as np
 import pandas as pd
-import json
+import re
 
 from ast import literal_eval
+from itertools import product
 from matplotlib.transforms import ScaledTranslation
+from matplotlib.ticker import NullFormatter
 from os import makedirs
 from os.path import isdir, isfile
+from pathlib import Path
 from string import ascii_lowercase
 from time import time
 from tqdm import tqdm
 from constants import *
-from mutils import njoin, str2bool, str2ls, create_model_dir, convert_train_history
-from mutils import collect_model_dirs
+from UTILS.mutils import njoin, str2bool, str2ls, create_model_dir, convert_train_history
+from UTILS.mutils import collect_model_dirs, find_subdirs, load_model_files
+from UTILS.figure_utils import matrixify_axs, label_axs
 
-import warnings
-warnings.filterwarnings("ignore", category=DeprecationWarning) 
+matplotlib.use("Agg")
 
 # ---------- Global plot settings ----------
-font_type = {'family' : 'sans-serif'}
-plt.rc('font', **font_type)
-plt.rc('legend',fontsize=7)
-#linestyles = ['solid', 'densely dashed', 'dashed', 'densely dotted', 'dotted']
-#linestyles = ['-', '--', '-.', ':']
-linestyles = ['-', '--', ':']
+# font_type = {'family' : 'sans-serif'}
+# plt.rc('font', **font_type)
+# plt.rc('legend',fontsize=7)
+linestyles = ['-', '--', '-.', ':']
+#linestyles = ['-', '--', ':']
 markers = ['s', 'D', 'd', 'v', '^', 'o', '.']
 markersize = '3'
 colors = list(mcl.TABLEAU_COLORS.keys())
-OTHER_COLORS = ['m', 'dimgray']
-OTHER_COLORS_DICT = {'sink'+MODEL_SUFFIX: OTHER_COLORS[0], 'dp'+MODEL_SUFFIX: OTHER_COLORS[1],
-                     'opsink'+MODEL_SUFFIX: OTHER_COLORS[0], 'opdp'+MODEL_SUFFIX: OTHER_COLORS[1]}
 # ------------------------------------------
 
-
-# Ablation study on alphas
-def fns_ensembles(models_roots, fns_type='spopfnsvit', metrics='val_acc',
-                  is_single=False, cbar_separate=True, display=False):
-    global df, df_setting, df_filtered, fig_file, axs
-    global model_dirs, subpath, dirnames, model_root_dirs
-    global model_combo, model_combos
-    global alphas, epss, DCT_ALL, model_info, model_df, run_perf, dataset, df_model
-    global model_types, model_info, epochs, ensembles
-    global axs
-
-    models_roots = str2ls(models_roots)
-    model_root_dirs = models_roots
-    print(model_root_dirs)
-
-    metrics = str2ls(metrics)    
-    is_single = str2bool(is_single)
-    cbar_separate = str2bool(cbar_separate)
-    display = str2bool(display)    
-    assert len(metrics) == 1
-
-    suffix = fns_type.split('fns')[-1]
-    DCT_ALL = collect_model_dirs(model_root_dirs[0], suffix=suffix)
-    model_types = list(DCT_ALL.keys())
-    for model_type in model_types:
-        if 'fns' in model_type:
-            df_model = DCT_ALL[model_type].dropna(subset='alpha')
-            df_model.reset_index(drop=True, inplace=True)
-            break
-
-    # ----- general settings -----
-    num_attention_heads, num_hidden_layers, hidden_size = df_model.loc[0,['num_attention_heads', 'num_hidden_layers', 'hidden_size']]
-    dataset = df_model.loc[0,'dataset_name']
-
-    # ----- fns setting -----
-    alphas = sorted(df_model.loc[:,'alpha'].unique())[::-1]  # large to small
-    epss = sorted(df_model.loc[:,'bandwidth'].unique())    
-
-    if is_single:
-        nrows = 1
-        ncols = len(model_root_dirs)
-    else:
-        nrows = len(model_root_dirs)    
-        ncols = len(epss)
-
-    #ratio = 3 / 2 * ncols
-    ratio = 3
-    figsize = (ratio*ncols,ratio*nrows)
-    fig, axs = plt.subplots(nrows,ncols,figsize=figsize,sharex=True,sharey=True)
-    
-    if nrows == 1:
-        axs = np.expand_dims(axs, axis=0)
-        if ncols == 1:
-            axs = np.expand_dims(axs, axis=1)
-    elif nrows > 1 and ncols == 1:
-        axs = np.expand_dims(axs, axis=1)     
-    
-    total_figs = 0
-    model_types_plotted = []
-    for row_idx, models_root in enumerate(models_roots):
-        DCT_ALL = collect_model_dirs(models_root)
-        if DCT_ALL == {}:
-            continue
-        for col_idx, eps in tqdm(enumerate(epss)):
-            ax = axs[row_idx, col_idx]
-
-            model_type = fns_type
-            if model_type not in model_types_plotted:
-                model_types_plotted.append(model_type)
-
-            model_df = DCT_ALL[model_type].dropna(subset='alpha')
-            model_df.reset_index(drop=True, inplace=True)            
-            lstyle_model = LINESTYLE_DICT[model_type]
-
-            # -------------------- FNS --------------------
-            for alpha in alphas:
-                c_hyp = HYP_CMAP(HYP_CNORM(alpha))  # hyperparameter color  
-
-                model_info = model_df[(model_df['alpha']==alpha) & (model_df['bandwidth']==eps) & (model_df['ensembles']>0)]
-                if len(model_info.index) == 0:
-                    continue
-
-                instances = model_info['instances'].item()
-                qk_share = model_info['qk_share'].item()
-                
-                model_instance_path = njoin(model_info['model_dir'].item(), f'model={instances[0]}')
-                if isfile(njoin(model_instance_path, 'run_performance.csv')): 
-                    run_perf = pd.read_csv(njoin(model_instance_path, 'run_performance.csv'))
-                if isfile(njoin(model_instance_path, '_run_performance.csv')): 
-                    run_perf = pd.read_csv(njoin(model_instance_path, '_run_performance.csv'))
-
-                if 'acc' in metrics[0]:
-                    run_perf.loc[:,metrics[0]] *= 100     
-                epochs = run_perf.loc[:,'iter'].astype(int) // int(model_info['steps_per_epoch'].item())
-                #epochs = run_perf.loc[:,'epoch']
-
-                #trans = 1 if qk_share else 0.5
-                trans = HYP_TRANS(alpha)
-                if (row_idx,col_idx) == (0,0):
-                    im = ax.plot(epochs, run_perf.loc[:,metrics[0]], linestyle=lstyle_model, c=c_hyp, alpha=trans)
-                                        #,marker=model_markers[model_name], markersize=markersize,
-                                        #,label=model_legend)    
-                else:
-                    ax.plot(epochs, run_perf.loc[:,metrics[0]], linestyle=lstyle_model, c=c_hyp, alpha=trans)
-                                        #,marker=model_markers[model_name], markersize=markersize,
-                                        #,label=model_legend)                                    
-
-                # if row_idx == nrows - 1:
-                #     if len(epochs) > 50:
-                #         ax.set_xticks(epochs[49::50])
-                #         ax.set_xticklabels(epochs[49::50])
-                #     else:
-                #         ax.set_xticks(epochs)
-                #         ax.set_xticklabels(epochs)
-                # if row_idx != nrows - 1 and nrows != 1:
-                #     ax.set_xticklabels([])                
-
-                # col labels (bandwidth)
-                if row_idx == 0:
-                    ax.set_title(rf'$\varepsilon = {{{eps}}}$')
-                # row labels (Q = K)
-                if col_idx == ncols - 1:
-                    title = r'$Q \neq K$' if not qk_share else r'$Q = K$'               
-                    ax.text(1.2, 0.5, title, transform=(
-                                    ax.transAxes + ScaledTranslation(-20/72, +7/72, fig.dpi_scale_trans)),
-                                    va='center', rotation='vertical')  # fontsize='medium',                 
-
-                # subplot labels
-                ax.text(
-                    0.0, 1.0, f'({ascii_lowercase[total_figs]})', transform=(
-                        ax.transAxes + ScaledTranslation(-20/72, +7/72, fig.dpi_scale_trans)),
-                    va='bottom', fontfamily='sans-serif')  # fontsize='medium',              
-
-            if eps == 1:
-            #if col_idx == 0:
-
-            # -------------------- SINK --------------------                
-                model_type = 'sink' + suffix
-                if model_type in model_types:
-                    model_df = DCT_ALL[model_type]
-                    lstyle_model = LINESTYLE_DICT[model_type]
-
-                    model_info = model_df.iloc[0,:]
-                    ensembles = model_info['ensembles']
-                    instances = model_info['instances']
-                    qk_share = model_info['qk_share']
-                    if ensembles > 0:
-                        model_instance_path = njoin(model_info['model_dir'], f'model={instances[0]}')
-                        if isfile(njoin(model_instance_path, 'run_performance.csv')): 
-                            run_perf = pd.read_csv(njoin(model_instance_path, 'run_performance.csv'))
-                        if isfile(njoin(model_instance_path, '_run_performance.csv')): 
-                            run_perf = pd.read_csv(njoin(model_instance_path, '_run_performance.csv'))
-
-                        if 'acc' in metrics[0]:
-                            run_perf.loc[:,metrics[0]] *= 100     
-                        epochs = run_perf.loc[:,'iter'].astype(int) // int(model_info['steps_per_epoch'])
-
-                        trans = 1
-                        ax.plot(epochs, run_perf.loc[:,metrics[0]], linestyle=lstyle_model, c=OTHER_COLORS[0], alpha=trans)    
-
-                    if model_type not in model_types_plotted:
-                        model_types_plotted.append(model_type)
-
-            # -------------------- DP --------------------
-
-                model_type = 'dp' + suffix
-                if model_type in model_types:       
-                    model_df = DCT_ALL[model_type]
-                    lstyle_model = LINESTYLE_DICT[model_type]
-
-                    model_info = model_df.iloc[0,:]
-                    ensembles = model_info['ensembles']
-                    instances = model_info['instances']
-                    qk_share = model_info['qk_share']
-                    if ensembles > 0:
-                        model_instance_path = njoin(model_info['model_dir'], f'model={instances[0]}')
-                        if isfile(njoin(model_instance_path, 'run_performance.csv')): 
-                            run_perf = pd.read_csv(njoin(model_instance_path, 'run_performance.csv'))
-                        if isfile(njoin(model_instance_path, '_run_performance.csv')): 
-                            run_perf = pd.read_csv(njoin(model_instance_path, '_run_performance.csv'))                        
-
-                        if 'acc' in metrics[0]:
-                            run_perf.loc[:,metrics[0]] *= 100     
-                        epochs = run_perf.loc[:,'iter'].astype(int) // int(model_info['steps_per_epoch'])
-
-                        trans = 1
-                        ax.plot(epochs, run_perf.loc[:,metrics[0]], linestyle=lstyle_model, c=OTHER_COLORS[1], alpha=trans)                                            
-                
-                    if model_type not in model_types_plotted:
-                        model_types_plotted.append(model_type)
-
-            ax.grid()
-            total_figs += 1
-
-    # legend
-    # for alpha in alphas:
-    #     axs[0,0].plot([], [], c=HYP_CMAP(HYP_CNORM(alpha)), linestyle='solid', 
-    #                 label=rf'$\alpha$ = {alpha}')    
-    for model_type in model_types_plotted:   
-        if 'fns' in model_type:
-            color = 'k'
-        elif 'sink' in model_type:
-            color = OTHER_COLORS[0]
-        elif 'dp' in model_type:
-            color = OTHER_COLORS[1]
-        axs[0,0].plot([], [], c=color, linestyle=LINESTYLE_DICT[model_type], 
-                    label=NAMES_DICT[model_type])
-
-    ncol_legend = 2 if len(model_types_plotted) == 3 else 1
-    if len(model_types_plotted) >= 2:
-        #axs[0,0].legend(loc='best', ncol=ncol_legend, frameon=False)           
-        axs[0,0].legend(bbox_to_anchor=(0.85, 1.35),
-                    loc='best', ncol=ncol_legend, frameon=False)                    
-
-    # Add shared x and y labels
-    # fig.text(0.5, 0.01, 'Epochs', fontsize='medium', ha='center')
-    # fig.text(0.05, 0.5, 'Eval accuracy', fontsize='medium', va='center', rotation='vertical')    
-    fig.supxlabel('Epochs', fontsize='medium')
-    fig.supylabel(NAMES_DICT[metrics[0]], fontsize='medium')
-
-    # Adjust layout
-    plt.tight_layout(rect=[0, 0, 0.93, 1])  # Leave space for the right label                 
-
-    dataset_name_short = ''
-    if isinstance(dataset,str):
-        if '_' in dataset:
-            for s in dataset.split('_'):
-                dataset_name_short += s[0]
-        else:
-            dataset_name_short += dataset
-
-    from constants import FIGS_DIR
-    SAVE_DIR = njoin(FIGS_DIR, 'vit-task')
-    if display:
-        plt.show()
-    else:
-        if not isdir(SAVE_DIR): makedirs(SAVE_DIR)
-        fig_file = models_root.split('/')[1] + '-'
-        fig_file += f'L={num_hidden_layers}-H={num_attention_heads}-D={hidden_size}-'            
-        fig_file += '-'.join(model_types_plotted)+'_' + f'ds={dataset_name_short}'
-        # if isfile(njoin(SAVE_DIR, fig_file)):
-        #     version = len([fname for fname in os.listdir(SAVE_DIR) if fname==fig_file])
-        #     fig_file += f'-v{version}'
-        fig_file += '.pdf'
-        plt.savefig(njoin(SAVE_DIR, fig_file))            
-        print(f'Figure saved in {njoin(SAVE_DIR, fig_file)}')
-
-    # separate colorbar
-    if cbar_separate:    
-        """
-        #fig.subplots_adjust(right=0.8)
-        fig = plt.figure()
-        cbar_ax = fig.add_axes([0.85, 0.20, 0.03, 0.75])
-        cbar_ticks = list(np.arange(1,2.01,0.2))
-        cbar = fig.colorbar(im, cax=cbar_ax, ticks=cbar_ticks)
-        cbar.ax.set_yticklabels(cbar_ticks)
-        cbar.ax.tick_params(axis='y', labelsize=tick_size)
-        """
-        
-        fig = plt.figure()
-        cbar_ax = fig.add_axes([0.85, 0.20, 0.03, 0.75])
-        cbar_ticks = list(np.linspace(1,2,6))
-        
-        cbar = mpl.colorbar.ColorbarBase(cbar_ax, norm=HYP_CNORM, cmap=HYP_CM)
-        cbar.ax.set_yticklabels(cbar_ticks)
-        cbar.ax.tick_params(axis='y', labelsize=16.5)
-
-        plt.savefig(njoin(SAVE_DIR,"alpha_colorbar.pdf"), bbox_inches='tight')  
-
-
-# Ablation study on bandwidth
-def fns_fix_eps(models_roots, fns_type='spopfns'+MODEL_SUFFIX, metrics='val_acc',
-                include_others=False, display=False):
-    global df, df_setting, df_filtered, fig_file, axs
-    global model_dirs, subpath, dirnames, model_root_dirs
-    global model_combo, model_combos
-    global alphas, epss, DCT_ALL, model_info, model_df, run_perf, dataset, df_model
-    global model_types, model_info, epochs, ensembles
-    global other_final_epoch_metrics
-    global fns_final_epoch_metrics, eps_idx, alp_idx, ii
-
-    models_roots = str2ls(models_roots)
-    model_root_dirs = models_roots
-    print(model_root_dirs)
-
-    metrics = str2ls(metrics)    
-    display = str2bool(display) 
-    include_others = str2bool(include_others)   
-    assert len(metrics) == 1
-
-    suffix = fns_type.split('fns')[-1]
-    DCT_ALL = collect_model_dirs(model_root_dirs[0], suffix=suffix)
-    model_types = list(DCT_ALL.keys())
-    for model_type in model_types:
-        if 'fns' in model_type:
-            df_model = DCT_ALL[model_type].dropna(subset='alpha')
-            df_model.reset_index(drop=True, inplace=True)
-            break
-
-    # ----- general settings -----
-    num_attention_heads, num_hidden_layers, hidden_size = df_model.loc[0,['num_attention_heads', 'num_hidden_layers', 'hidden_size']]
-    dataset = df_model.loc[0,'dataset_name']
-
-    # ----- fns setting -----
-    alphas = sorted(df_model.loc[:,'alpha'].unique())[::-1]  # large to small
-    epss = sorted(df_model.loc[:,'bandwidth'].unique())    
-
-    nrows, ncols = len(models_roots), 2
-    figsize = (3*ncols,3*nrows)
-    fig, axs = plt.subplots(nrows,ncols,figsize=figsize,sharex=True,sharey=False)  # layout='constrained'
-    
-    if nrows == 1:
-        axs = np.expand_dims(axs, axis=0)
-        if ncols == 1:
-            axs = np.expand_dims(axs, axis=1)
-    elif nrows > 1 and ncols == 1:
-        axs = np.expand_dims(axs, axis=1)     
-    
-    total_figs = 0
-    model_types_plotted = []
-    for row_idx, models_root in enumerate(models_roots):
-        inter_instances = list(set.intersection(*map(set,list(DCT_ALL[fns_type].loc[:,'instances']))))
-        fns_final_epoch_metrics = np.zeros([len(inter_instances), 2, len(epss), len(alphas)])
-        fns_final_epoch_metrics[:] = np.nan
-        other_final_epoch_metrics = {}        
-        other_best_epoch_metrics = {}   
-
-        DCT_ALL = collect_model_dirs(models_root)
-        if DCT_ALL == {}:
-            continue
-        for eps_idx, eps in tqdm(enumerate(epss)):            
-
-            model_type = fns_type
-            if model_type not in model_types_plotted:
-                model_types_plotted.append(model_type)
-
-            model_df = DCT_ALL[model_type].dropna(subset='alpha')
-            model_df.reset_index(drop=True, inplace=True)
-            lstyle_model = LINESTYLE_DICT[model_type]
-
-            # -------------------- FNS --------------------
-            row_stats = []
-            for alp_idx, alpha in enumerate(alphas):
-                c_hyp = HYP_CMAP(HYP_CNORM(alpha))  # hyperparameter color  
-
-                model_info = model_df[(model_df['alpha']==alpha) & (model_df['bandwidth']==eps) & (model_df['ensembles']>0)]
-                if len(model_info.index) == 0:
-                    continue
-
-                instances = model_info['instances'].item()
-                qk_share = model_info['qk_share'].item()          
-                
-                for ii, instance in enumerate(instances[:fns_final_epoch_metrics.shape[0]]):
-                    model_instance_path = njoin(model_info['model_dir'].item(), f'model={instance}')
-                    if isfile(njoin(model_instance_path, 'run_performance.csv')): 
-                        run_perf = pd.read_csv(njoin(model_instance_path, 'run_performance.csv'))
-                        file_exists = True
-                    elif isfile(njoin(model_instance_path, '_run_performance.csv')): 
-                        run_perf = pd.read_csv(njoin(model_instance_path, '_run_performance.csv'))
-                        file_exists = True
-                    else:
-                        file_exists = False
-
-                    if file_exists:
-                        if 'acc' in metrics[0]:
-                            run_perf.loc[:,metrics[0]] = run_perf.loc[:,metrics[0]] * 100  
-
-                        epochs = run_perf.loc[:,'iter'].astype(int) // int(model_info['steps_per_epoch'])             
-
-                        fns_final_epoch_metrics[ii, 0, eps_idx, alp_idx] = run_perf.loc[run_perf.index[-1],metrics[0]]                                            
-                        if 'acc' in metrics[0]:
-                            fns_final_epoch_metrics[ii, 1, eps_idx, alp_idx] = run_perf.loc[:,metrics[0]].max()  
-                        else:
-                            fns_final_epoch_metrics[ii, 1, eps_idx, alp_idx] = run_perf.loc[:,metrics[0]].min()
-
-                # print results
-                median_metric = np.median(fns_final_epoch_metrics[:,0,eps_idx,alp_idx],0) 
-                mean_metric = np.mean(fns_final_epoch_metrics[:,0,eps_idx,alp_idx],0)
-                std_metric = np.std(fns_final_epoch_metrics[:,0,eps_idx,alp_idx],0)
-                min_metric, max_metric = fns_final_epoch_metrics[:,0,eps_idx,alp_idx].min(), fns_final_epoch_metrics[:,0,eps_idx,alp_idx].max()
-                mid_metric = (min_metric + max_metric)/2   
-                diff_metric = max_metric - mid_metric                         
-                row_stats.append([alpha, eps, min_metric, max_metric, 
-                mid_metric, diff_metric, median_metric, mean_metric, std_metric])
-
-            summary_stats = pd.DataFrame(data=row_stats, 
-                                         columns=['alpha', 'eps', 'min', 'max', 'mid', 'diff', 'median', 'mean', 'std'])
-            print('\n')    
-            print(summary_stats)
-            print('\n')
-
-            if eps_idx == 0:                
-            # -------------------- SINK --------------------                
-                model_type = 'sink' + suffix
-                if model_type in model_types:
-                    model_df = DCT_ALL[model_type]
-                    lstyle_model = LINESTYLE_DICT[model_type]
-
-                    model_info = model_df.iloc[0,:]
-                    ensembles = model_info['ensembles']
-                    instances = model_info['instances']
-                    qk_share = model_info['qk_share']
-                    if ensembles > 0:
-                        model_instance_path = njoin(model_info['model_dir'], f'model={instances[0]}')
-                        if isfile(njoin(model_instance_path, 'run_performance.csv')): 
-                            run_perf = pd.read_csv(njoin(model_instance_path, 'run_performance.csv'))
-                        if isfile(njoin(model_instance_path, '_run_performance.csv')): 
-                            run_perf = pd.read_csv(njoin(model_instance_path, '_run_performance.csv'))
-
-                        epochs = run_perf.loc[:,'iter'].astype(int) // int(model_info['steps_per_epoch'])
-
-                        other_final_epoch_metrics[model_type] = run_perf.loc[run_perf.index[-1],metrics[0]]
-
-                    if model_type not in model_types_plotted:
-                        model_types_plotted.append(model_type)
-
-            # -------------------- DP --------------------
-
-                model_type = 'dp' + suffix
-                if model_type in model_types:       
-                    model_df = DCT_ALL[model_type]
-                    lstyle_model = LINESTYLE_DICT[model_type]
-
-                    model_info = model_df.iloc[0,:]
-                    ensembles = model_info['ensembles']
-                    instances = model_info['instances']
-                    qk_share = model_info['qk_share']
-                    if ensembles > 0:
-                        model_instance_path = njoin(model_info['model_dir'], f'model={instances[0]}')
-                        if isfile(njoin(model_instance_path, 'run_performance.csv')): 
-                            run_perf = pd.read_csv(njoin(model_instance_path, 'run_performance.csv'))
-                        if isfile(njoin(model_instance_path, '_run_performance.csv')): 
-                            run_perf = pd.read_csv(njoin(model_instance_path, '_run_performance.csv'))                        
-
-                        epochs = run_perf.loc[:,'iter'].astype(int) // int(model_info['steps_per_epoch'])
-
-                        other_final_epoch_metrics[model_type] = run_perf.loc[run_perf.index[-1],metrics[0]]                                        
-                
-                    if model_type not in model_types_plotted:
-                        model_types_plotted.append(model_type)
-
-        perc_l, perc_u = 25, 75
-        for col_idx in range(fns_final_epoch_metrics.shape[1]):
-            ax = axs[row_idx, col_idx]
-            for eps_idx, eps in tqdm(enumerate(epss)):
-                ax.plot(alphas, np.nanmedian(fns_final_epoch_metrics[:,col_idx,eps_idx,:],axis=0), 
-                        label = rf'$\varepsilon$ = {eps}',
-                        linestyle=f'--', marker=markers[eps_idx],markersize=2)
-                                        
-                ax.fill_between(alphas, np.nanpercentile(fns_final_epoch_metrics[:,col_idx,eps_idx,:], 25, axis=0), 
-                                np.percentile(fns_final_epoch_metrics[:,col_idx,eps_idx,:], 75, axis=0),
-                                alpha=0.5)        
-
-            if include_others:
-                for model_type in other_final_epoch_metrics.keys():
-                    ax.axhline(y=other_final_epoch_metrics[model_type], linestyle=LINESTYLE_DICT[model_type], c=OTHER_COLORS_DICT[model_type])
-
-            if row_idx == 0:
-                title = 'Final' if col_idx==0 else 'Best'
-                ax.set_title(title)
-
-            # row labels (Q = K)
-            if col_idx == ncols - 1:
-                title = r'$Q \neq K$' if not qk_share else r'$Q = K$'               
-                ax.text(1.2, 0.5, title, transform=(
-                                ax.transAxes + ScaledTranslation(-20/72, +7/72, fig.dpi_scale_trans)),
-                                va='center', rotation='vertical')  # fontsize='medium',                            
-
-            # subplot labels
-            ax.text(
-                0.0, 1.0, f'({ascii_lowercase[total_figs]})', transform=(
-                    ax.transAxes + ScaledTranslation(-20/72, +7/72, fig.dpi_scale_trans)),
-                va='bottom', fontfamily='sans-serif')  # fontsize='medium',     
-
-            ax.grid()
-            #ax.yaxis.grid(True)
-            ax.set_ylim([92,95])
-            ax.set_xticks(alphas)
-
-            total_figs += 1
-
-    # for model_type in model_types_plotted:   
-    #     if 'fns' in model_type:
-    #         color = 'k'
-    #     elif 'sink' in model_type:
-    #         color = OTHER_COLORS[0]
-    #     elif 'dp' in model_type:
-    #         color = OTHER_COLORS[1]
-    #     axs[0,0].plot([], [], c=color, linestyle=LINESTYLE_DICT[model_type], 
-    #                 label=NAMES_DICT[model_type])                  
-
-    #axs[0,0].set_ylim([80,90]); axs[1,0].set_ylim([80,90])
-
-    ncol_legend = 2 if len(epss) > 1 else 1
-    axs[0,0].legend(bbox_to_anchor=(0.85, 1.4),
-                    loc='best', ncol=ncol_legend, frameon=False)  
-
-    # axs[0,0].legend(loc='upper left', ncol=1, frameon=False)  
-
-    # Add shared x and y labels   
-    fig.supxlabel(r'$\alpha$', fontsize='medium')
-    fig.supylabel(NAMES_DICT[metrics[0]], fontsize='medium')
-
-    # Adjust layout
-    plt.tight_layout(rect=[0, 0, 0.93, 1])  # Leave space for the right label                 
-
-    dataset_name_short = ''
-    if isinstance(dataset,str):
-        if '_' in dataset:
-            for s in dataset.split('_'):
-                dataset_name_short += s[0]
-        else:
-            dataset_name_short += dataset
-
-    from constants import FIGS_DIR
-    SAVE_DIR = njoin(FIGS_DIR, 'vit-task')
-    if display:
-        plt.show()
-    else:
-        if not isdir(SAVE_DIR): makedirs(SAVE_DIR)
-        fig_file = models_root.split('/')[1] + '-'
-        fig_file += f'fns_fix_eps-L={num_hidden_layers}-H={num_attention_heads}-D={hidden_size}-'            
-        fig_file += f'ds={dataset_name_short}'
-        # if isfile(njoin(SAVE_DIR, fig_file)):
-        #     version = len([fname for fname in os.listdir(SAVE_DIR) if fname==fig_file])
-        #     fig_file += f'-v{version}'
-        fig_file += '.pdf'
-        plt.savefig(njoin(SAVE_DIR, fig_file))            
-        print(f'Figure saved in {njoin(SAVE_DIR, fig_file)}')
-
-
-# assumption 1 and 2 possibilities for full-sized models
-def phase_ensembles(models_root, fns_manifold='rd', metrics='val_acc,val_loss',
-                    cbar_separate=False, display=False):
-    global df, df_setting, df_filtered, fig_file, axs
-    global model_dirs, subpath, dirnames, model_root_dirs
-    global model_combo, model_combos, model_types_plotted, model_types_short
-    global alphas, epss, DCT_ALL, model_info, model_df, run_perf, run_perf_all, dataset, df_model
-    global model_types, model_info, epochs, ensembles, instances
-    global models_roots, qk_shares, matching_df
-    global model_type, qk_share
-    global DCT_cur, df_model_cur, other_matching_df
-    global model_labels
-    global metric_m, metric_l, metric_u
-    global model_instance_path    
-
-    assert fns_manifold in ['sphere', 'rd'], f'{fns_manifold} does not exist!'
-    manifold_prefix = 'sp' if fns_manifold == 'sphere' else 'rd'
-
-    BIGGER_SIZE = 10
-    plt.rc('font', size=BIGGER_SIZE)          # controls default text sizes
-    plt.rc('axes', titlesize=BIGGER_SIZE)     # fontsize of the axes title
-    plt.rc('axes', labelsize=BIGGER_SIZE)    # fontsize of the x and y labels
-    plt.rc('xtick', labelsize=BIGGER_SIZE)    # fontsize of the tick labels
-    plt.rc('ytick', labelsize=BIGGER_SIZE)    # fontsize of the tick labels
-    plt.rc('legend', fontsize=BIGGER_SIZE-2)    # legend fontsize
-    plt.rc('figure', titlesize=BIGGER_SIZE)  # fontsize of the figure title
-
-    models_roots = []
-    subdir_l1s = [ f.path for f in os.scandir(models_root) if f.is_dir() ]
-    for subdir_l1 in subdir_l1s:
-        subdir_l2s = [ f.path for f in os.scandir(njoin(subdir_l1)) if f.is_dir() and 'config_' in f.path ]
-        for subdir_l2 in subdir_l2s:
-            subdir_l3s = [ f.path for f in os.scandir(subdir_l2) if f.is_dir() ]
-            for subdir_l3 in subdir_l3s:
-                models_roots.append(subdir_l3)
-
-
-    model_root_dirs = models_roots
-    print(model_root_dirs)    
-
-    metrics = str2ls(metrics)    
-    display = str2bool(display)    
-
-    #suffix = fns_type.split('fns')[-1]
-    suffix = MODEL_SUFFIX
-    model_types = []   
-    DCT_ALL = {} 
-    for ii, model_root_dir in enumerate(model_root_dirs):
-        DCT_cur = collect_model_dirs(model_root_dir, suffix=suffix)
-        #print(DCT_ALL)
-        model_types_cur = list(DCT_cur.keys())
-    
-        for model_type in model_types_cur:
-            df_model_cur = DCT_cur[model_type]
-            #if 'fns' in model_type:
-            if model_type not in model_types:
-                model_types.append(model_type)
-                if 'alpha' in df_model_cur.columns:
-                    DCT_ALL[model_type] = df_model_cur.dropna(subset='alpha')
-                else:
-                    DCT_ALL[model_type] = df_model_cur
-            else:                
-                if 'alpha' in df_model_cur.columns:
-                    DCT_ALL[model_type] = DCT_ALL[model_type]._append(df_model_cur.dropna(subset='alpha'), ignore_index=True)
-                else:
-                    DCT_ALL[model_type] = DCT_ALL[model_type]._append(df_model_cur, ignore_index=True)
-
-    df_model = DCT_ALL[ 'op' + manifold_prefix + 'fns' + MODEL_SUFFIX]
-    #df_model.reset_index(drop=True, inplace=True)
-    
-    # ----- general settings -----
-    num_attention_heads, num_hidden_layers, hidden_size = DCT_ALL[list(DCT_ALL.keys())[0]].loc[0,['num_attention_heads', 'num_hidden_layers', 'hidden_size']]
-    dataset = DCT_ALL[list(DCT_ALL.keys())[0]].loc[0,'dataset_name']
-
-    # ----- fns setting -----
-    alphas = sorted(df_model.loc[:,'alpha'].unique())[::-1]  # large to small
-    epss = sorted(df_model.loc[:,'bandwidth'].unique())    
-
-    #alpha = alphas[-1]
-    #eps = epss[0]
-    eps = epss[-1]
-
-    metric = metrics[0]
-    qk_shares = list(df_model.loc[:,'qk_share'].unique())
-    is_orthogs = [False, True]
-    #nrows = len(model_root_dirs)    
-    nrows = len(qk_shares)
-    ncols = len(is_orthogs)
-
-    figsize = (3*ncols,3*nrows)
-    fig, axs = plt.subplots(nrows,ncols,figsize=figsize,sharex=True,sharey=False)  # layout='constrained'
-    
-    if nrows == 1:
-        axs = np.expand_dims(axs, axis=0)
-        if ncols == 1:
-            axs = np.expand_dims(axs, axis=1)
-    elif nrows > 1 and ncols == 1:
-        axs = np.expand_dims(axs, axis=1)                 
-
-    lower_qt, upper_qt = 0.25, 0.75
-
-    model_types_plotted = []
-    model_types_instances = {}
-    #for row_idx, models_root in enumerate(models_roots):    
-    #for row_idx, qk_share in enumerate(qk_shares):        
-    qk_share = False
-    for row_idx, metric in enumerate(metrics):
-        for col_idx, is_orthog in enumerate(is_orthogs):
-
-            ax = axs[row_idx, col_idx]
-            model_type = 'op' + manifold_prefix + 'fns' + MODEL_SUFFIX if is_orthog else manifold_prefix + 'fns' + MODEL_SUFFIX
-            df_model = DCT_ALL[model_type]
-            matching_df = df_model[(df_model['ensembles']>0)&(df_model['qk_share']==qk_share)&
-                                   (df_model['model_dir'].str.contains('layers=2-heads=6'))&
-                                   (df_model['model_dir'].str.contains(model_type))]
-            #print(matching_df)
-
-            if matching_df.shape[0] > 0: 
-                DCT_matching = { model_type: matching_df }
-            else:
-                DCT_matching = {}
-
-            if DCT_matching == {}:
+MARKERSIZE = 4
+BIGGER_SIZE = 10
+TRANSP = 1  # transparency (corresponding to alpha in plot)
+plt.rc('font', size=BIGGER_SIZE)          # controls default text sizes
+plt.rc('axes', titlesize=BIGGER_SIZE)     # fontsize of the axes title
+plt.rc('axes', labelsize=BIGGER_SIZE)    # fontsize of the x and y labels
+plt.rc('xtick', labelsize=BIGGER_SIZE)    # fontsize of the tick labels
+plt.rc('ytick', labelsize=BIGGER_SIZE)    # fontsize of the tick labels
+plt.rc('legend', fontsize=BIGGER_SIZE-2)    # legend fontsize
+plt.rc('figure', titlesize=BIGGER_SIZE)  # fontsize of the figure title
+
+# -------------------- FUNCTIONS --------------------
+# return median, 25/75 percentile
+def get_metric_curves(run_perf_all,lq=0.25,uq=0.75):
+    metric_m = run_perf_all.quantile(0.5,1)
+    metric_l = run_perf_all.quantile(lq,1)
+    metric_u = run_perf_all.quantile(uq,1)
+    return [metric_l, metric_m, metric_u]
+
+# aggregate all runs
+def load_seed_runs(model_dir, seeds, metric):
+    runs = []
+    for seed in seeds:
+        seed_path = njoin(model_dir, f'model={seed}')
+        fpath = njoin(seed_path, 'run_performance.csv')
+        if not isfile(fpath):
+            fpath = njoin(seed_path, '_run_performance.csv')
+            if not isfile(fpath):
                 continue
-
-            if model_type not in model_types_plotted:
-                model_types_plotted.append(model_type)
-
-            for alpha in alphas:
-            #for alpha in alphas[-1:]:
-                model_df = DCT_matching[model_type].dropna(subset='alpha')
-                model_df.reset_index(drop=True, inplace=True)
-                lstyle_model = LINESTYLE_DICT[model_type]
-
-                # -------------------- FNS --------------------                        
-                c_hyp = HYP_CMAP(HYP_CNORM(alpha))  # hyperparameter color  
-
-                model_info = model_df[(model_df['alpha']==alpha)&(model_df['bandwidth']==eps)&
-                                      (model_df['ensembles']>0)]
-                if len(model_info.index) == 0:
-                    continue
-
-                instances = model_info['instances'].item()
-                qk_share = model_info['qk_share'].item()
-                
-                run_perf_all = []
-                for instance in instances:
-                    model_instance_path = njoin(model_info['model_dir'].item(), f'model={instance}')
-                    if isfile(njoin(model_instance_path, 'run_performance.csv')): 
-                        run_perf = pd.read_csv(njoin(model_instance_path, 'run_performance.csv'))
-                    elif isfile(njoin(model_instance_path, '_run_performance.csv')): 
-                        run_perf = pd.read_csv(njoin(model_instance_path, '_run_performance.csv'))            
-
-                    epochs = run_perf.loc[:,'iter'].astype(int) // int(model_info['steps_per_epoch'])             
-                    if 'acc' in metric and run_perf.loc[run_perf.index[-1],metric] <= 1:
-                        run_perf.loc[:,metric] = run_perf.loc[:,metric] * 100
-
-                    run_perf_all.append(run_perf.loc[:,metric])
-
-                run_perf_all = pd.concat(run_perf_all, axis=1)
-                # metric_mean = run_perf_all.mean(1)
-                # metric_std = run_perf_all.std(1)
-                metric_m = run_perf_all.quantile(0.5,1)
-                metric_l = run_perf_all.quantile(lower_qt,1)
-                metric_u = run_perf_all.quantile(upper_qt,1)
-
-                trans = 1
-                #trans = HYP_TRANS(alpha)
-                if (row_idx,col_idx) == (0,0):
-                    im = ax.plot(epochs, metric_m, linestyle=lstyle_model, c=c_hyp, alpha=trans)
-                                        #,marker=model_markers[model_name], markersize=markersize,
-                                        #,label=model_legend)   
-                                            
-                    ax.fill_between(epochs, metric_l, metric_u,
-                                    color=c_hyp, alpha=trans/2)
-                else:
-                    ax.plot(epochs, metric_m, linestyle=lstyle_model, c=c_hyp, alpha=trans)
-                                        #,marker=model_markers[model_name], markersize=markersize,
-                                        #,label=model_legend)
-                                         
-                    ax.fill_between(epochs, metric_l, metric_u,
-                                    color=c_hyp, alpha=trans/2)                                                                        
-
-            # if row_idx != nrows - 1:
-            #     ax.set_xticklabels([])
-
-            # col labels (bandwidth)
-            # if row_idx == 0:
-            #     ax.set_title(rf'$\varepsilon = {{{eps}}}$')
-            # row labels (Q = K)
-            # if col_idx == ncols - 1:
-            #     title = r'$Q \neq K$' if not qk_share else r'$Q = K$'               
-            #     ax.text(1.2, 0.5, title, transform=(
-            #                     ax.transAxes + ScaledTranslation(-20/72, +7/72, fig.dpi_scale_trans)),
-            #                     va='center', rotation='vertical')  # fontsize='medium',                          
-
-            # -------------------- SINK, DP --------------------                
-            #other_model_types = ['sink' + suffix, 'dp' + suffix]
-            if is_orthog:
-                #other_model_types = ['opsink' + suffix, 'opdp' + suffix]
-                other_model_types = ['opdp' + suffix]
-            else:
-                #other_model_types = ['sink' + suffix, 'dp' + suffix]
-                other_model_types = ['dp' + suffix]
-            for oidx, model_type in enumerate(other_model_types):
-                if model_type in model_types:
-                    model_df = DCT_ALL[model_type]
-                    other_matching_df = model_df[(model_df['ensembles']>0)&(model_df['qk_share']==qk_share)&
-                                                 (model_df['model_dir'].str.contains('layers=2-heads=6'))&
-                                                 (model_df['model_dir'].str.contains(model_type))]                
-                    # print('other_matching_df')  # delete
-                    # print(model_type)
-                    # print(f'qk_share = {qk_share}')
-                    # print(other_matching_df)  # delete
-
-                    lstyle_model = LINESTYLE_DICT[model_type]
-
-                    model_info = other_matching_df.iloc[0,:]
-                    ensembles = model_info['ensembles']
-                    instances = model_info['instances']
-                    qk_share = model_info['qk_share']
-                    if ensembles > 0:
-
-                        run_perf_all = []
-                        for instance in instances:
-                            model_instance_path = njoin(model_info['model_dir'], f'model={instance}')
-                            if isfile(njoin(model_instance_path, 'run_performance.csv')): 
-                                run_perf = pd.read_csv(njoin(model_instance_path, 'run_performance.csv'))
-                            elif isfile(njoin(model_instance_path, '_run_performance.csv')): 
-                                run_perf = pd.read_csv(njoin(model_instance_path, '_run_performance.csv'))
-
-                            epochs = run_perf.loc[:,'iter'].astype(int) // int(model_info['steps_per_epoch'])
-                            if 'acc' in metric and run_perf.loc[run_perf.index[-1],metric] <= 1:
-                                run_perf.loc[:,metric] = run_perf.loc[:,metric] * 100
-                        
-                            run_perf_all.append(run_perf.loc[:,metric])
-                        run_perf_all = pd.concat(run_perf_all, axis=1)
-
-                        metric_m = run_perf_all.quantile(0.5,1)
-                        metric_l = run_perf_all.quantile(lower_qt,1)
-                        metric_u = run_perf_all.quantile(upper_qt,1)
-                        trans = 1
-
-                        ax.plot(epochs, metric_m, linestyle=lstyle_model, 
-                                c=OTHER_COLORS_DICT[model_type], alpha=trans)    
-                                            
-                        ax.fill_between(epochs, metric_l, metric_u,
-                                        color=OTHER_COLORS_DICT[model_type], alpha=trans/2)    
-
-                    if model_type not in model_types_plotted:
-                        model_types_plotted.append(model_type)
-
-            ax.grid()
-            #ax.yaxis.grid(True)        
-
-    # labels
-    model_labels = []
-    for model_type in model_types_plotted:   
-        if 'op' in model_type:
-            model_type = model_type.replace('op', '')
-        if 'fns' in model_type:
-            color = 'k'
-        elif 'sink' in model_type:
-            color = OTHER_COLORS[0]
-        elif 'dp' in model_type:
-            color = OTHER_COLORS[1]
-            
-        model_label = NAMES_DICT[model_type]
-        if model_label not in model_labels:            
-            axs[0,0].plot([], [], c=color, linestyle=LINESTYLE_DICT[model_type], 
-                          label=model_label)
-
-            model_labels.append(model_label)
-
-    # legend
-    for alpha in alphas[::-1]:
-        axs[0,0].plot([], [], c=HYP_CMAP(HYP_CNORM(alpha)), linestyle='solid', 
-                      label=rf'$\alpha$ = {alpha}')   
-
-    #ncol_legend = 2 if len(model_types_plotted) == 3 else 1
-    ncol_legend = 2
-    if len(model_types_plotted) >= 2:
-        #axs[0,0].legend(loc='best', ncol=ncol_legend, frameon=False)           
-        axs[0,0].legend(bbox_to_anchor=(0.95, 1.35),   # bbox_to_anchor=(0.85, 1.35)
-                        loc='best', ncol=ncol_legend, frameon=False)                     
-
-    # Add shared x and y labels     
-    total_figs = 0      
-    #fig.supxlabel('Epochs')  # , fontsize='medium'
-    #fig.supylabel(NAMES_DICT[metrics[0]], fontsize='medium')
-    for row_idx in range(len(qk_shares)):
-        for col_idx, is_orthog in enumerate(is_orthogs):  
-            ax = axs[row_idx, col_idx]
-            #ax.set_ylabel(NAMES_DICT[metric])
-            if row_idx == 0:
-                #ax.set_title(NAMES_DICT[metric])
-                ax_title = r'$W \in O(d)$' if is_orthogs[col_idx] else r'$W \notin O(d)$'
-                ax.set_title(ax_title)
-
-            # subplot labels
-            ax.text(
-                0.0, 1.0, f'({ascii_lowercase[total_figs]})', transform=(
-                    ax.transAxes + ScaledTranslation(-20/72, +7/72, fig.dpi_scale_trans)),
-                va='bottom')  # , fontfamily='sans-serif', fontsize='medium',     
-
-            # if row_idx != 0:
-            #     ax.sharey(axs[0, col_idx])
-
-            total_figs += 1
-            axs[row_idx,col_idx].sharey(axs[row_idx, 0])
-            axs[-1,col_idx].set_xlabel('Epochs')
-        axs[row_idx, 0].set_ylabel(NAMES_DICT[metrics[row_idx]])
-
-    # axs[0,0].set_xlim([50,310])
-    # # axs[0,0].set_ylim([50,75])
-    # # axs[1,0].set_ylim([0.7,1.4])
-    # axs[0,0].set_ylim([55,75])
-    # axs[1,0].set_ylim([0.7,1.2])
-
-    # Adjust layout
-    plt.tight_layout(rect=[0, 0, 0.93, 1])  # Leave space for the right label                 
-
-    dataset_name_short = ''
-    if isinstance(dataset,str):
-        if '_' in dataset:
-            for s in dataset.split('_'):
-                dataset_name_short += s[0]
+            # continue
+        run = pd.read_csv(fpath)
+        if int(run.loc[0,'iter']) > 0:
+            epochs = run['iter'].astype(int) // int(run.loc[0,'iter'])
         else:
-            dataset_name_short += dataset
-
-    model_types_short = [model_type.replace(MODEL_SUFFIX,'') for model_type in model_types_plotted]
-
-    from constants import FIGS_DIR
-    SAVE_DIR = njoin(FIGS_DIR, 'vit-task')
-    if display:
-        plt.show()
+            epochs = run['iter'].astype(int) // int(run.loc[1,'iter'])
+        if 'acc' in metric and run.loc[run.index[-1], metric] <= 1:
+            run[metric] *= 100
+        runs.append(run[metric])
+    if len(runs)==0:
+        return (None, None)
     else:
-        if not isdir(SAVE_DIR): makedirs(SAVE_DIR)
-        fig_file = models_root.split('/')[1] + '-'
-        #fig_file += f'layers={num_hidden_layers}-heads={num_attention_heads}-hidden={hidden_size}-'            
-        fig_file += f'layers={num_hidden_layers}-hidden={hidden_size}-'
-        fig_file += '_'.join(model_types_short)+ '-' + metrics[0] + '-' + f'ds={dataset_name_short}'
-        # if isfile(njoin(SAVE_DIR, fig_file)):
-        #     version = len([fname for fname in os.listdir(SAVE_DIR) if fname==fig_file])
-        #     fig_file += f'-v{version}'
-        fig_file += '.pdf'
-        plt.savefig(njoin(SAVE_DIR, fig_file))            
-        print(f'Figure saved in {njoin(SAVE_DIR, fig_file)}')
+        return epochs, pd.concat(runs, axis=1)
 
-    # separate colorbar
-    if cbar_separate:    
-        """
-        #fig.subplots_adjust(right=0.8)
-        fig = plt.figure()
-        cbar_ax = fig.add_axes([0.85, 0.20, 0.03, 0.75])
-        cbar_ticks = list(np.arange(1,2.01,0.2))
-        cbar = fig.colorbar(im, cax=cbar_ax, ticks=cbar_ticks)
-        cbar.ax.set_yticklabels(cbar_ticks)
-        cbar.ax.tick_params(axis='y', labelsize=tick_size)
-        """
-        
-        fig = plt.figure()
-        cbar_ax = fig.add_axes([0.85, 0.20, 0.03, 0.75])
-        cbar_ticks = list(np.linspace(1,2,6))
-        
-        cbar = mpl.colorbar.ColorbarBase(cbar_ax, norm=HYP_CNORM, cmap=HYP_CM)
-        cbar.ax.set_yticklabels(cbar_ticks)
-        cbar.ax.tick_params(axis='y', labelsize=16.5)
+# final epoch stats
+def final_epoch_stats(run_perf_all, metric):
+    epoch_index = run_perf_all.index[-1]
+    metric_min = run_perf_all.loc[epoch_index,metric].min()
+    metric_max = run_perf_all.loc[epoch_index,metric].max()
+    metric_mid = (metric_min + metric_max) / 2
 
-        plt.savefig(njoin(SAVE_DIR,"alpha_colorbar.pdf"), bbox_inches='tight')  
+    metric_median = run_perf_all.loc[epoch_index:epoch_index+1,metric].median()
+    metric_mean = run_perf_all.loc[epoch_index:epoch_index+1,metric].mean()
+    metric_std = run_perf_all.loc[epoch_index:epoch_index+1,metric].std()    
+    return [metric_min, metric_max, metric_mid, metric_median, metric_mean, metric_std]
+# --------------------------------------------------
 
 
-def phase_ensembles_v3(models_root, selected_dataset='mnist',
+# Plots average of metrics over ensembles (assumption 1 and 2 possibilities for full-sized models)
+def phase_ensembles(models_root, selected_dataset='imdb',
                     fns_manifold='rd', qk_share=False, selected_alphas='1.2,2',
-                    #metrics='val_acc',
-                    metric='val_acc',
-                    is_ops = [True],
-                    #is_ops = [True],
+                    metrics='val_acc,val_loss',
+                    is_ops = [False,True],  # [False,True]
                     cbar_separate=False, display=False):
-    global df, df_setting, df_filtered, fig_file, axs
-    global model_dirs, subpath, dirnames, model_root_dirs
-    global model_combo, model_combos, model_types_plotted, model_types_short
-    global alphas, epss, DCT_ALL, model_info, model_df, run_perf, run_perf_all, dataset, df_model
-    global model_types, model_info, epochs, ensembles, seeds
-    global models_roots, qk_shares, matching_df
-    global model_type, other_model_types
-    global DCT_cur, df_model_cur, other_matching_df
-    global model_seed_path    
-    global summary_stats, row_stats, metric_m
+    pd.set_option('display.max_rows', None)
+    pd.set_option('display.max_columns', None)
 
-    assert fns_manifold in ['sp', 'rd'], f'{fns_manifold} does not exist!'
-    qk_share = qk_share if isinstance(qk_share, bool) else literal_eval(qk_share)
+    global qk_shares, summary_stats
 
-    models_roots = []
-    subdir_l1s = [ f.path for f in os.scandir(models_root) if f.is_dir() ]
-    for subdir_l1 in subdir_l1s:
-        subdir_l2s = [ f.path for f in os.scandir(njoin(subdir_l1)) if f.is_dir() and 'config_' in f.path ]
-        for subdir_l2 in subdir_l2s:
-            subdir_l3s = [ f.path for f in os.scandir(subdir_l2) if f.is_dir() ]
-            for subdir_l3 in subdir_l3s:
-                models_roots.append(subdir_l3)
+    assert fns_manifold in ['sp', 'rd', 'v2_rd'], f'{fns_manifold} does not exist!'
+    qk_share, cbar_separate, display = map(str2bool, (qk_share, cbar_separate, display))
+    metrics, is_ops = str2ls(metrics), str2ls(is_ops)
 
-    model_root_dirs = models_roots
-    print(model_root_dirs)        
+    # collect subdirs containing the model directories
+    model_root_dirs = models_roots = find_subdirs(models_root, MODEL_SUFFIX)
+    print(model_root_dirs)                  
 
-    #metrics = str2ls(metrics)    
-    display = str2bool(display)    
-
-    #suffix = fns_type.split('fns')[-1]
-    suffix = MODEL_SUFFIX
+    # all trained model types
     model_types = []   
     DCT_ALL = {} 
-    for ii, model_root_dir in enumerate(model_root_dirs):
-        DCT_cur = collect_model_dirs(model_root_dir, suffix=suffix)
-        #print(DCT_ALL)
-        model_types_cur = list(DCT_cur.keys())
-    
-        for model_type in model_types_cur:
-            df_model_cur = DCT_cur[model_type]
-            #if 'fns' in model_type:
-            if model_type not in model_types:
+    for model_root_dir in model_root_dirs:
+        DCT_cur = collect_model_dirs(model_root_dir, suffix=MODEL_SUFFIX)
+        for model_type, df_model_cur in DCT_cur.items():
+            df_clean = df_model_cur.dropna(subset='alpha') if 'alpha' in df_model_cur.columns else df_model_cur
+            if model_type not in DCT_ALL:
                 model_types.append(model_type)
-                if 'alpha' in df_model_cur.columns:
-                    DCT_ALL[model_type] = df_model_cur.dropna(subset='alpha')
-                else:
-                    DCT_ALL[model_type] = df_model_cur
-            else:                
-                if 'alpha' in df_model_cur.columns:
-                    DCT_ALL[model_type] = DCT_ALL[model_type]._append(df_model_cur.dropna(subset='alpha'), ignore_index=True)
-                else:
-                    DCT_ALL[model_type] = DCT_ALL[model_type]._append(df_model_cur, ignore_index=True)
+                DCT_ALL[model_type] = df_clean
+            else:
+                DCT_ALL[model_type] = pd.concat([DCT_ALL[model_type], df_clean], ignore_index=True)                    
 
+    # isolate partiulcar setting for qk_share
     df_model = DCT_ALL[[model_type for model_type in list(DCT_ALL.keys()) if fns_manifold in model_type][0]]
     df_model.reset_index(drop=True, inplace=True)
+    qk_shares = list(df_model.loc[:,'qk_share'].unique())
+    assert qk_share in qk_shares, f'qk_share = {qk_share} setting does not exist!'
     
+    # ---- col names ----
+    stats_colnames = ['min', 'max', 'mid', 'median', 'mean', 'std', 'counter']   
+
     # ----- general settings -----
-    num_attention_heads, num_hidden_layers, hidden_size = DCT_ALL[list(DCT_ALL.keys())[0]].loc[0,['num_attention_heads', 'num_hidden_layers', 'hidden_size']]
+    num_attention_heads, num_hidden_layers, hidden_size =\
+         DCT_ALL[list(DCT_ALL.keys())[0]].loc[0,['num_attention_heads', 'num_hidden_layers', 'hidden_size']]    
     #dataset = DCT_ALL[list(DCT_ALL.keys())[0]].loc[0,'dataset_name']
     assert selected_dataset in DCT_ALL[list(DCT_ALL.keys())[0]].loc[:,'dataset_name'].unique(), 'selected_dataset does not exist'
 
     # ----- fns setting -----
     alphas = sorted(df_model.loc[:,'alpha'].unique())[::-1]  # large to small
     epss = sorted(df_model.loc[:,'bandwidth'].unique())    
-
     if selected_alphas.lower() == 'none':
         selected_alphas = alphas
     else:
         selected_alphas = [float(selected_alpha) for selected_alpha in str2ls(selected_alphas)]
-    eps = epss[0]
+    #eps = epss[0]
+    eps = 1  # hard coded
 
-    #metric = metrics[0]
-    qk_shares = list(df_model.loc[:,'qk_share'].unique())    
-    if isinstance(is_ops, str):
-        is_ops = str2ls(is_ops)
-    #nrows, ncols = len(metrics), len(is_ops)     
-    nrows, ncols = len(qk_shares), len(is_ops)
+    # ----- models to plot -----
+    fns_model_type = fns_manifold + 'fns' + MODEL_SUFFIX    
+    other_model_types = ['dp' + MODEL_SUFFIX]  # 'sink' + MODEL_SUFFIX
+    model_types_to_plot = [fns_model_type] + other_model_types
+            
+    nrows, ncols = len(metrics), len(is_ops)     
     figsize = (3*ncols,3.5*nrows)
     fig, axs = plt.subplots(nrows,ncols,figsize=figsize,sharex=True,sharey=False)  # layout='constrained'    
-    if nrows == 1:
-        axs = np.expand_dims(axs, axis=0)
-        if ncols == 1:
-            axs = np.expand_dims(axs, axis=1)
-    elif nrows > 1 and ncols == 1:
-        axs = np.expand_dims(axs, axis=1)                 
+    axs = matrixify_axs(axs, nrows, ncols)  # convert axs to 2D array
+    label_axs(fig, axs)  # alphabetically label subfigures             
 
     model_types_plotted = []
     model_types_seeds = {}     
-    #for row_idx, metric in enumerate(metrics):    
-    for row_idx, qk_share in enumerate(qk_shares):
-        for col_idx, is_op in enumerate(is_ops):
+    for (row_idx, metric), (col_idx, is_op) in product(enumerate(metrics), enumerate(is_ops)):
+        ax = axs[row_idx, col_idx] 
+        ax.grid()
+        # summary statistics
+        row_stats = []
 
-            # summary statistics
-            row_stats = []
-
-            ax = axs[row_idx, col_idx]
-            model_type = 'op' + fns_manifold + 'fns' + MODEL_SUFFIX if is_op else fns_manifold + 'fns' + MODEL_SUFFIX
-            print(f'model_type = {model_type}')
-            df_model = DCT_ALL[model_type]
-            matching_df = df_model[(df_model['ensembles']>0)&(df_model['qk_share']==qk_share)&
-                                    (df_model['is_op']==is_op)&
-                                    (df_model['model_dir'].str.contains(f'/{model_type}-'))
-                                    #(df_model['model_dir']==model_type)
-                                    ]
-            #print(matching_df)
-            #quit()  # delete
-
-            if matching_df.shape[0] > 0: 
-                DCT_matching = { model_type: matching_df }
+        print(f'model_type = {model_type}')        
+        for model_type in model_types_to_plot:
+            if is_op:
+                model_type = 'op' + model_type
+            if model_type in DCT_ALL.keys():
+                df_model = DCT_ALL[model_type]
             else:
-                DCT_matching = {}
-
-            if DCT_matching == {}:
                 continue
+            # matching conditions for model setup
+            condition0 = (df_model['ensembles']>0)&(df_model['qk_share']==qk_share)&(df_model['is_op']==is_op)&\
+                         (df_model['model_dir'].str.contains(selected_dataset))&\
+                         (df_model['model_dir'].str.contains(f'/{model_type}-'))
+            matching_df = df_model[condition0]
 
             if model_type not in model_types_plotted:
                 model_types_plotted.append(model_type)
 
-            for alpha in alphas:                
-                model_df = DCT_matching[model_type].dropna(subset='alpha')
-                model_df.reset_index(drop=True, inplace=True)
-                lstyle_model = LINESTYLE_DICT[model_type]
-
-                # -------------------- FNS --------------------                        
-                c_hyp = HYP_CMAP(HYP_CNORM(alpha))  # hyperparameter color  
-
-                model_info = model_df[(model_df['alpha']==alpha) & (model_df['bandwidth']==eps) & 
-                                      (model_df['ensembles']>0) & model_df['model_dir'].str.contains(selected_dataset)
-                                      ]
-                if len(model_info.index) == 0:
+            lstyle_model = LINESTYLE_DICT[model_type]
+            for alpha in selected_alphas:
+                is_fns = 'fns' in model_type
+                alpha = alpha if is_fns else None
+                matching_df.reset_index(drop=True, inplace=True)                
+                                       
+                # color
+                color = HYP_CMAP(HYP_CNORM(alpha)) if is_fns else OTHER_COLORS_DICT[model_type]  
+                # -------------------- SINK, DP -------------------- 
+                model_info = matching_df 
+                # -------------------- FNS --------------------
+                if is_fns:
+                    # matching conditions for FNS setup
+                    condition = (matching_df['alpha']==alpha) & (matching_df['bandwidth']==eps)
+                    model_info = model_info[condition]
+                # get aggregated training curves
+                if model_info.shape[0] > 0:
+                    seeds, qk_share = (model_info[k].item() for k in ('seeds', 'qk_share'))                
+                    epochs, run_perf_all = load_seed_runs(model_info['model_dir'].item(), seeds, metric)   
+                else:
                     continue
 
-                seeds = model_info['instances'].item()
-                qk_share = model_info['qk_share'].item()
-                
-                run_perf_all = []
-                counter = 0
-                for seed in seeds:
-                    model_seed_path = njoin(model_info['model_dir'].item(), f'model={seed}')
-                    if isfile(njoin(model_seed_path, 'run_performance.csv')): 
-                        run_perf = pd.read_csv(njoin(model_seed_path, 'run_performance.csv'))
-                    elif isfile(njoin(model_seed_path, '_run_performance.csv')): 
-                        run_perf = pd.read_csv(njoin(model_seed_path, '_run_performance.csv'))   
-                    else: 
-                        continue
-
-                    epochs = run_perf.loc[:,'iter'].astype(int) // int(run_perf.loc[0,'iter'].astype(int))                
-                    if 'acc' in metric and run_perf.loc[run_perf.index[-1],metric] <= 1:
-                        run_perf.loc[:,metric] = run_perf.loc[:,metric] * 100
-                        counter += 1
-
-                    run_perf_all.append(run_perf.loc[:,metric])
-
-                if len(run_perf_all) > 0:
-                    run_perf_all = pd.concat(run_perf_all, axis=1)
-
-                    metric_m = run_perf_all.quantile(0.5,1)
-                    metric_l = run_perf_all.quantile(0.25,1)
-                    metric_u = run_perf_all.quantile(0.75,1)
-
-                    trans = 1
-                    #trans = HYP_TRANS(alpha)
-                    if alpha in selected_alphas:  # only plot selected_alphas
-                        if (row_idx,col_idx) == (0,0):
-                            im = ax.plot(epochs, metric_m, linestyle=lstyle_model, c=c_hyp, alpha=trans)
-                                                    
-                            ax.fill_between(epochs, metric_l, metric_u,
-                                            color=c_hyp, alpha=trans/2)
-                        else:
-                            ax.plot(epochs, metric_m, linestyle=lstyle_model, c=c_hyp, alpha=trans)
-                                                
-                            ax.fill_between(epochs, metric_l, metric_u,
-                                            color=c_hyp, alpha=trans/2)                                                                        
+                if run_perf_all is not None:
+                    counter = run_perf_all.shape[1]
+                    metric_curves = get_metric_curves(run_perf_all)          
+                    exe_plot = ax.plot(epochs, metric_curves[1], linestyle=lstyle_model, c=color, alpha=TRANSP)          
+                    if (row_idx,col_idx) == (0,0):
+                        im = exe_plot                                            
+                    ax.fill_between(epochs, metric_curves[0], metric_curves[2], color=color, alpha=TRANSP/2)                                                                        
 
                     # results of the final epoch
-                    epoch_index = run_perf_all.index[-1]
-                    metric_min = run_perf_all.loc[epoch_index,metric].min()
-                    metric_max = run_perf_all.loc[epoch_index,metric].max()
-                    metric_mid = (metric_min + metric_max) / 2
-                    if run_perf_all.shape[0] == 1:
-                        metric_median = run_perf_all.loc[epoch_index,metric].median()
-                        metric_mean = run_perf_all.loc[epoch_index,metric].mean()
-                        metric_std = run_perf_all.loc[epoch_index,metric].std()
-                    else:
-                        metric_median = run_perf_all.loc[epoch_index,metric]
-                        metric_mean = run_perf_all.loc[epoch_index,metric]
-                        metric_std = 0
-                    row_stats.append([alpha, metric_min, metric_max, metric_mid, metric_median, metric_mean, metric_std, counter])
+                    row_stats.append([model_type, alpha] +\
+                                     final_epoch_stats(run_perf_all,metric) + [counter])    
+                if not is_fns:
+                    break  # only do once if model is not FNS type
 
-            summary_stats = pd.DataFrame(data=row_stats, 
-            columns=['alpha', 'min', 'max', 'mid', 'median', 'mean', 'std', 'counter']
-            )
+        summary_stats = pd.DataFrame(data=row_stats, columns=['model_type','alpha']+stats_colnames)
 
-            print(metric)
-            print(f'is_op = {is_op}, qk_share = {qk_share}')
-            print(summary_stats)
-            print('\n')
-
-            # if row_idx != nrows - 1:
-            #     ax.set_xticklabels([])
-
-            # col labels (bandwidth)
-            # if row_idx == 0:
-            #     ax.set_title(rf'$\varepsilon = {{{eps}}}$')
-            # row labels (Q = K)
-            # if col_idx == ncols - 1:
-            #     title = r'$Q \neq K$' if not qk_share else r'$Q = K$'               
-            #     ax.text(1.2, 0.5, title, transform=(
-            #                     ax.transAxes + ScaledTranslation(-20/72, +7/72, fig.dpi_scale_trans)),
-            #                     va='center', rotation='vertical')  # fontsize='medium',                          
-
-            # -------------------- SINK, DP --------------------                
-            #other_model_types = ['sink' + suffix, 'dp' + suffix]
-            if is_op:
-                #other_model_types = ['opdp' + suffix, 'opsink' + suffix]
-                other_model_types = ['opdp' + suffix]
-                #other_model_types = ['opsink' + suffix]
-            else:
-                #other_model_types = ['dp' + suffix, 'sink' + suffix]
-                other_model_types = ['dp' + suffix]
-                #other_model_types = ['sink' + suffix]
-            for oidx, model_type in enumerate(other_model_types):
-                # summary statistics
-                row_stats = []
-
-                if model_type in model_types:
-                    model_df = DCT_ALL[model_type]
-                    other_matching_df = model_df[(model_df['ensembles']>0)&(model_df['qk_share']==qk_share)&
-                                                 (model_df['is_op']==is_op)&
-                                                 (model_df['model_dir'].str.contains(model_type))]                
-
-                    lstyle_model = LINESTYLE_DICT[model_type]
-
-                    model_info = other_matching_df.iloc[0,:]
-                    ensembles = model_info['ensembles']
-                    seeds = model_info['instances']
-                    qk_share = model_info['qk_share']
-                    if ensembles > 0:
-
-                        run_perf_all = []
-                        counter = 0
-                        for seed in seeds:
-                            model_seed_path = njoin(model_info['model_dir'], f'model={seed}')
-                            if isfile(njoin(model_seed_path, 'run_performance.csv')): 
-                                run_perf = pd.read_csv(njoin(model_seed_path, 'run_performance.csv'))
-                                counter += 1
-                            # if isfile(njoin(model_seed_path, '_run_performance.csv')): 
-                            #     run_perf = pd.read_csv(njoin(model_seed_path, '_run_performance.csv'))
-
-                            epochs = run_perf.loc[:,'iter'].astype(int) // int(run_perf.loc[0,'iter'].astype(int)) 
-                            if 'acc' in metric and run_perf.loc[run_perf.index[-1],metric] <= 1:
-                                run_perf.loc[:,metric] = run_perf.loc[:,metric] * 100
-                        
-                            run_perf_all.append(run_perf.loc[:,metric])
-                        run_perf_all = pd.concat(run_perf_all, axis=1)
-
-                        metric_m = run_perf_all.quantile(0.5,1)
-                        metric_l = run_perf_all.quantile(0,1)
-                        metric_u = run_perf_all.quantile(1,1)
-                        trans = 1
-
-                        # print(model_type + f' qk_share = {qk_share}, is_op = {is_op}')
-                        # print(metric_m)
-
-                        ax.plot(epochs, metric_m, linestyle=lstyle_model, 
-                                c=OTHER_COLORS_DICT[model_type], alpha=trans)    
-                        ax.plot(epochs, metric_l, linestyle='-', linewidth=0.8,
-                                c=OTHER_COLORS_DICT[model_type], alpha=trans)  
-                        ax.plot(epochs, metric_u, linestyle='-', linewidth=0.8,
-                                c=OTHER_COLORS_DICT[model_type], alpha=trans)                                                                  
-                                            
-                        ax.fill_between(epochs, metric_l, metric_u,
-                                        color=OTHER_COLORS_DICT[model_type], alpha=trans/2)    
-
-                    # results of the final epoch
-                    epoch_index = run_perf_all.index[-1]
-                    metric_min = run_perf_all.loc[epoch_index,metric].min()
-                    metric_max = run_perf_all.loc[epoch_index,metric].max()
-                    metric_mid = (metric_min + metric_max) / 2                    
-                    if run_perf_all.shape[-1] > 1:
-                        metric_median = run_perf_all.loc[epoch_index,metric].median(-1)
-                        metric_mean = run_perf_all.loc[epoch_index,metric].mean(-1)                    
-                        metric_std = run_perf_all.loc[epoch_index,metric].std()
-                    else:
-                        metric_median = metric_mean = run_perf_all.loc[epoch_index,metric]
-                        metric_std = 0
-                    row_stats.append([metric_min, metric_max, metric_mid, metric_median, metric_mean, metric_std, counter])
-
-                    if model_type not in model_types_plotted:
-                        model_types_plotted.append(model_type)
-
-                summary_stats = pd.DataFrame(data=row_stats, 
-                columns=['min', 'max', 'mid', 'median', 'mean', 'std', 'counter']
-                )
-
-                print(model_type)
-                print(metric)
-                print(f'is_op = {is_op}, qk_share = {qk_share}')
-                print(summary_stats)
-                print('\n')
-
-            ax.grid()
-            #ax.axvline(x=15, color='k', linestyle='--', linewidth=0.8)
-            #ax.yaxis.grid(True)        
-
-    # axs[0,0].set_ylim([75,85])
-    # axs[1,0].set_ylim([0.45,0.65])
-    # axs[1,0].set_xticks([5,10,15,20])
+        # print message
+        print(metric)
+        print(f'is_op = {is_op}, qk_share = {qk_share}')
+        print(summary_stats)
+        print('\n')                    
 
     # labels
     model_labels = []
-    for model_type in model_types_plotted:   
-        color = 'k' if 'fns' in model_type else OTHER_COLORS_DICT[model_type]            
-        model_label = NAMES_DICT[model_type]
-        if model_label not in model_labels:            
-            axs[0,0].plot([], [], c=color, linestyle=LINESTYLE_DICT[model_type], 
-                          label=model_label)
-
-            model_labels.append(model_label)
+    for model_type in model_types_plotted:  
+        if model_type[:2] != 'op': 
+            color = 'k' if 'fns' in model_type else OTHER_COLORS_DICT[model_type]            
+            model_label = NAMES_DICT[model_type]
+            if model_label not in model_labels:            
+                axs[0,0].plot([], [], c=color, linestyle=LINESTYLE_DICT[model_type], label=model_label)
+                model_labels.append(model_label)
 
     # legend
-    if selected_alphas is None:
-        for alpha in alphas[::-1]:
-            axs[0,0].plot([], [], c=HYP_CMAP(HYP_CNORM(alpha)), linestyle='solid', 
-                        label=rf'$\alpha$ = {alpha}')   
-    else:
-        for alpha in selected_alphas[::-1]:
-            axs[0,0].plot([], [], c=HYP_CMAP(HYP_CNORM(alpha)), linestyle='solid', 
-                        label=rf'$\alpha$ = {alpha}')           
-
-    #ncol_legend = 2 if len(model_types_plotted) == 3 else 1
-    ncol_legend = 2
+    for alpha in selected_alphas[::-1]:
+        axs[0,0].plot([], [], c=HYP_CMAP(HYP_CNORM(alpha)), linestyle='solid', 
+                      label=rf'$\alpha$ = {alpha}')         
+    ncol_legend = 2  #if len(model_types_plotted) == 3 else 1
     if len(model_types_plotted) >= 2:
         #axs[0,0].legend(loc='best', ncol=ncol_legend, frameon=False)           
         axs[0,0].legend(bbox_to_anchor=(0.95, 1.35),   # bbox_to_anchor=(0.85, 1.35)
                         loc='best', ncol=ncol_legend, frameon=False)                     
 
     # Add shared x and y labels     
-    total_figs = 0      
-    #fig.supxlabel('Epochs')  # , fontsize='medium'
-    #fig.supylabel(NAMES_DICT[metrics[0]], fontsize='medium')
+    #fig.supxlabel('Epochs', fontsize='medium'); fig.supylabel(NAMES_DICT[metrics[0]], fontsize='medium')
 
     for row_idx in range(len(qk_shares)):        
         for col_idx, is_op in enumerate(is_ops):  
@@ -1294,19 +260,10 @@ def phase_ensembles_v3(models_root, selected_dataset='mnist',
                 #ax.set_title(NAMES_DICT[metric])
                 ax_title = r'$W \in O(d)$' if is_ops[col_idx] else r'$W \notin O(d)$'
                 ax.set_title(ax_title)
-
-            # subplot labels
-            ax.text(
-                0.0, 1.0, f'({ascii_lowercase[total_figs]})', transform=(
-                    ax.transAxes + ScaledTranslation(-20/72, +7/72, fig.dpi_scale_trans)),
-                va='bottom')  # , fontfamily='sans-serif', fontsize='medium',     
-
-            total_figs += 1
             
             axs[row_idx,col_idx].sharey(axs[row_idx, 0])
             axs[-1,col_idx].set_xlabel('Epochs')
-        #axs[row_idx,0].set_ylabel(NAMES_DICT[metrics[row_idx]])
-        axs[row_idx,0].set_ylabel(NAMES_DICT[metric])
+        axs[row_idx,0].set_ylabel(NAMES_DICT[metrics[row_idx]])
 
     # Adjust layout
     plt.tight_layout(rect=[0, 0, 0.93, 1])  # Leave space for the right label                 
@@ -1329,11 +286,9 @@ def phase_ensembles_v3(models_root, selected_dataset='mnist',
         if not isdir(SAVE_DIR): makedirs(SAVE_DIR)
         fig_file = models_root.split('/')[1] + '-'
         #fig_file += f'layers={num_hidden_layers}-heads={num_attention_heads}-hidden={hidden_size}-'            
-        fig_file += f'l={num_hidden_layers}-d={hidden_size}-qk_share={qk_share}-'
-        fig_file += '_'.join(model_types_short)+ '-' + metric + '-' + f'ds={dataset_name_short}'
-        # if isfile(njoin(SAVE_DIR, fig_file)):
-        #     version = len([fname for fname in os.listdir(SAVE_DIR) if fname==fig_file])
-        #     fig_file += f'-v{version}'
+        fig_file += f'l={num_hidden_layers}-d={hidden_size}-'
+        fig_file += 'qqv-' if qk_share else 'qkv-'
+        fig_file += '_'.join(model_types_short)+ '-' + metrics[0] + '-' + f'ds={dataset_name_short}'
         fig_file += '.pdf'
         plt.savefig(njoin(SAVE_DIR, fig_file))            
         print(f'Figure saved in {njoin(SAVE_DIR, fig_file)}')
@@ -1361,331 +316,6 @@ def phase_ensembles_v3(models_root, selected_dataset='mnist',
         plt.savefig(njoin(SAVE_DIR,"alpha_colorbar.pdf"), bbox_inches='tight')  
 
 
-# Plots average of metrics over ensembles
-def plot_ensembles(model_root_dir, datasets=['cifar10'],  
-                   metrics=['train_loss','val_loss','train_acc','val_acc'], 
-                   mod_rows=1,display=False):
-    global df, df_setting, df_filtered, fig_file, axs
-    global model_dir, config_dict, final_metrics, ensemble_metrics, metric_plot 
-    global model_dirs, config, attn_setup   
-
-    datasets = str_to_ls(datasets)
-    metrics = str_to_ls(metrics)
-
-    mod_rows = int(mod_rows)
-    display = str_to_bool(display)
-
-    model_root_dir = model_root_dir.replace('\\','')
-    dirnames = sorted([dirname for dirname in os.listdir(model_root_dir) if 'vit' in dirname])
-
-    print(f'Datasets: {datasets}')
-    print(f'model_root_dir = {model_root_dir}')
-    # prompt to reorder file names
-    for dirname_idx, dirname in enumerate(dirnames):
-        for subdir in os.listdir(njoin(model_root_dir, dirname)):
-            if isfile(njoin(model_root_dir, dirname, subdir, 'run_performance.csv')):
-                print(f'Index {dirname_idx}: {dirname}')
-                break
-    dirname_idxs = input('Order of dirnames:')
-    dirname_idxs = [int(dirname_idx) for dirname_idx in dirname_idxs.split(',')]
-    assert len(dirname_idxs) <= len(dirnames), 'dirname_idxs cannot exceed dirnames'
-    dirnames = [dirnames[dirname_idx] for dirname_idx in dirname_idxs]
-    print(f'{metrics} \n')
-
-    nrows, ncols = len(datasets), len(metrics)
-    #figsize = (9.5,2.5*nrows)
-    figsize = (12,2.5*nrows)
-    fig, axs = plt.subplots(nrows,ncols,figsize=figsize,
-                            sharex=True,sharey=False)
-    if axs.ndim == 1:
-        axs = np.expand_dims(axs, axis=0)
-
-    # get model config
-    qk_share = 'qkv' if 'qkv' in model_root_dir else 'qqv'
-    config_dict = {}
-    for ls in model_root_dir.split('/'):
-        for ele in ls.split('-'):
-            if '=' in ele:
-                key, val = ele.split('=')
-                config_dict[key] = val
-
-    #quit()  # delete
-    for idx, dataset in tqdm(enumerate(datasets)):
-        print('\n' + '#'*25 + f' Training on {dataset} '  + '#'*25 + '\n')
-
-        model_names = []
-        model_types = {}
-        model_linestyles = {}
-        model_colors = {}
-        N_model_types = 0        
-        for jdx, dirname in enumerate(dirnames):             
-            ensemble_dir = njoin(model_root_dir,dirname)
-            model_dirs = []
-            for subdir in os.listdir(ensemble_dir):
-                subpath = njoin(ensemble_dir,subdir)
-                if 'model=' in subdir and isfile(njoin(subpath,'run_performance.csv')):
-                    model_dirs.append(subpath.replace('\\',''))
-
-            # get type of transformer
-            #df_setting = pd.read_csv(njoin(model_dirs[0],'train_setting.csv'))
-
-            with open(njoin(model_dirs[0], 'config.json')) as json_file:
-                config = json.load(json_file)
-            with open(njoin(model_dirs[0], 'attn_setup.json')) as json_file:
-                attn_setup = json.load(json_file)         
-            model_type = model_name = NAMES_DICT[dirname.split('-')[0]]
-            if model_type not in model_types.keys():                
-                model_types[model_name] = 1
-                N_model_types += 1
-            else:
-                model_types[model_name] += 1            
-            if model_name not in model_names:
-                model_names.append(model_name)
-            if 'fns' in dirname.lower():
-                alpha, bandwidth, a  = attn_setup['alpha'], attn_setup['bandwidth'], attn_setup['a']
-                #model_settings = rf'$\alpha$ = {alpha}, $\varepsilon$ = {bandwidth}'
-                model_settings = rf'$\alpha$ = {alpha}, $a$ = {a}'
-                # if alpha < 2:                        
-                #     d_intrinsic = attn_setup.loc[0,'d_intrinsic']
-                #     model_settings += rf', $d$ = {d_intrinsic}'  #$d_{\mathcal{M}}$
-                model_name += f' ({model_settings})'
-            elif 'sink' in dirname.lower():
-                n_it  = attn_setup['n_it']
-                model_settings = rf'iter = {n_it}'
-                model_name += f' ({model_settings})'
-            model_linestyles[model_name] = linestyles[model_types[model_type] - 1]
-            model_colors[model_name] = colors[N_model_types - 1]
-
-            # ensemble of training instances for the same architecture
-            ylims = [100,100,0,0]
-            count = 0
-            final_metrics = {}  # metrics of the final epoch            
-            ensemble_metrics = {}            
-            for model_dir in model_dirs:
-                df = pd.read_csv(njoin(model_dir, 'run_performance.csv'), index_col=0)     
-                                   
-                for kdx, metric in enumerate(metrics):
-                    df_filtered = df[df[metric].notna()]        
-                    df_filtered = df_filtered[::mod_rows]            
-
-                    if 'acc' in metric or 'f1' in metric:
-                        metric_plot = df_filtered.loc[:,metric] * 100
-                    else:
-                        metric_plot = df_filtered.loc[:,metric]
-                    if metric not in final_metrics.keys():
-                        final_metrics[metric] = [metric_plot.iloc[-1]]
-                    else:
-                        final_metrics[metric].append(metric_plot.iloc[-1])
-
-                    if metric not in ensemble_metrics.keys():
-                        ensemble_metrics[metric] = [metric_plot]
-                    else:
-                        ensemble_metrics[metric].append(metric_plot)
-
-                    # epoch_eval_runtime = df[df['eval_runtime'].notna()].loc[:,'eval_runtime'].mean()
-                    # train_runtime, total_flos = df_setting.loc[0,['train_runtime', 'total_flos']]
-                    # for other_metric in ['epoch_eval_runtime', 'train_runtime', 'total_flos']:
-                    #     if other_metric not in final_metrics.keys():
-                    #         final_metrics[other_metric] = [locals()[other_metric]]
-                    #     else:
-                    #         final_metrics[other_metric].append(locals()[other_metric])
-                
-                count += 1
-            final_metrics[f'count'] = count                        
-                        
-            print('-'*15)                
-            print(f'{model_name}, total ensembles = {len(model_dirs)}')
-            for kdx, metric in enumerate(metrics):
-
-                ensemble_metrics[metric] = pd.concat(ensemble_metrics[metric], axis=1).T
-                # quit()
-
-                # ----- Plots -----
-                ensemble_mean = ensemble_metrics[metric].mean(0)
-                ensemble_std = ensemble_metrics[metric].std(0)
-                max_iter = df_filtered.loc[:,'iter'].max()
-
-                iit = df_filtered[df_filtered.loc[:,'iter']>=max_iter*1/3].index
-                # df_filtered.loc[iit,'iter'], ensemble_mean[iit],
-                axs[idx,kdx].plot(df_filtered.index, ensemble_mean,
-                                  linestyle=model_linestyles[model_name], c=model_colors[model_name],
-                                  label=model_name)                 
-
-                # std
-                # axs[idx,kdx].fill_between(df_filtered.loc[:,'epoch'], 
-                #                           ensemble_mean - ensemble_std, ensemble_mean + ensemble_std, 
-                #                           color=model_colors[model_name], alpha=0.5)                                          
-
-                if idx == 0:
-                    axs[idx,kdx].set_title(NAMES_DICT[metric])
-                #if idx == nrows - 1:
-                axs[0,kdx].set_xlabel('Steps')
-                axs[idx,kdx].ticklabel_format(style='sci',scilimits=(-3,10),axis='x')
-
-                #axs[idx,0].set_ylabel(NAMES_DICT[dataset])
-                axs[0,0].legend(loc='upper right', #bbox_to_anchor=(0.5, 1.05),
-                                ncol=1, frameon=False)    
-
-                # ----- Messages -----
-                best = max(final_metrics[metric]) if 'acc' in metric or 'f1' in metric else min(final_metrics[metric])
-                worst = min(final_metrics[metric]) if 'acc' in metric or 'f1' in metric else max(final_metrics[metric])
-                median, mean = np.median(final_metrics[metric]), np.mean(final_metrics[metric])
-                print(f'best, median, mean, worst {metric}: {best}, {median}, {mean}, {worst}')
-
-                if 'acc' in metric or 'f1' in metric: 
-                    if 'val' in metric:                   
-                        axs[idx,kdx].set_ylim([40, 65])
-                    else:
-                        axs[idx,kdx].set_ylim([40, 90])
-                # else:
-                #     ylims[kdx] = min(ylims[kdx], mean)
-                # axs[idx,kdx].set_ylim
-
-            # for other_metric in ['epoch_eval_runtime', 'train_runtime', 'total_flos']:
-            #     print(f'Average total {other_metric}: {np.mean(final_metrics[other_metric])}')
-            print('-'*15 + '\n')                                
-
-
-    if display:
-        plt.show()
-    else:
-        if not isdir(FIGS_DIR): makedirs(FIGS_DIR)
-        layers, heads, hidden = int(config_dict['layers']), int(config_dict['heads']), int(config_dict['hidden'])
-        fig_file = f'layers={layers}-heads={heads}-hidden={hidden}-'
-        fig_file += '-'.join(model_names)+'_'+'-'.join(datasets)
-        if isfile(njoin(FIGS_DIR, fig_file)):
-            version = len([fname for fname in os.listdir(FIGS_DIR) if fname==fig_file])
-            fig_file += f'-v{version}'
-        fig_file += '.pdf'
-        plt.savefig(njoin(FIGS_DIR, fig_file))            
-        print(f'Figure saved in {njoin(FIGS_DIR, fig_file)}')
-
-
-# Example:
-"""
-python -i plot_results.py plot_model .droot/formers_trained
-"""
-def plot_model(model_root_dir, dirnames, instances, 
-               datasets, metrics=['train_loss','val_loss','train_acc','val_acc'], 
-               mod_rows=1,
-               display=False):
-    
-    """
-    - model_root_dir (str): the root dir of models performance saved
-    - dirnames (str): the dirnames of the models
-    - instances (str): the instance of training
-    - mod_rows (int): number for modding df_filtered
-    - display (bool): whether to display the figure
-    """
-
-    global df, df_setting, df_filtered, fig_file, axs
-    global model_dir
-    global config_dict, model_dict
-    global metric_plot
-    # for local_keys in ['dirnames', 'datasets', 'metrics']:
-    #     locals()[local_keys] = str_to_ls(locals()[local_keys])
-
-    dirnames = str_to_ls(dirnames)
-    datasets = str_to_ls(datasets)
-    instances = str_to_ls(instances)
-    metrics = str_to_ls(metrics)
-    display = str_to_bool(display)
-
-    mod_rows = int(mod_rows)
-
-    model_root_dir = model_root_dir.replace('\\','')
-    print(f'model_root_dir = {model_root_dir}')
-    print(f'{metrics} \n')
-
-    nrows, ncols = len(datasets), len(metrics)
-    figsize = (10,2.5*nrows)
-    fig, axs = plt.subplots(nrows,ncols,figsize=figsize,
-                            sharex=True,sharey=False)
-    if axs.ndim == 1:
-        axs = np.expand_dims(axs, axis=0)
-
-    # get model config
-    qk_share = 'qqv' if 'qqv' in model_root_dir else 'qkv'
-    config_dict = {}
-    for ls in model_root_dir.split('/'):
-        for ele in ls.split('-'):
-            if '=' in ele:
-                key, val = ele.split('=')
-                config_dict[key] = val
-
-    #quit()  # delete
-    model_names = []
-    for idx, dataset in tqdm(enumerate(datasets)):
-        for jdx, dirname in enumerate(dirnames): 
-            model_dir = njoin(model_root_dir, dirname, f'model={instances[jdx]}')
-            model_dir = model_dir.replace('\\','')
-            df = pd.read_csv(njoin(model_dir, 'run_performance.csv'))    
-            #df_setting = pd.read_csv(njoin(model_dir,'final_performance.csv'))  
-            print_metrics = {}      
-            for kdx, metric in enumerate(metrics):
-                df_filtered = df[df[metric].notna()]
-                df_filtered = df_filtered.iloc[::mod_rows]
-
-                model_name = NAMES_DICT[dirname.split('-')[0]]
-                if model_name not in model_names:
-                    model_names.append(model_name)
-                if 'fns' in dirname:
-                    #alpha, bandwidth  = df_setting.loc[0,['alpha','bandwidth']]    
-                    model_dict = {}
-                    for ls in dirname.split('/'):
-                        for ele in ls.split('-'):
-                            if '=' in ele:
-                                key, val = ele.split('=')
-                                model_dict[key] = val
-
-                    alpha, bandwidth = model_dict['alpha'], model_dict['eps']
-                    model_settings = rf'$\alpha$ = {alpha}, $\varepsilon$ = {bandwidth}'
-                    # if alpha < 2:                        
-                    #     d_intrinsic = df_setting.loc[0,'d_intrinsic']
-                    #     model_settings += rf', $d$ = {d_intrinsic}'  #$d_{\mathcal{M}}$
-                    model_name += f' ({model_settings})'
-                if 'acc' in metric or 'f1' in metric:
-                    metric_plot = df_filtered.loc[:,metric] * 100
-                    best_metric = metric_plot.max()
-                else:
-                    metric_plot = df_filtered.loc[:,metric]
-                    best_metric = metric_plot.min()
-
-                axs[idx,kdx].plot(df_filtered.loc[:,'iter'], metric_plot, label=model_name,
-                                  linewidth=lwidth)
-
-                if idx == 0:
-                    axs[idx,kdx].set_title(NAMES_DICT[metric])
-                if idx == nrows - 1:
-                    axs[idx,kdx].set_xlabel('Steps')
-
-                print_metrics[metric] = [best_metric, metric_plot.iloc[-1]]  # best + final
-
-            # ----- Messages -----            
-            print('-'*15)    
-            print(f'{model_name} on {dataset}')
-            for kdx, metric in enumerate(metrics):
-                print(f'best and final {metric}: {print_metrics[metric]}')
-            print('-'*15 + '\n')                    
-
-        axs[idx,0].set_ylabel(NAMES_DICT[dataset])
-    #axs[0,0].legend(loc=7)
-    axs[0,0].legend(loc='upper left', #bbox_to_anchor=(0.5, 1.05),
-                    ncol=1, frameon=False)
-
-    if display:
-        plt.show()
-    else:
-        if not isdir(FIGS_DIR): makedirs(FIGS_DIR)
-        layers, heads, hidden = int(config_dict['layers']), int(config_dict['heads']), int(config_dict['hidden'])
-        fig_file = f'layers={layers}-heads={heads}-hidden={hidden}-'
-        fig_file += '-'.join(model_names)+'_'+'-'.join(datasets)
-        if isfile(njoin(FIGS_DIR, fig_file)):
-            version = len([fname for fname in os.listdir(FIGS_DIR) if fname==fig_file])
-            fig_file += f'-v{version}'
-        fig_file += '.pdf'
-        plt.savefig(njoin(FIGS_DIR, fig_file))            
-        print(f'Figure saved in {njoin(FIGS_DIR, fig_file)}')
 
 if __name__ == '__main__':
     import sys

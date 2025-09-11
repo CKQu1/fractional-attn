@@ -202,7 +202,7 @@ def phase_ensembles(models_root, selected_dataset='cifar10',
                     model_info = model_info[condition]
                 # get aggregated training curves
                 if model_info.shape[0] > 0:
-                    seeds, qk_share = (model_info[k].item() for k in ('instances', 'qk_share'))                
+                    seeds, qk_share = (model_info[k].item() for k in ('seeds', 'qk_share'))                
                     epochs, run_perf_all = load_seed_runs(model_info['model_dir'].item(), seeds, metric)   
                 else:
                     continue

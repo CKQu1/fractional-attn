@@ -4,8 +4,8 @@ from datetime import datetime
 from itertools import product
 from os.path import isfile, isdir
 from time import sleep
-from constants import DROOT, CLUSTER, PHYSICS_CONDA
-from mutils import njoin, get_instance, structural_model_root, str2bool
+from constants import DROOT, CLUSTER, PHYSICS_CONDA, RESOURCE_CONFIGS
+from UTILS.mutils import njoin, get_seed, structural_model_root, str2bool
 from qsub_parser import job_setup, qsub, add_common_kwargs
 """
 torchrun --nnodes=1 --nproc_per_node=2 ddp_main.py --max_iters=5 --eval_interval=5\
@@ -29,10 +29,10 @@ if __name__ == '__main__':
     #seeds = list(range(5))        
     seeds = [0]
 
-    patch_size = 2
-    is_preln = True  # default is True            
+    patch_size = 4
+    is_preln = False  # default is True            
     qk_shares = [False]
-    is_ops = [False, True]
+    is_ops = [True]
 
     # FNS settings
     is_rescale_dist = True
@@ -40,29 +40,21 @@ if __name__ == '__main__':
     alphas = [1.2, 2]
     bandwidths = [1]
 
-    # resources    
+    # Resources
     nstack = 1
+    walltime = '04:00:59'
+    mem = '8GB'      
     is_use_gpu = True
-    if is_use_gpu:
-        if CLUSTER == 'GADI':
-            q = 'gpuvolta'
-            ngpus, ncpus = 1, 12  # GPU       
-        elif CLUSTER == 'PHYSICS':
-            q = 'l40s'
-            ngpus, ncpus = 1, 1  # GPU
-    else:
-        if CLUSTER == 'GADI':
-            q = 'normal'
-        elif CLUSTER == 'PHYSICS':
-            q = 'taiji'         
-        ngpus, ncpus = 0, 1  # CPU             
 
-    select = 1                           
-    walltime = '03:29:59'
-    mem = '8GB'     
+    cfg = RESOURCE_CONFIGS[CLUSTER][is_use_gpu]
+    q, ngpus, ncpus = cfg["q"], cfg["ngpus"], cfg["ncpus"]         
+    select = 1
+   
 
     for n_layer in n_layers:
-        ROOT = njoin(DROOT, f'{n_layer}L-ps={patch_size}')
+        dirname = f'{n_layer}L-ps={patch_size}' 
+        dirname = dirname + '-preln' if is_preln else dirname + '-postln'
+        ROOT = njoin(DROOT, dirname)
         job_path = njoin(ROOT, 'jobs_all')
 
         kwargss_all = []    
@@ -86,6 +78,7 @@ if __name__ == '__main__':
 
                 # ----- dpvit -----
                 kwargss.append({'model_name':'dpvit','is_op':is_op})
+
                 # ----- sinkvit -----
                 # for n_it in [3]:
                 #     kwargss.append({'model_name':'opsinkvit','n_it':n_it,'is_op':is_op})                            
@@ -124,8 +117,10 @@ if __name__ == '__main__':
                     common_kwargs['lr_scheduler_type'] = 'binary'
                     if common_kwargs['lr_scheduler_type'] == 'binary':
                         common_kwargs['binary_ratio'] = 4/5
-                    common_kwargs['max_lr'] = 1e-4
-                    common_kwargs['min_lr'] = 1e-5
+                    # common_kwargs['max_lr'] = 1e-4
+                    # common_kwargs['min_lr'] = 1e-5
+                    common_kwargs['max_lr'] = 2e-4
+                    common_kwargs['min_lr'] = 2e-5
 
                     common_kwargs['epochs'] = 250                                                        
                     common_kwargs['n_attn_heads'] = 6

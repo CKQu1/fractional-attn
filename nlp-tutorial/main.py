@@ -29,43 +29,17 @@ from UTILS.mutils import str2bool, str2ls, str_or_float
 #from torch.optim import AdamW
 from torch.optim import Adam
 
-"""
-s = 'model_name=fnsformer,alpha=1.2,a=0,bandwidth=1,manifold=v2_rd,is_op=True,dataset=emotion,model_root=/project/RDS-FSC-frac_attn-RW/fractional-attn/nlp-tutorial/.droot/1L-hidden=32-max_len=512-rescaled/config_qqv/emotion/layers=1-heads=1-qqv,seed=0,qk_share=True,is_rescale_dist=True,weight_decay=0,max_lr=0.001,min_lr=0.0002,max_len=512,n_layers=1,n_attn_heads=1,epochs=25,fix_embed=False,lr_scheduler_type=binary,train_bs=16,hidden=32'
-ss = '--' + ' --'.join(s.split(','))
+# def seed_everything(seed):
+#     random.seed(seed)
+#     os.environ['PYTHONHASHSEED'] = str(seed)
+#     np.random.seed(seed)
+#     torch.manual_seed(seed)
+#     torch.cuda.manual_seed(seed)
+#     torch.cuda.manual_seed_all(seed)
 
-##### trained-embed #####
-python -i main.py --model_name=fnsformer --alpha=1 --a=0 --bandwidth=1 --manifold=rd --is_op=True\
- --dataset=imdb --model_root=/project/RDS-FSC-frac_attn-RW/fractional-attn/nlp-tutorial/.droot/debug-mode --seed=0\
- --qk_share=False --is_rescale_dist=True --weight_decay=0 --max_lr=0.001 --min_lr=0.0002\
- --max_len=512 --n_layers=1 --n_attn_heads=1 --epochs=25 --fix_embed=False --lr_scheduler_type=binary --train_bs=16 --hidden=32
-"""
+#     torch.backends.cudnn.deterministic = True
+#     torch.backends.cudnn.benchmark = False
 
-"""
-python -i main.py --train_bs=32 --dataset_name=imdb --fix_embed=True --pretrained_model_name=glove\
- --hidden=300 --model_name=dpformer --qk_share=False\
- --epochs=1 --weight_decay=0 --n_layers=1 --n_attn_heads=1 --model_root=.droot/debug-mode
-"""
-
-"""
-python -i main.py --train_bs=32 --dataset_name=imdb --fix_embed=True --pretrained_model_name=glove --max_len=1024\
- --hidden=16 --model_name=fnsformer --manifold=rd --is_op=True --alpha=1.2 --bandwidth=1 --a=0  --qk_share=True\
- --max_lr=0.0001 --lr_scheduler_type=constant --epochs=5 --weight_decay=0\
- --n_layers=1 --n_attn_heads=1 --seed=0\
- --model_root=.droot/debug-mode-v3
-"""
-
-"""
-python -i main.py --train_bs=32 --dataset_name=imdb --fix_embed=True --hidden=16\
- --model_name=fnsformer --manifold=rd --alpha=1.2 --bandwidth=1 --qk_share=False\
- --epochs=1 --weight_decay=0 --n_layers=1 --n_attn_heads=1 --model_root=.droot/debug-mode
-"""
-
-# single-core
-"""
-python -i main.py --train_bs=32 --dataset_name=imdb\
-  --model_name=fnsformer --manifold=sphere --alpha=1.2 --bandwidth=1 --qk_share=False\
- --epochs=1 --weight_decay=0 --n_layers=1 --n_attn_heads=1 --model_root=.droot/debug-mode 
-"""
 
 if __name__ == '__main__':
 
@@ -133,8 +107,6 @@ if __name__ == '__main__':
 
     # Config settings    
     # parser.add_argument('--hidden_size', default=48, type=int)
-    # parser.add_argument('--n_layers', default=1, type=int)
-    # parser.add_argument('--n_attn_heads', default=2, type=int)
     # #parser.add_argument('--intermediate_size', default=4 * 48, type=int)
 
     parser.add_argument('--hidden',         default=256,  type=int,   help='the number of expected features in the transformer')
@@ -193,6 +165,7 @@ if __name__ == '__main__':
 
     ##### SET SEED #####
     torch.manual_seed(args.seed)   
+    #seed_everything(args.seed)  # somehow not necessarily needed
     device_type = 'cuda' if 'cuda' in device else 'cpu' # for later use in torch.autocast
         
     #args.bandwidth = float(args.bandwidth) if args.bandwidth.replace('.','').isnumeric() else args.bandwidth
@@ -282,7 +255,7 @@ if __name__ == '__main__':
             else:           
                 # PCA
                 from sklearn.decomposition import PCA  
-                pca = PCA(n_components=args.hidden, random_state=args.seed) 
+                pca = PCA(n_components=args.hidden, svd_solver="full") 
                 pretrained_word_embeddings =\
                      pca.fit_transform(pretrained_model.embeddings.word_embeddings.weight.detach().numpy())    
                 pretrained_position_embeddings =\
@@ -296,7 +269,7 @@ if __name__ == '__main__':
             else:           
                 # PCA
                 from sklearn.decomposition import PCA  
-                pca = PCA(n_components=args.hidden, random_state=args.seed) 
+                pca = PCA(n_components=args.hidden, svd_solver="full") 
                 pretrained_word_embeddings =\
                      pca.fit_transform(pretrained_model.transformer.wte.weight.detach().numpy())    
                 pretrained_position_embeddings =\
@@ -311,7 +284,7 @@ if __name__ == '__main__':
                 # pretrained_word_embeddings = tsne.fit_transform(glove.vectors.numpy())                
                 # PCA
                 from sklearn.decomposition import PCA  
-                pca = PCA(n_components=args.hidden, random_state=args.seed)
+                pca = PCA(n_components=args.hidden, svd_solver="full")
                 pretrained_word_embeddings = pca.fit_transform(glove.vectors.numpy())                
                 
     if 'fns' in model_name:
@@ -369,18 +342,13 @@ if __name__ == '__main__':
         config['n_it'] = attn_setup['n_it'] = args.n_it
         #config['bandwidth'] = attn_setup['bandwidth'] = args.bandwidth
     
-    if model_name in ['rdfnsformer', 'v2_rdfnsformer']:
-        from models.rdfnsformer import RDFNSformer
-        model = RDFNSformer(config)               
-    elif model_name == 'spfnsformer':
-        from models.spfnsformer import SPFNSformer
-        model = SPFNSformer(config)                                      
-    elif model_name == 'sinkformer':
-        from models.sinkformer import SINKformer
-        model = SINKformer(config)
-    elif model_name == 'dpformer':
-        from models.dpformer import DPformer
-        model = DPformer(config)   
+    config['model_name'] = model_name
+    model_name = 'op' + model_name if args.is_op else model_name
+    attn_setup['model_name'] = model_name   
+
+    # load model
+    from models.model import Transformer
+    model = Transformer(config)
 
     def count_parameters(model):
         return sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -408,9 +376,6 @@ if __name__ == '__main__':
                 pretrained_position_embeddings = torch.tensor(pretrained_position_embeddings)                 
             model.pos_embedding =\
                 nn.Embedding.from_pretrained(nn.Parameter(pretrained_position_embeddings).to(device), freeze=True)
-
-    model_name = 'op' + model_name if args.is_op else model_name
-    attn_setup['model_name'] = model_name   
 
     if args.model_root == '':
         model_root = structural_model_root(qk_share=args.qk_share, n_layers=args.n_layers,

@@ -26,32 +26,16 @@ from UTILS.data_utils import prepare_cifar10_data, prepare_mnist_data
 
 from torch.optim import AdamW
 
-# single-core
-"""
-python -i main.py --train_bs=32 --dataset_name=mnist --model_name=fnsvit --manifold=rd --alpha=2 --is_op=True --qk_share=True\
- --epochs=45 --lr_scheduler_type=binary --min_lr=1e-4 --max_lr=1e-3 --weight_decay=0\
- --n_layers=1 --n_attn_heads=1 --model_root=.droot/debug-mode 
+def seed_everything(seed):
+    random.seed(seed)
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
 
-python -i main.py --train_bs=32 --lr_scheduler_type=constant --dataset_name=mnist\
- --model_name=fnsvit --is_op=True\
- --manifold=rd --qk_share=True\
- --alpha=1.5 --a=0 --epochs=1 --weight_decay=0 --n_layers=1 --n_attn_heads=1\
- --model_root=.droot/debug-mode
-
-python -i main.py --model_name=fnsvit --is_op=True --manifold=rd --alpha=1.5\
- --max_iters=100 --eval_interval=5\
- --lr_scheduler_type=binary --max_lr=5e-5 --max_lr=5e-6\
- --eval_iters=200 --weight_decay=0 --n_layers=1 --n_attn_heads=2 --model_root=.droot/single-core  
-
-python -i main.py --hidden_size=3 --model_name=opfnsvit --manifold=sphere --alpha=1.5 --epochs=1\
- --lr_scheduler_type=binary --max_lr=1e-4\
- --weight_decay=0 --n_layers=1 --n_attn_heads=1 --model_root=.droot/debug-mode --train_bs=64
-
-python -i main.py --model_name=fnsvit --manifold=sphere --alpha=1.5 --a=0\
- --epochs=2 --weight_decay=0 --n_layers=1 --n_attn_heads=1 --model_root=.droot/debug-mode
-"""
-
-#def train_vit(args):
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 if __name__ == '__main__':
 
@@ -309,14 +293,12 @@ if __name__ == '__main__':
     #print(f'backend = {backend}')
     print('-'*25 + '\n')           
 
-    ##### SET SEED #####
-    torch.manual_seed(args.seed)
     if torch.cuda.is_available():
         ##### GPU SET SEED #####
-        torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = False        
-        torch.cuda.manual_seed(args.seed)
-        torch.cuda.manual_seed_all(args.seed)
+        # torch.backends.cudnn.deterministic = True
+        # torch.backends.cudnn.benchmark = False        
+        # torch.cuda.manual_seed(args.seed)
+        # torch.cuda.manual_seed_all(args.seed)
 
         torch.backends.cuda.matmul.allow_tf32 = True # allow tf32 on matmul
         torch.backends.cudnn.allow_tf32 = True # allow tf32 on cudnn
@@ -327,6 +309,9 @@ if __name__ == '__main__':
     # note: float16 data type will automatically use a GradScaler
     ptdtype = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torch.float16}[dtype]
     ctx = nullcontext() if device_type == 'cpu' else torch.amp.autocast(device_type=device_type, dtype=ptdtype)
+
+    ##### SET SEED #####
+    seed_everything(args.seed)
 
     # poor man's data loader
     if dataset_name == 'cifar10':
@@ -693,7 +678,7 @@ if __name__ == '__main__':
             if args.lr_scheduler_type == 'cosine':
                 lr = get_lr(iter_num) if decay_lr else learning_rate
             elif args.lr_scheduler_type == 'binary':
-                if iter_num < max_iters * 2/3:
+                if iter_num < max_iters * args.binary_ratio:
                     lr = learning_rate
                 else:
                     lr = min_lr  

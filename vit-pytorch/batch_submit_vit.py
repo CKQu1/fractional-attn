@@ -1,6 +1,6 @@
 import argparse
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from itertools import product
 from os.path import isfile, isdir
 from time import sleep
@@ -12,6 +12,17 @@ torchrun --nnodes=1 --nproc_per_node=2 ddp_main.py --max_iters=5 --eval_interval
  --eval_iters=200 --weight_decay=0 --n_layers=1 --n_attn_heads=2
 """
 
+def str_to_time(s):
+    t = datetime.strptime(s, "%H:%M:%S")
+    time_delta = timedelta(hours=t.hour, minutes=t.minute, seconds=t.second)    
+    return time_delta
+
+def time_to_str(delta):
+    total_seconds = int(delta.total_seconds())
+    h, remainder = divmod(total_seconds, 3600)
+    m, s = divmod(remainder, 60)
+    return f"{h:02d}:{m:02d}:{s:02d}"    
+    
 if __name__ == '__main__':
       
     parser = argparse.ArgumentParser(description='batch_submit_main.py args')   
@@ -22,17 +33,17 @@ if __name__ == '__main__':
     script_name = "main.py"    
 
     # add or change datasets here
-    DATASET_NAMES = ['cifar10']  #  'cifar10', 'mnist', 'pathfinder-classification'   
+    DATASET_NAMES = ['cifar10']  #  'cifar10', 'mnist'   
 
     # general settings
-    n_layers = [4]
-    #seeds = list(range(5))        
-    seeds = [0]
+    #n_layers = [4]
+    n_layer = 4
+    seeds = list(range(1))        
 
     patch_size = 4
-    is_preln = False  # default is True            
+    is_preln = True  # default is True            
     qk_shares = [False]
-    is_ops = [True]
+    is_ops = [True, False]
 
     # FNS settings
     is_rescale_dist = True
@@ -42,7 +53,6 @@ if __name__ == '__main__':
 
     # Resources
     nstack = 1
-    walltime = '04:00:59'
     mem = '8GB'      
     is_use_gpu = True
 
@@ -50,100 +60,80 @@ if __name__ == '__main__':
     q, ngpus, ncpus = cfg["q"], cfg["ngpus"], cfg["ncpus"]         
     select = 1
    
-
-    for n_layer in n_layers:
+    for is_op in is_ops:
+        single_walltime = '01:09:59' if not is_op else '01:45:59'    
+        walltime = time_to_str(str_to_time(single_walltime) * nstack)
         dirname = f'{n_layer}L-ps={patch_size}' 
         dirname = dirname + '-preln' if is_preln else dirname + '-postln'
-        ROOT = njoin(DROOT, dirname)
+        ROOT = njoin(DROOT, 'full_models-v2', dirname)
         job_path = njoin(ROOT, 'jobs_all')
 
         kwargss_all = []    
-        for seed, dataset_name in product(seeds, DATASET_NAMES):
-            for qk_share, is_op in product(qk_shares, is_ops):       
-                kwargss = []
-                if n_layer <= 4:                                                
-                    for alpha in alphas:
-                        for bandwidth in bandwidths:                                                         
-                            for manifold in manifolds:
-                                    kwargss.append({'model_name':'fnsvit','manifold':manifold,
-                                    'alpha': alpha,'a': 0,'bandwidth':bandwidth, 'is_op':is_op}
-                                    )     
-                else:                      
-                    for alpha in alphas:                            
-                        for bandwidth in bandwidths:                            
-                            for manifold in manifolds:
-                                kwargss.append({'model_name':'fnsvit','manifold':manifold,
-                                'alpha': alpha,'a': 0,'bandwidth':bandwidth,'is_op':is_op}
-                                )    
+        for seed, dataset_name, qk_share in product(seeds, DATASET_NAMES, qk_shares):    
+            kwargss = []                                         
+            for alpha, bandwidth, manifold in product(alphas, bandwidths, manifolds):                                                       
+                kwargss.append({'model_name':'fnsvit','manifold':manifold,
+                'alpha': alpha,'a': 0,'bandwidth':bandwidth, 'is_op':is_op}
+                )      
 
-                # ----- dpvit -----
-                kwargss.append({'model_name':'dpvit','is_op':is_op})
+            # ----- dpvit -----
+            kwargss.append({'model_name':'dpvit','is_op':is_op})
 
-                # ----- sinkvit -----
-                # for n_it in [3]:
-                #     kwargss.append({'model_name':'opsinkvit','n_it':n_it,'is_op':is_op})                            
-                    
-                common_kwargs = {'seed':             seed,
-                                'is_preln':          is_preln,  
-                                'qk_share':          qk_share, 
-                                'n_layers':          n_layer,
-                                'hidden_size':       48,
-                                'patch_size':        patch_size,                                                                                                                                 
-                                'weight_decay':      0
-                                }  
-                if n_layer == 1:
-                    common_kwargs['lr_scheduler_type'] = 'binary'
-                    #common_kwargs['max_lr'] = 1e-4
-                    common_kwargs['max_lr'] = 4e-3
-                    common_kwargs['min_lr'] = 4e-4
-
-                    common_kwargs['epochs'] = 45
-                    common_kwargs['n_layers'] = 1
-                    common_kwargs['n_attn_heads'] = 1   
-                    common_kwargs['train_bs'] = 32                                                                
-
-                    common_kwargs['is_rescale_dist'] = is_rescale_dist
-                # elif 1 < n_layer <= 4:
-                #     common_kwargs['lr_scheduler_type'] = 'constant'
-                #     #common_kwargs['max_lr'] = 1e-4
-                #     common_kwargs['max_lr'] = 1e-3
-
-                #     common_kwargs['epochs'] = 50
-                #     common_kwargs['n_attn_heads'] = 1   
-                #     common_kwargs['train_bs'] = 32           
-                        
-                #     common_kwargs['is_rescale_dist'] = is_rescale_dist   
-                else:
-                    common_kwargs['lr_scheduler_type'] = 'binary'
-                    if common_kwargs['lr_scheduler_type'] == 'binary':
-                        common_kwargs['binary_ratio'] = 4/5
-                    # common_kwargs['max_lr'] = 1e-4
-                    # common_kwargs['min_lr'] = 1e-5
-                    common_kwargs['max_lr'] = 2e-4
-                    common_kwargs['min_lr'] = 2e-5
-
-                    common_kwargs['epochs'] = 250                                                        
-                    common_kwargs['n_attn_heads'] = 6
-                    #common_kwargs['n_attn_heads'] = 1 if is_op else 6
-                    common_kwargs['train_bs'] = 64                         
-                    
-                    common_kwargs['is_rescale_dist'] = is_rescale_dist
-
-                use_custom_optim = False if 'use_custom_optim' not in common_kwargs.keys() else common_kwargs['use_custom_optim']                                 
-
-                model_root_dirname = structural_model_root(qk_share=qk_share, n_layers=common_kwargs['n_layers'],
-                                                        n_attn_heads=common_kwargs['n_attn_heads'], hidden_size=common_kwargs['hidden_size']
-                                                        )       
-                model_root = njoin(ROOT, 'config_qqv' if qk_share else 'config_qkv', dataset_name, model_root_dirname)
-            
-        
-                for idx in range(len(kwargss)):
-                    # function automatically creates dir
-                    kwargss[idx]["dataset"] = dataset_name    
-                    kwargss[idx]['model_root'] = model_root
+            # ----- sinkvit -----
+            # for n_it in [3]:
+            #     kwargss.append({'model_name':'opsinkvit','n_it':n_it,'is_op':is_op})                            
                 
-                kwargss = add_common_kwargs(kwargss, common_kwargs)
-                kwargss_all += kwargss
+            common_kwargs = {'seed':             seed,
+                            'is_preln':          is_preln,  
+                            'qk_share':          qk_share, 
+                            'n_layers':          n_layer,
+                            'hidden_size':       48,
+                            'patch_size':        patch_size,                                                                                                                                 
+                            'weight_decay':      0
+                            }  
+            if n_layer == 1:
+                common_kwargs['lr_scheduler_type'] = 'binary'
+                #common_kwargs['max_lr'] = 1e-4
+                common_kwargs['max_lr'] = 4e-3
+                common_kwargs['min_lr'] = 4e-4
+
+                common_kwargs['epochs'] = 45
+                common_kwargs['n_layers'] = 1
+                common_kwargs['n_attn_heads'] = 1   
+                common_kwargs['train_bs'] = 32                                                                
+
+                common_kwargs['is_rescale_dist'] = is_rescale_dist
+            else:
+                common_kwargs['lr_scheduler_type'] = 'binary'
+                if common_kwargs['lr_scheduler_type'] == 'binary':
+                    common_kwargs['binary_ratio'] = 4/5
+                # common_kwargs['max_lr'] = 2e-4
+                # common_kwargs['min_lr'] = 2e-5
+                common_kwargs['max_lr'] = 5e-4
+                common_kwargs['min_lr'] = 5e-5
+
+                common_kwargs['epochs'] = 125                                                        
+                common_kwargs['n_attn_heads'] = 6
+                #common_kwargs['n_attn_heads'] = 1 if is_op else 6
+                common_kwargs['train_bs'] = 64                         
+                
+                common_kwargs['is_rescale_dist'] = is_rescale_dist
+
+            use_custom_optim = False if 'use_custom_optim' not in common_kwargs.keys() else common_kwargs['use_custom_optim']                                 
+
+            model_root_dirname = structural_model_root(qk_share=qk_share, n_layers=common_kwargs['n_layers'],
+                                                    n_attn_heads=common_kwargs['n_attn_heads'], hidden_size=common_kwargs['hidden_size']
+                                                    )       
+            model_root = njoin(ROOT, 'config_qqv' if qk_share else 'config_qkv', dataset_name, model_root_dirname)
+        
+    
+            for idx in range(len(kwargss)):
+                # function automatically creates dir
+                kwargss[idx]["dataset"] = dataset_name    
+                kwargss[idx]['model_root'] = model_root
+            
+            kwargss = add_common_kwargs(kwargss, common_kwargs)
+            kwargss_all += kwargss
     
         # ----- submit jobs -----
         print(f'Total jobs: {len(kwargss_all)} \n')      

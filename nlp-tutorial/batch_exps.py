@@ -13,10 +13,9 @@ The following are all the experiments to be run from `batch_submit_main.py`
 """
 
 # ----- model training experiments (full) -----
-def train_exps():
+def train_exps_full():
 
-    script_name = 'main.py'
-    nstack = 1
+    script_name = 'main.py'    
     MEM_DICT = {1: '4GB', 2: '8GB', 3: '8GB', 4: '8GB', 5: '10GB', 6: '12GB'}
     #CLUSTER = 'PHYSICS'  # can manually enter here too
     #q = 'l40s'  # 'l40s', 'taiji', 'h100'        
@@ -60,7 +59,7 @@ def train_exps():
 
         # model root dir
         #ROOT = njoin(DROOT, 'full_models')
-        ROOT = njoin(DROOT, 'full_models-v2')
+        ROOT = njoin(DROOT, 'full_models-v3')
         job_path = njoin(ROOT, 'jobs_all')          
     # training
     lr_scheduler_type = 'binary'  # 'constant'
@@ -83,10 +82,10 @@ def train_exps():
             q = 'taiji'         
         ngpus, ncpus = 0, 1  # CPU             
 
-    select = 1                           
-    #walltime = '01:29:59'  # for nstack = 1
-    walltime = '00:35:59'
+    nstack = 1                               
+    walltime = '01:29:59'  # for nstack = 1
     mem = MEM_DICT[n_layers]   
+    select = 1
 
     # models
     is_force_train = False
@@ -215,12 +214,11 @@ def train_exps_hyperparam():
     max_len = 512
 
     # -------------------- CHANGE HERE --------------------
-    n_layers = 2  # 1, 2, 3
+    n_layers = 1  # 1, 2, 3
     # -----------------------------------------------------
 
     if n_layers < 4:
         hiddens = [8, 16 ,32 ,64]
-        #hiddens = [64]
         n_attn_heads = 1
 
         is_ops = [True]
@@ -263,7 +261,7 @@ def train_exps_hyperparam():
 
     select = 1                           
     #walltime = '01:29:59'  # for nstack = 1
-    walltime = '00:35:59'
+    walltime = '00:11:59'
     mem = MEM_DICT[n_layers]   
 
     # models
@@ -276,7 +274,7 @@ def train_exps_hyperparam():
     bandwidths = [1]  # 'median'      
     manifolds = ['rd']  # 'rd', 'v2_rd', 'sphere'       
     # other types
-    is_train_others = True          
+    is_train_others = False    
 
     kwargss_all = []    
     for seed, dataset_name in product(seeds, DATASET_NAMES):                                                                                                         

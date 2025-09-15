@@ -4,24 +4,13 @@ from datetime import datetime, timedelta
 from itertools import product
 from os.path import isfile, isdir
 from time import sleep
-from constants import DROOT, CLUSTER, PHYSICS_CONDA, RESOURCE_CONFIGS
+from constants import MODEL_SUFFIX, DROOT, CLUSTER, PHYSICS_CONDA, RESOURCE_CONFIGS
 from UTILS.mutils import njoin, get_seed, structural_model_root, str2bool
-from qsub_parser import job_setup, qsub, add_common_kwargs
+from qsub_parser import job_setup, qsub, add_common_kwargs, str_to_time, time_to_str
 """
 torchrun --nnodes=1 --nproc_per_node=2 ddp_main.py --max_iters=5 --eval_interval=5\
  --eval_iters=200 --weight_decay=0 --n_layers=1 --n_attn_heads=2
-"""
-
-def str_to_time(s):
-    t = datetime.strptime(s, "%H:%M:%S")
-    time_delta = timedelta(hours=t.hour, minutes=t.minute, seconds=t.second)    
-    return time_delta
-
-def time_to_str(delta):
-    total_seconds = int(delta.total_seconds())
-    h, remainder = divmod(total_seconds, 3600)
-    m, s = divmod(remainder, 60)
-    return f"{h:02d}:{m:02d}:{s:02d}"    
+"""   
     
 if __name__ == '__main__':
       
@@ -38,12 +27,14 @@ if __name__ == '__main__':
     # general settings
     #n_layers = [4]
     n_layer = 4
-    seeds = list(range(1))        
+    seeds = list(range(5))   
+    is_force_train = False   
+    is_train_others = True  
 
     patch_size = 4
     is_preln = True  # default is True            
     qk_shares = [False]
-    is_ops = [True, False]
+    is_ops = [False, True]
 
     # FNS settings
     is_rescale_dist = True
@@ -52,7 +43,7 @@ if __name__ == '__main__':
     bandwidths = [1]
 
     # Resources
-    nstack = 1
+    nstack = 4
     mem = '8GB'      
     is_use_gpu = True
 
@@ -65,23 +56,11 @@ if __name__ == '__main__':
         walltime = time_to_str(str_to_time(single_walltime) * nstack)
         dirname = f'{n_layer}L-ps={patch_size}' 
         dirname = dirname + '-preln' if is_preln else dirname + '-postln'
-        ROOT = njoin(DROOT, 'full_models-v2', dirname)
+        ROOT = njoin(DROOT, 'full_models-v6', dirname)
         job_path = njoin(ROOT, 'jobs_all')
 
         kwargss_all = []    
-        for seed, dataset_name, qk_share in product(seeds, DATASET_NAMES, qk_shares):    
-            kwargss = []                                         
-            for alpha, bandwidth, manifold in product(alphas, bandwidths, manifolds):                                                       
-                kwargss.append({'model_name':'fnsvit','manifold':manifold,
-                'alpha': alpha,'a': 0,'bandwidth':bandwidth, 'is_op':is_op}
-                )      
-
-            # ----- dpvit -----
-            kwargss.append({'model_name':'dpvit','is_op':is_op})
-
-            # ----- sinkvit -----
-            # for n_it in [3]:
-            #     kwargss.append({'model_name':'opsinkvit','n_it':n_it,'is_op':is_op})                            
+        for seed, dataset_name, qk_share in product(seeds, DATASET_NAMES, qk_shares):                              
                 
             common_kwargs = {'seed':             seed,
                             'is_preln':          is_preln,  
@@ -107,10 +86,14 @@ if __name__ == '__main__':
                 common_kwargs['lr_scheduler_type'] = 'binary'
                 if common_kwargs['lr_scheduler_type'] == 'binary':
                     common_kwargs['binary_ratio'] = 4/5
-                # common_kwargs['max_lr'] = 2e-4
-                # common_kwargs['min_lr'] = 2e-5
-                common_kwargs['max_lr'] = 5e-4
-                common_kwargs['min_lr'] = 5e-5
+                # common_kwargs['max_lr'] = 5e-4  # v2
+                if is_op:
+                    common_kwargs['max_lr'] = 6e-4  # v3 (best for is_op True)             
+                else:
+                    #common_kwargs['max_lr'] = 7e-4  # v4
+                    #common_kwargs['max_lr'] = 1e-3  # v5                    
+                    common_kwargs['max_lr'] = 2e-3  # v6
+                common_kwargs['min_lr'] = common_kwargs['max_lr'] / 10         
 
                 common_kwargs['epochs'] = 125                                                        
                 common_kwargs['n_attn_heads'] = 6
@@ -125,8 +108,31 @@ if __name__ == '__main__':
                                                     n_attn_heads=common_kwargs['n_attn_heads'], hidden_size=common_kwargs['hidden_size']
                                                     )       
             model_root = njoin(ROOT, 'config_qqv' if qk_share else 'config_qkv', dataset_name, model_root_dirname)
-        
-    
+            
+            kwargss = []
+            qkv = 'qqv' if qk_share else 'qkv'
+            # FNS
+            for alpha, bandwidth, manifold in product(alphas, bandwidths, manifolds):
+                model_name = manifold + 'fns' +  MODEL_SUFFIX
+                model_name = 'op' + model_name if is_op else model_name
+                model_dir = njoin(model_root,
+                f'{model_name}-{dataset_name}-{qkv}-alpha={float(alpha)}-eps={float(bandwidth)}',
+                f'model={seed}')
+                if not isfile(njoin(model_dir, 'run_performance.csv')) or is_force_train:
+                    kwargss.append({'model_name':'fnsformer','alpha':alpha,'a': 0,
+                                    'bandwidth':bandwidth,'manifold':manifold})
+            
+            # Other models
+            if is_train_others:
+                model_name = 'dp' + MODEL_SUFFIX
+                model_name = 'op' + model_name if is_op else model_name
+                model_dir = njoin(model_root,f'{model_name}-{dataset_name}-{qkv}',f'model={seed}')                
+                if not isfile(njoin(model_dir, 'run_performance.csv')) or is_force_train:
+                    kwargss.append({'model_name':'dpformer'})
+                # for n_it in [3]:
+                #     kwargss.append({'model_name':'sinkformer','n_it':n_it,'is_op': is_op})      
+
+
             for idx in range(len(kwargss)):
                 # function automatically creates dir
                 kwargss[idx]["dataset"] = dataset_name    

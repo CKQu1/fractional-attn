@@ -5,6 +5,7 @@ import matplotlib.gridspec as gridspec
 import numpy as np
 import os
 import pandas as pd
+import random
 import torch
 import torch.nn as nn
 from ast import literal_eval
@@ -12,21 +13,19 @@ from torch.nn import functional as F
 from tqdm import tqdm
 from os import makedirs
 from os.path import isdir, isfile
-
-from models.rdfnsformer import RDFNSformer
-from models.dpformer import DPformer
-
-from constants import *
-from UTILS.mutils import njoin, str2bool, collect_model_dirs, AttrDict, load_model_files, dist_to_score
-from UTILS.figure_utils import matrixify_axs, label_axs
-from UTILS.dataloader import load_dataset_and_tokenizer
-
 from torch.utils.data import DataLoader
 from torchtext.data.utils import get_tokenizer
 from torchtext.vocab import GloVe
 from UTILS.data_utils import create_examples, glove_create_examples
 
+from models.model import Transformer
+from constants import *
+from UTILS.mutils import njoin, str2bool, collect_model_dirs, AttrDict, load_model_files, dist_to_score
+from UTILS.figure_utils import matrixify_axs, label_axs
+from UTILS.dataloader import load_dataset_and_tokenizer
+
 """
+-------------------------------------------------------------------------
 There are 2 modes for this:
     - normal mode: args.is_normal_mode == True
         - obtain the classification errors for all single sequence length
@@ -34,7 +33,19 @@ There are 2 modes for this:
     - dynamic mode: args.is_normal_mode == False
         - randomly mask attention score
         - batch_size can be anything
+-------------------------------------------------------------------------
 """
+
+def seed_everything(seed):
+    random.seed(seed)
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 if __name__ == '__main__':
 
@@ -42,9 +53,11 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='nlp-tutorial/dynamic_inference.py arguments')    
     parser.add_argument('--model_dir', default='', help='Pretrained models root')
     parser.add_argument('--is_normal_mode', type=str2bool, nargs='?', const=True, default=False)
+    # ----- is_normal_mode == True -----
+    parser.add_argument('--max_len_adj', default=512, type=int)
     # ----- is_normal_mode == False -----
     parser.add_argument('--batch_size', default=64, type=int)
-    parser.add_argument('--is_dist_based', type=str2bool, nargs='?', const=True, default=False)    
+    parser.add_argument('--is_dist_based', type=str2bool, nargs='?', const=True, default=False)        
 
     args = parser.parse_args()   
 
@@ -64,8 +77,11 @@ if __name__ == '__main__':
     pretrained_model_name = config['pretrained_model_name'] if fix_embed else False
     dataset_name = config['dataset_name'] = attn_setup['dataset_name']
     if dataset_name == 'imdb' and 'num_classes' not in config.keys():
-        config['num_classes'] = 2                
-    max_len = config['max_len'] = config['seq_len']    
+        config['num_classes'] = 2    
+
+    ###########################
+    max_len_original = config['seq_len']
+    max_len_adj = config['max_len'] = config['seq_len'] = args.max_len_adj   
     main_args = AttrDict(config)
     
     # ---------- set up ----------    
@@ -76,23 +92,33 @@ if __name__ == '__main__':
     checkpoint = njoin(model_dir, 'ckpt.pt')
     is_checkpoint_exist = isfile(checkpoint)
 
-    torch.manual_seed(seed)
+    # ---------- seed ----------
+    #torch.manual_seed(seed)
+    seed_everything(seed)
+
     if isfile(njoin(model_dir, 'run_performance.csv')) and is_checkpoint_exist:
         run = pd.read_csv(njoin(model_dir, 'run_performance.csv'))
     else:
         print(f'model={seed} incomplete training!')
         quit()            
 
-    # ---------------------------------------- poor man's data loader ----------------------------------------
     # tokenizer_name is hard set in main.py for the following case
     if main_args.dataset_name == 'imdb' and not main_args.fix_embed:
         main_args.tokenizer_name = 'sentencepiece'  
         main_args.pretrained_model = 'wiki.model'
         main_args.vocab_file = 'wiki.vocab'
+
+    # ---------------------------------------- poor man's data loader ----------------------------------------
     tokenizer, train_loader, test_loader, train_size, eval_size, steps_per_epoch, num_classes =\
         load_dataset_and_tokenizer(main_args, batch_size)     
     test_n_batches, test_n_samples = len(test_loader), len(test_loader.dataset)  
     # -------------------------------------------------------------------------------------------------------- 
+
+    # load again with max_len + 1
+    main_args.max_len = max_len_adj + 1
+    _, train_loader_adj, test_loader_adj, _, _, _, _ =\
+        load_dataset_and_tokenizer(main_args, batch_size)          
+
     print(f'Dataset {dataset_name} loaded! \n')
 
     # ----- varying sequence len -----
@@ -101,27 +127,43 @@ if __name__ == '__main__':
 
         def eval_model(model):
             dynamic_metrics = []
-            for dataset_loader in [train_loader, test_loader]:                  
+            for didx, dataset_loader in enumerate([train_loader, test_loader]):                    
                 n_batches = len(dataset_loader)
                 n_samples = len(dataset_loader.dataset)  
                 dataset_metrics = np.zeros([n_samples,2])
-                for batch_idx, batch in tqdm(enumerate(dataset_loader)):  # batch_size should be 1 here only
-                    inputs, labels = batch
-                    
-                    inputs, labels = inputs.to(device), labels.to(device)            
+                dataset_loader_adj = train_loader_adj if didx == 0 else test_loader_adj
 
-                    outputs, attention_weights = model(inputs)
+                # the dataset attribute is not randomized
+                for batch_idx in tqdm(range(n_samples)):  # batch_size should be 1 here only
+                    inputs, labels = dataset_loader.dataset[batch_idx]
+                    inputs, labels = inputs.to(device), labels.to(device)            
+                    outputs, attention_weights = model(inputs[None])
                                    
+                    inputs_adj, _ = dataset_loader_adj.dataset[batch_idx]
+
                     dataset_metrics[batch_idx,0] = int((outputs.argmax(dim=-1) == labels).item())  # double-check
-                    dataset_metrics[batch_idx,1] = max_len - count_trailing_zeros(inputs[0])      
+                    #dataset_metrics[batch_idx,1] = max_len - count_trailing_zeros(inputs[0])      
+                    dataset_metrics[batch_idx,1] = max_len_adj + 1 - count_trailing_zeros(inputs_adj)
                 dynamic_metrics.append(dataset_metrics)
             return dynamic_metrics
 
-        # load weights  
-        model = RDFNSformer(config) if is_fns else DPformer(config)
-        model = model.to(device)                                  
-        ckpt = torch.load(checkpoint, map_location=torch.device(device))                            
-        model.load_state_dict(ckpt['model'])                            
+        # correction for config model_name
+        if 'model_name' not in config.keys():
+            config['model_name'] = attn_setup['model_name'][2:] if config['is_op'] else attn_setup['model_name']   
+        # load weights        
+        model = Transformer(config)
+        model = model.to(device)   
+        ckpt = torch.load(checkpoint, map_location=torch.device(device))
+        if max_len_original == max_len_adj:               
+            model.load_state_dict(ckpt['model'])                         
+        else:
+            pretrained_state_dict = {
+                k: v for k, v in ckpt['model'].items() 
+                if k != 'pos_embedding.weight'
+            }
+            # ckpt['model']['pos_embedding.weight' = ]
+            model.load_state_dict(pretrained_state_dict, strict=False)
+                                    
         model.eval()  
 
         # ----- save data -----
@@ -131,9 +173,9 @@ if __name__ == '__main__':
         df_test = pd.DataFrame(data=testset_metrics, columns=col_names)   
         # order based on second col (seq len)
         df_train = df_train.sort_values(by='seq_len').reset_index(drop=True)
-        df_test = df_test.sort_values(by='seq_len').reset_index(drop=True)
-        df_train.to_csv(njoin(model_dir, f'bs=1-train_inference.csv'))
-        df_test.to_csv(njoin(model_dir, f'bs=1-test_inference.csv'))        
+        df_test = df_test.sort_values(by='seq_len').reset_index(drop=True)      
+        df_train.to_csv(njoin(model_dir, f'train_inference-bs=1-len={args.max_len_adj}.csv'))
+        df_test.to_csv(njoin(model_dir, f'test_inference-bs=1-len={args.max_len_adj}.csv'))    
 
     # ----- dynamic inference -----
     else:  

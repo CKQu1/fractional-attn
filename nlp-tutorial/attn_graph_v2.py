@@ -1,25 +1,24 @@
 import argparse
 import os
+import networkx as nx
+import matplotlib.pyplot as plt
+import numpy as np
+import torch.nn as nn
+import torch
 from os import makedirs
 from os.path import isdir, isfile
-import matplotlib.pyplot as plt
 from matplotlib.transforms import ScaledTranslation
 from string import ascii_lowercase
-import numpy as np
-import torch
 from torch.nn import functional as F  
 from UTILS.mutils import njoin, str2bool, collect_model_dirs, AttrDict, load_model_files, dist_to_score
 from constants import HYP_CMAP, HYP_CNORM, MODEL_SUFFIX, DROOT
-from models.rdfnsformer import RDFNSformer
-from models.dpformer import DPformer
+from models.model import Transformer
 from torchtext.data.utils import get_tokenizer
 from torchtext.vocab import GloVe
 from UTILS.data_utils import glove_create_examples, count_trailing_zeros
 from UTILS.dataloader import load_dataset_and_tokenizer
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-import networkx as nx
-import torch.nn as nn
     
 def eval_model(model):
     _loss = 0
@@ -110,10 +109,10 @@ if __name__ == '__main__':
     # --------------------------------------------------------------------------------------------------------   
     
     is_fns = attn_setup['model_name'][-9:] == 'fns' + MODEL_SUFFIX 
-    if not is_fns: # opdpformer
-        model = DPformer(config, is_return_dist=True)
-    else: # rdfnsformer
-        model = RDFNSformer(config, is_return_dist=True) 
+    # correction for config model_name
+    if 'model_name' not in config.keys():
+        config['model_name'] = attn_setup['model_name'][2:] if config['is_op'] else attn_setup['model_name']    
+    model = Transformer(config, is_return_dist = True)
 
     ckpt = torch.load(checkpoint, map_location=torch.device(device))
     model.load_state_dict(ckpt['model'])

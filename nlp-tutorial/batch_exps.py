@@ -4,9 +4,9 @@ from itertools import product
 from os.path import isfile, isdir
 from pathlib import Path
 
-from constants import DROOT, MODEL_SUFFIX, CLUSTER
+from constants import DROOT, MODEL_SUFFIX, CLUSTER, RESOURCE_CONFIGS
 from UTILS.mutils import njoin, collect_model_dirs, load_model_files, structural_model_root
-from qsub_parser import add_common_kwargs
+from qsub_parser import add_common_kwargs, str_to_time, time_to_str
 
 """
 The following are all the experiments to be run from `batch_submit_main.py`
@@ -68,19 +68,8 @@ def train_exps_full():
 
     # resources
     is_use_gpu = True
-    if is_use_gpu:
-        if CLUSTER == 'GADI':
-            q = 'gpuvolta'
-            ngpus, ncpus = 1, 12  # GPU       
-        elif CLUSTER == 'PHYSICS':
-            q = 'l40s'
-            ngpus, ncpus = 1, 1  # GPU
-    else:
-        if CLUSTER == 'GADI':
-            q = 'normal'
-        elif CLUSTER == 'PHYSICS':
-            q = 'taiji'         
-        ngpus, ncpus = 0, 1  # CPU             
+    cfg = RESOURCE_CONFIGS[CLUSTER][is_use_gpu]
+    q, ngpus, ncpus = cfg["q"], cfg["ngpus"], cfg["ncpus"]              
 
     nstack = 1                               
     walltime = '01:29:59'  # for nstack = 1
@@ -245,19 +234,8 @@ def train_exps_hyperparam():
 
     # resources
     is_use_gpu = True
-    if is_use_gpu:
-        if CLUSTER == 'GADI':
-            q = 'gpuvolta'
-            ngpus, ncpus = 1, 12  # GPU       
-        elif CLUSTER == 'PHYSICS':
-            q = 'l40s'
-            ngpus, ncpus = 1, 1  # GPU
-    else:
-        if CLUSTER == 'GADI':
-            q = 'normal'
-        elif CLUSTER == 'PHYSICS':
-            q = 'taiji'         
-        ngpus, ncpus = 0, 1  # CPU             
+    cfg = RESOURCE_CONFIGS[CLUSTER][is_use_gpu]
+    q, ngpus, ncpus = cfg["q"], cfg["ngpus"], cfg["ncpus"]            
 
     select = 1                           
     #walltime = '01:29:59'  # for nstack = 1
@@ -376,17 +354,15 @@ def train_exps_hyperparam():
 # ----- dynamic inference for pretrained models -----
 def dynamic_inference_exps():
     script_name = 'dynamic_inference.py'
-    nstack = 4
+    nstack = 5 
 
-    #CLUSTER = 'PHYSICS'  # can manually enter here too  
-
-    # ---------- CHANGE HERE ----------
-    # isolate layers
-    n_layers = 1    
-
-    # general setting
+    # ---------- CHANGE HERE ----------    
+    n_layers = 1  # isolate layers
     is_normal_mode = True
-    if not is_normal_mode: 
+
+    if is_normal_mode:
+        max_len_adj = 512
+    else:
         is_dist_based = False
         batch_size = 64
 
@@ -396,23 +372,14 @@ def dynamic_inference_exps():
     # ---------------------------------
 
     # resources
+    #CLUSTER = 'PHYSICS'  # can manually enter here too  
     is_use_gpu = True
-    if is_use_gpu:
-        if CLUSTER == 'GADI':
-            q = 'gpuvolta'
-            ngpus, ncpus = 1, 12  # GPU       
-        elif CLUSTER == 'PHYSICS':
-            q = 'l40s'
-            ngpus, ncpus = 1, 1  # GPU
-    else:
-        if CLUSTER == 'GADI':
-            q = 'normal'
-        elif CLUSTER == 'PHYSICS':
-            q = 'taiji'         
-        ngpus, ncpus = 0, 1  # CPU  
+    cfg = RESOURCE_CONFIGS[CLUSTER][is_use_gpu]
+    q, ngpus, ncpus = cfg["q"], cfg["ngpus"], cfg["ncpus"]  
 
     select = 1                             
-    walltime = '00:08:59'
+    single_walltime = '00:03:15'
+    walltime = time_to_str(str_to_time(single_walltime) * nstack)    
     mem = '4GB'      
 
     # extract model_dir
@@ -420,13 +387,13 @@ def dynamic_inference_exps():
     all_model_dirs = [str(p) for p in models_root.rglob("*") if p.is_dir() and pattern.search(str(p))]
     all_model_dirs = [model_dir for model_dir in all_model_dirs if f'{n_layers}L-hidden' in model_dir]
 
-    fnames =[]  # if these files do not exist, then run
+    fnames = []  # if these files do not exist, then run
     if not is_normal_mode:
         fname = 'dist' if is_dist_based else 'prob'
         fname += f'-bs={batch_size}-inference.csv'
         fnames.append(fname)
     else:
-        fnames += ['bs=1-train_inference.csv', 'bs=1-test_inference.csv']
+        fnames += [f'train_inference-bs=1-len={max_len_adj}.csv', f'test_inference-bs=1-len={max_len_adj}.csv']
     fnames.append('ckpt.pt')
 
     # FNS setting
@@ -448,8 +415,9 @@ def dynamic_inference_exps():
                 continue
 
         is_run_exp = model_dir is not None
-        for fname in fnames:
-            is_run_exp = is_run_exp and not isfile(fname)
+        for fname in fnames[:-1]:
+            is_run_exp = is_run_exp and not isfile(njoin(model_dir, fname))  # data files
+        is_run_exp = is_run_exp and isfile(njoin(model_dir, fnames[-1]))     # ckpt.pt
         if is_run_exp:
             # non-normal mode (random masking exp)
             if not is_normal_mode:
@@ -458,7 +426,7 @@ def dynamic_inference_exps():
             # normal mode (batch-size 1)
             else:
                 kwargss_all.append({'model_dir': model_dir, 
-                                    'is_normal_mode': is_normal_mode})
+                                    'is_normal_mode': is_normal_mode, 'max_len_adj': max_len_adj})
 
     return kwargss_all, script_name, q, ncpus, ngpus, select, walltime, mem, job_path, nstack
 
@@ -474,8 +442,9 @@ def attn_graph_exps():
 
     # resources
     is_use_gpu = False
-    select = 1
-    (ngpus,ncpus) = (1,1) if is_use_gpu else (0,1)                               
+    cfg = RESOURCE_CONFIGS[CLUSTER][is_use_gpu]
+    q, ngpus, ncpus = cfg["q"], cfg["ngpus"], cfg["ncpus"]      
+    select = 1                              
     walltime = '23:59:59'
     mem = '4GB'      
 

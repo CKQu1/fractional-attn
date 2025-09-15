@@ -18,6 +18,19 @@ else:
     CLUSTER = None
 # -------------------
 
+# ----- RESOURCES -----
+RESOURCE_CONFIGS = {
+    "GADI": {
+        True:  {"q": "gpuvolta", "ngpus": 1, "ncpus": 12},
+        False: {"q": "normal",   "ngpus": 0, "ncpus": 1},
+    },
+    "PHYSICS": {
+        True:  {"q": "l40s", "ngpus": 1, "ncpus": 1},
+        False: {"q": "taiji", "ngpus": 0, "ncpus": 1},
+    },
+}
+# -------------------
+
 # ----- GADI -----
 GADI_PROJECTS = ['uu69']
 GADI_SOURCE = '/scratch/uu69/cq5024/myenvs/fsa/bin/activate'

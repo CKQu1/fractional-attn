@@ -1,5 +1,4 @@
 import argparse
-from datetime import datetime
 from constants import DROOT, CLUSTER, MODEL_SUFFIX
 from UTILS.mutils import njoin, get_seed, structural_model_root, str2bool
 from qsub_parser import job_setup, qsub, add_common_kwargs
@@ -16,19 +15,22 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='batch_submit_main.py args')   
     parser.add_argument('--is_qsub', type=str2bool, nargs='?', const=True, default=False) 
     args = parser.parse_args()
-
-    date_str = datetime.today().strftime('%Y-%m-%d')    
+    
     batch_script_name = "batch_main.py"
 
-    exp_type = 'exp2'
+    exp_type = 'exp3'
     if exp_type == 'exp1':                           # train full-sized models
-        EXPS_TO_RUN = train_exps_full()
+        EXPS_TO_RUN = train_exps_full(); EXP_NAME = '6-layer model training'
     if exp_type == 'exp2':                           # train models of depth 1, 2 and 3
-        EXPS_TO_RUN = train_exps_hyperparam()        
+        EXPS_TO_RUN = train_exps_hyperparam(); EXP_NAME = 'hyperparam model training'        
     elif exp_type == 'exp3':                         # dynamic inference
-        EXPS_TO_RUN = dynamic_inference_exps()
+        EXPS_TO_RUN = dynamic_inference_exps(); EXP_NAME = 'dynamic inference'
     elif exp_type == 'exp4':                         # attn graph from pretrained models
-        EXPS_TO_RUN = attn_graph_exps()
+        EXPS_TO_RUN = attn_graph_exps(); EXP_NAME = 'attn graph construction'
+
+    print('-----------------------')
+    print(f'{exp_type}: {EXP_NAME}')
+    print('----------------------- \n')
     
     kwargss_all, script_name, q, ncpus, ngpus, select, walltime, mem, job_path, nstack = EXPS_TO_RUN
 

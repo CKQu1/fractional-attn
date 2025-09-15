@@ -12,25 +12,20 @@ from torch.nn import functional as F
 from tqdm import tqdm
 from os import makedirs
 from os.path import isdir
-
-from constants import HYP_CMAP, HYP_CNORM, FIGS_DIR, MODEL_SUFFIX
-from UTILS.mutils import njoin, str2bool, collect_model_dirs, AttrDict, load_model_files, dist_to_score
-from UTILS.mutils import dijkstra_matrix, fdm_kernel
-from models.rdfnsformer import RDFNSformer
-from models.dpformer import DPformer
-
+from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
+from matplotlib.transforms import ScaledTranslation
+from string import ascii_lowercase
 from torch.utils.data import DataLoader
 from torchtext.data.utils import get_tokenizer
 from torchtext.vocab import GloVe
+from constants import HYP_CMAP, HYP_CNORM, FIGS_DIR, MODEL_SUFFIX
 from UTILS.data_utils import glove_create_examples
 from UTILS.dataloader import load_dataset_and_tokenizer
 from UTILS.figure_utils import matrixify_axs, label_axs
-
-from sklearn.decomposition import PCA
-from sklearn.preprocessing import StandardScaler
-
-from matplotlib.transforms import ScaledTranslation
-from string import ascii_lowercase
+from UTILS.mutils import njoin, str2bool, collect_model_dirs, AttrDict, load_model_files, dist_to_score
+from UTILS.mutils import dijkstra_matrix, fdm_kernel
+from models.model import Transformer
 
 matplotlib.use("Agg")
 
@@ -164,8 +159,10 @@ if __name__ == '__main__':
             config['dataset_name'] = attn_setup['dataset_name']
             config['max_len'] = config['seq_len']
             manifold = attn_setup['manifold']      
-
-            model = RDFNSformer(config, is_return_dist=True)     
+            # correction for config model_name
+            if 'model_name' not in config.keys():
+                config['model_name'] = attn_setup['model_name'][2:] if config['is_op'] else attn_setup['model_name']    
+            model = Transformer(config,  is_return_dist = True)   
             model = model.to(device)
             checkpoint = njoin(model_dir, 'ckpt.pt')  # assuming model's is trained
             ckpt = torch.load(checkpoint, map_location=torch.device(device))
@@ -642,8 +639,11 @@ if __name__ == '__main__':
         if config_other['dataset_name'] == 'imdb' and 'num_classes' not in config_other.keys():
             config_other['num_classes'] = 2
         config_other['max_len'] = config_other['seq_len']
+        # correction for model_name
+        if 'model_name' not in config_other.keys():
+            config_other['model_name'] = attn_setup['model_name'][2:] if config_other['is_op'] else attn_setup['model_name']            
 
-        model_other = DPformer(config_other, is_return_dist=True)  
+        model_other = Transformer(config_other, is_return_dist=True)  
         model_other = model_other.to(device)   
         checkpoint_other = njoin(model_dir_other, 'ckpt.pt')
         ckpt_other = torch.load(checkpoint_other, map_location=torch.device(device))

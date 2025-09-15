@@ -2,7 +2,7 @@ import numpy as np
 import sys
 import os
 import random
-from datetime import datetime
+from datetime import datetime, timedelta
 from os.path import isdir, isfile
 from constants import *
 from UTILS.mutils import njoin
@@ -453,6 +453,18 @@ def command_setup_ddp(**kwargs):
         command = command[1:]
 
     return command, additional_command    
+
+
+def str_to_time(s):
+    t = datetime.strptime(s, "%H:%M:%S")
+    time_delta = timedelta(hours=t.hour, minutes=t.minute, seconds=t.second)    
+    return time_delta
+
+def time_to_str(delta):
+    total_seconds = int(delta.total_seconds())
+    h, remainder = divmod(total_seconds, 3600)
+    m, s = divmod(remainder, 60)
+    return f"{h:02d}:{m:02d}:{s:02d}" 
 
 
 # ---------------------------------------- UNUNSED FUNCTIONS ----------------------------------------

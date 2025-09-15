@@ -689,7 +689,7 @@ def dynamic_inference(models_root, n_layer=1,
 """
 python -i plot_results.py len_inference .droot/L-d-grid/
 """
-def len_inference(models_root, n_layer=1,
+def len_inference(models_root, n_layer=1, max_len_adj=512,
                   fns_type='fns', manifold='rd', is_rescale_dist=True, selected_alphas=[1.2, 2.0],
                   is_op=True, qk_shares=[False,True], metric='test_acc'):
 
@@ -697,9 +697,9 @@ def len_inference(models_root, n_layer=1,
 
     # general setting
     if metric == 'test_acc':
-        fname = 'bs=1-test_inference.csv'
+        fname = f'test_inference-bs=1-len={max_len_adj}.csv'
     elif metric == 'train_acc':
-        fname = 'bs=1-train_inference.csv'
+        fname = f'train_inference-bs=1-len={max_len_adj}.csv'
 
     # get layers, emb_ds from regular expression
     pattern = r"\d+L-hidden=\d+-max_len=512"
@@ -751,9 +751,12 @@ def len_inference(models_root, n_layer=1,
     _, config, _, _ = load_model_files(model_dir)    
     thresholds = []
     ii = 6
-    while 2**ii <= config['seq_len']:
+    #while 2**ii <= config['seq_len']:
+    while 2**ii <= max_len_adj:
         thresholds.append(2**ii)
         ii += 1    
+    # if seq_lens.max() > max_len_adj:
+    #     thresholds.append(seq_lens.max())
 
     ensembles = 5  # figure out how to extract this
 
@@ -764,7 +767,7 @@ def len_inference(models_root, n_layer=1,
     label_axs(fig, axs)
 
     metrics_all = np.zeros([2, len(selected_alphas)+1, len(qk_shares), 
-                                len(emb_ds), len(thresholds), ensembles])
+                               len(emb_ds), len(thresholds) + 1, ensembles])
     metrics_all[:] = np.nan
     for model_dir in model_dirs:
         # load config
@@ -788,8 +791,10 @@ def len_inference(models_root, n_layer=1,
             metrics_all[:, alpha_idx, qk_shares.index(qk_share), list(emb_ds).index(hidden), tidx, seed] =\
                 [inference.loc[mask, "is_correct"].sum(), mask.sum()]                
 
-            # print(f'threshold = {threshold}')
-            # print([inference.loc[mask, "is_correct"].sum(), mask.sum()])
+        # greater than max_len
+        mask = (thresholds[-1] < inference["seq_len"])
+        metrics_all[:, alpha_idx, qk_shares.index(qk_share), list(emb_ds).index(hidden), -1, seed] =\
+            [inference.loc[mask, "is_correct"].sum(), mask.sum()]                
 
     # accuracy is count / total
     metric_plot = metrics_all[0,:] / metrics_all[1,:]
@@ -805,7 +810,8 @@ def len_inference(models_root, n_layer=1,
         metric_mean = np.nanmean(metric_plot[alpha_idx,sidx,didx,:,:],-1)
         metric_std = np.nanstd(metric_plot[alpha_idx,sidx,didx,:,:],-1)
                             
-        axs[sidx,didx].plot(thresholds, metric_mean,
+        # add final dummy threshold
+        axs[sidx,didx].plot(thresholds + [thresholds[-1] * 2], metric_mean,
                             markersize=MARKERSIZE,
                             c=color, linestyle=LINESTYLE_DICT[fns_type])  
 
@@ -827,8 +833,8 @@ def len_inference(models_root, n_layer=1,
         axs[0,ncol].set_title(rf'$d = {emb_ds[ncol]}$')
         axs[-1,ncol].set_xlabel('Sequence length')        
         # tick labels
-        axs[-1,ncol].set_xticks(thresholds)
-        axs[-1,ncol].set_xticklabels(thresholds)
+        axs[-1,ncol].set_xticks(thresholds + [thresholds[-1] * 2])
+        axs[-1,ncol].set_xticklabels(thresholds + [rf'${thresholds[-1]} \leq$'])
         # remove minor ticks
         axs[-1,ncol].xaxis.set_minor_formatter(NullFormatter()) 
         axs[-1,ncol].xaxis.minorticks_off() 
@@ -851,7 +857,7 @@ def len_inference(models_root, n_layer=1,
     SAVE_DIR = njoin(FIGS_DIR, 'nlp-task')
     if not isdir(SAVE_DIR): makedirs(SAVE_DIR)    
     qkv = 'qqv' if qk_share else 'qkv'
-    fig_file = f'{n_layer}L-{metric}-len_inference.pdf'
+    fig_file = f'{n_layer}L-len={max_len_adj}-{metric}-inference.pdf'
     plt.savefig(njoin(SAVE_DIR, fig_file))            
     print(f'Figure saved in {njoin(SAVE_DIR, fig_file)}')  
 

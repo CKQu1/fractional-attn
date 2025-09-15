@@ -1,9 +1,4 @@
 import argparse
-
-from models.model_utils import create_longformer_mask
-from UTILS.dataloader import load_dataset_and_tokenizer
-#from trainer import Trainer
-
 import json
 import os
 import platform
@@ -11,18 +6,18 @@ import pandas as pd
 import time
 import torch.nn as nn
 import math
-import pickle
+import numpy as np
+import torch
 from contextlib import nullcontext
 from os.path import isdir, isfile
 from os import makedirs
 from tqdm import tqdm
-
-import numpy as np
-import torch
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.distributed import init_process_group, destroy_process_group
-
 from constants import *
+from models.model import Transformer
+from models.model_utils import create_longformer_mask
+from UTILS.dataloader import load_dataset_and_tokenizer
 from UTILS.mutils import njoin, create_model_dir, convert_train_history, structural_model_root
 from UTILS.mutils import str2bool, str2ls, str_or_float
 

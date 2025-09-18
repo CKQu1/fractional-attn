@@ -34,7 +34,7 @@ if __name__ == '__main__':
     patch_size = 4
     is_preln = True  # default is True            
     qk_shares = [False]
-    is_ops = [False, True]
+    is_ops = [True]
 
     # FNS settings
     is_rescale_dist = True
@@ -64,6 +64,7 @@ if __name__ == '__main__':
                 
             common_kwargs = {'seed':             seed,
                             'is_preln':          is_preln,  
+                            'is_op':             is_op,
                             'qk_share':          qk_share, 
                             'n_layers':          n_layer,
                             'hidden_size':       48,
@@ -119,7 +120,7 @@ if __name__ == '__main__':
                 f'{model_name}-{dataset_name}-{qkv}-alpha={float(alpha)}-eps={float(bandwidth)}',
                 f'model={seed}')
                 if not isfile(njoin(model_dir, 'run_performance.csv')) or is_force_train:
-                    kwargss.append({'model_name':'fnsformer','alpha':alpha,'a': 0,
+                    kwargss.append({'model_name':'fns' + MODEL_SUFFIX,'alpha':alpha,'a': 0,
                                     'bandwidth':bandwidth,'manifold':manifold})
             
             # Other models
@@ -128,9 +129,9 @@ if __name__ == '__main__':
                 model_name = 'op' + model_name if is_op else model_name
                 model_dir = njoin(model_root,f'{model_name}-{dataset_name}-{qkv}',f'model={seed}')                
                 if not isfile(njoin(model_dir, 'run_performance.csv')) or is_force_train:
-                    kwargss.append({'model_name':'dpformer'})
+                    kwargss.append({'model_name':'dp' + MODEL_SUFFIX})
                 # for n_it in [3]:
-                #     kwargss.append({'model_name':'sinkformer','n_it':n_it,'is_op': is_op})      
+                #     kwargss.append({'model_name':'sink' + MODEL_SUFFIX,'n_it':n_it})      
 
 
             for idx in range(len(kwargss)):

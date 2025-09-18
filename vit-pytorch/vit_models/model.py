@@ -18,6 +18,10 @@ class Block(nn.Module):
             self.attention = RDFNSMultiHeadAttention(config)
         elif config['model_name'] == 'spfnsvit':
             self.attention = SPFNSMultiHeadAttention(config)
+        else:
+            model_name = config['model_name']
+            print(f'model_name = {model_name} does not exist')
+            quit()
         self.layernorm_1 = nn.LayerNorm(config["hidden_size"])
         self.mlp = MLP(config)
         self.layernorm_2 = nn.LayerNorm(config["hidden_size"])

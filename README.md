@@ -20,11 +20,22 @@ We focus on 2 types of experiments:
     1. `python main.py --dataset_name=aan-classification`
     2. `python main.py --dataset_name=pathfinder-classification`
 
-## nmt
+## translation-final
 
 ### Data preparation
 
-Run `python prepare_data.py`
+`python -m spacy download en_core_web_sm`
+`python -m spacy download de_core_news_sm`
+
+### Train model
+
+`python --model_name=fnsformer --alpha=1.2 --a=0 --bandwidth=1 --manifold=rd --is_rescale_dist=True --model_root=.droot/experiments --seed=0 --is_op=False --lr=0.00022 --lr_reduction_factor=0.75`
+
+### Files to check
+
+Double-check `modules/attention.py`
+    - Can use `tests/model.py` to check things too
+    - Can use `demo.py` to check translation output of model
 
 ### Model training
 
@@ -38,4 +49,6 @@ Run `python main.py`
 
 [3] `nmt` based on https://github.com/sgrvinod/a-PyTorch-Tutorial-to-Transformers
 
-[4] NanoGPT: https://github.com/karpathy/nanoGPT
+[4] `translation-final` based on https://github.com/tanjeffreyz/attention-is-all-you-need
+
+[5] NanoGPT: https://github.com/karpathy/nanoGPT

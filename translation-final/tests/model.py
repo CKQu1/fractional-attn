@@ -1,0 +1,115 @@
+import unittest
+import torch
+from modules.embedding import Embedding
+from modules.attention import MultiHeadAttention
+from modules.encoder import EncoderLayer
+from modules.decoder import DecoderLayer
+from modules.feed_forward import FeedForwardNetwork
+from modules.transformer import Transformer
+
+MODEL_NAME = 'dpformer'
+IS_OP = False
+QKV_BIAS = False
+
+class TestEmbedding(unittest.TestCase):
+    def test_embedding(self):
+        tokens = torch.ones((64, 30), dtype=torch.int).to(Embedding.device)
+        embedding = Embedding(512, 3000, 0).to(Embedding.device)
+        self.assertEqual(
+            torch.Size([64, 30, 512]),
+            embedding(tokens).size()
+        )
+
+    def test_positional_encoding(self):
+        tokens = torch.ones((64, 30), dtype=torch.int).to(Embedding.device)
+        embedding = Embedding(512, 3000, 0).to(Embedding.device)
+        self.assertEqual(
+            torch.Size([30, 512]),
+            embedding.positional_encoding(tokens).size()
+        )
+
+
+class TestAttention(unittest.TestCase):
+    def test_scaled_dot_product_attention(self):
+        config = {'d_model': 512, 'num_heads': 8, 'model_name': MODEL_NAME,
+                   'is_op': IS_OP, 'qkv_bias': QKV_BIAS}
+        x = torch.rand((64, 8, 30, 64))
+        attention = MultiHeadAttention(config)
+        self.assertEqual(
+            torch.Size([64, 8, 30, 64]),
+            attention.scaled_dot_product_attention(x, x, x).size()
+        )
+
+    def test_multi_head_attention(self):
+        config = {'d_model': 512, 'num_heads': 8, 'model_name': MODEL_NAME,
+                   'is_op': IS_OP, 'qkv_bias': QKV_BIAS}
+        x = torch.rand((64, 30, 512))
+        attention = MultiHeadAttention(config)
+        self.assertEqual(
+            torch.Size([64, 30, 512]),
+            attention(x, x, x).size()
+        )
+
+    def test_split_heads(self):
+        config = {'d_model': 512, 'num_heads': 8, 'model_name': MODEL_NAME,
+                   'is_op': IS_OP, 'qkv_bias': QKV_BIAS}
+        x = torch.rand((64, 30, 512))
+        attention = MultiHeadAttention(config)
+        self.assertEqual(
+            torch.Size([64, 8, 30, 64]),
+            attention.split_heads(x).size()
+        )
+
+    def test_merge_heads(self):
+        config = {'d_model': 512, 'num_heads': 8, 'model_name': MODEL_NAME,
+                   'is_op': IS_OP, 'qkv_bias': QKV_BIAS}
+        x = torch.rand((64, 8, 30, 64))
+        attention = MultiHeadAttention(config)
+        self.assertEqual(
+            torch.Size([64, 30, 512]),
+            attention.merge_heads(x).size()
+        )
+
+
+class TestTransformer(unittest.TestCase):
+    def test_encoder_layer(self):
+        config = {'d_model': 512, 'num_heads': 8, 'dropout_rate': 0.1}
+        x = torch.rand((64, 30, 512))
+        encoder = EncoderLayer(config)
+        self.assertEqual(
+            torch.Size([64, 30, 512]),
+            encoder(x).size()
+        )
+
+    def test_decoder_layer(self):
+        config = {'d_model': 512, 'num_heads': 8, 'dropout_rate': 0.1}
+        x = torch.rand((64, 30, 512)).to(DecoderLayer.device)
+        decoder = DecoderLayer(config).to(DecoderLayer.device)
+        self.assertEqual(
+            torch.Size([64, 30, 512]),
+            decoder(x, x).size()
+        )
+
+    def test_feed_forward_network(self):
+        x = torch.rand((64, 30, 512))
+        ffn = FeedForwardNetwork(512)
+        self.assertEqual(
+            torch.Size([64, 30, 512]),
+            ffn(x).size()
+        )
+
+    def test_transformer(self):
+        config = {'d_model': 512, 'src_vocab_len': 3000, 'trg_vocab_len': 4000,
+                  'src_pad_index': 0, 'trg_pad_index': 0,
+                  'num_heads': 8, 'num_layers': 6,
+                  'dropout_rate': 0.1}
+        x = torch.ones((64, 30), dtype=torch.int).to(Transformer.device)
+        transformer = Transformer(config)
+        self.assertEqual(
+            torch.Size([64, 30, 4000]),
+            transformer(x, x).size()
+        )
+
+
+if __name__ == '__main__':
+    unittest.main()

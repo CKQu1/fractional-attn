@@ -161,7 +161,11 @@ if __name__ == '__main__':
             manifold = attn_setup['manifold']      
             # correction for config model_name
             if 'model_name' not in config.keys():
-                config['model_name'] = attn_setup['model_name'][2:] if config['is_op'] else attn_setup['model_name']    
+                config['model_name'] = attn_setup['model_name'][2:] if config['is_op'] else attn_setup['model_name']   
+            # correction for alpha
+            if 'alpha' not in config.keys():
+                config['alpha'] = attn_setup['alpha']
+
             model = Transformer(config,  is_return_dist = True)   
             model = model.to(device)
             checkpoint = njoin(model_dir, 'ckpt.pt')  # assuming model's is trained
@@ -216,7 +220,7 @@ if __name__ == '__main__':
                 position_pad_mask = X[None].eq(pad_id)
                 positions.masked_fill_(position_pad_mask, 0)
 
-                embeddings = model.embedding(X[None]) + model.pos_embedding(positions)
+                embeddings = model.embedding(X[None].to(device)).to(device) + model.pos_embedding(positions.to(device)).to(device)
 
                 # PCA            
                 n_components = 2
@@ -225,7 +229,10 @@ if __name__ == '__main__':
                 # pca_results = pca.fit_transform(W_word.detach().numpy())
                 # data = StandardScaler().fit_transform(embeddings.detach().numpy()) # Normalise    
 
-                data = embeddings.detach().numpy() # No normalise
+                if 'cuda' in device:
+                    data = embeddings.cpu().detach().numpy() # No normalise
+                else:
+                    data = embeddings.detach().numpy() # No normalise
                 ##### Q = K case #####
                 if not config['qk_share']:
                     #Q = model.layers[0].mha.fns_attn.WQ(data[0])
@@ -323,8 +330,13 @@ if __name__ == '__main__':
                     eigvals, eigvecs = torch.linalg.eigh(K_hat_sym)    
                     eigvecs = torch.diag(D_tilde**(-0.5)) @ eigvecs
 
-                    eigvals = eigvals.detach().numpy()
-                    eigvecs = eigvecs.detach().numpy()      
+
+                    if 'cuda' in device:                        
+                        eigvals = eigvals.cpu().detach().numpy()
+                        eigvecs = eigvecs.cpu().detach().numpy() 
+                    else:
+                        eigvals = eigvals.detach().numpy()
+                        eigvecs = eigvecs.detach().numpy()      
                     # order based on eigvals from large to small
                     ii = np.argsort(eigvals)
                     eigvals = eigvals[ii]
@@ -335,8 +347,12 @@ if __name__ == '__main__':
                     #q = 1/3
                     q = 1/4*((attn_score[0,0] - attn_score[0,0].T).abs().max().item())  # q
                     # Magnetic transform
-                    K_S = (attn_score[0,0] + attn_score[0,0].T).detach()/2  # symmetrized
-                    K_A = -(attn_score[0,0] - attn_score[0,0].T).detach()   # anti-symmetrized
+                    if 'cuda' in device:  
+                        K_S = (attn_score[0,0] + attn_score[0,0].T).cpu().detach()/2  # symmetrized
+                        K_A = -(attn_score[0,0] - attn_score[0,0].T).cpu().detach()   # anti-symmetrized                        
+                    else:
+                        K_S = (attn_score[0,0] + attn_score[0,0].T).detach()/2  # symmetrized
+                        K_A = -(attn_score[0,0] - attn_score[0,0].T).detach()   # anti-symmetrized
                     D = torch.diag(K_S.sum(-1))
                     D_inv = torch.diag(1/K_S.sum(-1))
                     arg = 2j*np.pi*q*K_A.numpy()
@@ -356,11 +372,14 @@ if __name__ == '__main__':
                 if not isdir(SAVE_DIR): makedirs(SAVE_DIR)       
                 qk_affix = 'qqv' if config['qk_share'] else 'qkv'
                 # Save numerical results
-                np.savez(njoin(SAVE_DIR, f'attn_graph_results_{attn_setup['alpha']}.npz'), diffusion_map=eigvecs, far_xy_idxs=far_xy_idxs, attention_weights=attention_weight.detach(), embeddings=data[0])
+                alpha = attn_setup['alpha']
+                np.savez(njoin(SAVE_DIR, f'attn_graph_results_{alpha}.npz'), diffusion_map=eigvecs, far_xy_idxs=far_xy_idxs, 
+                         attention_weights=attention_weight.detach() if 'cuda' not in device else attention_weight.cpu().detach(), 
+                         embeddings=data[0])
                 # Save corresponding text
-                with open(njoin(SAVE_DIR, f'text_{attn_setup['alpha']}.txt'), 'w') as f:
+                with open(njoin(SAVE_DIR, f'text_{alpha}.txt'), 'w') as f:
                     for word in txts:
-                        f.write(f"{word}\n")
+                        f.write(f"{word}\n")                
 
                 # ----------------------------------
 
@@ -630,7 +649,8 @@ if __name__ == '__main__':
         # #print(f'Time 5: {t5 - t4}s')
         
         # RESULTS FOR DPFORMER
-        model_dir_other = '/taiji1/taijishare1/fractional-attn/nlp-tutorial/.droot/L-d-grid-v2/1L-hidden=8-max_len=512-rescaled/config_qqv/imdb/layers=1-heads=1-qqv/opdpformer-imdb-qqv/model=4'
+        #model_dir_other = '/taiji1/taijishare1/fractional-attn/nlp-tutorial/.droot/L-d-grid-v2/1L-hidden=8-max_len=512-rescaled/config_qqv/imdb/layers=1-heads=1-qqv/opdpformer-imdb-qqv/model=4'
+        model_dir_other = '.droot/L-d-grid-v2/1L-hidden=8-max_len=512-rescaled/config_qqv/imdb/layers=1-heads=1-qqv/opdpformer-imdb-qqv/model=4'
 
         attn_setup_other, config_other, run_performance_other, train_setting_other =\
             load_model_files(model_dir_other)
@@ -641,7 +661,7 @@ if __name__ == '__main__':
         config_other['max_len'] = config_other['seq_len']
         # correction for model_name
         if 'model_name' not in config_other.keys():
-            config_other['model_name'] = attn_setup['model_name'][2:] if config_other['is_op'] else attn_setup['model_name']            
+            config_other['model_name'] = attn_setup_other['model_name'][2:] if config_other['is_op'] else attn_setup_other['model_name']            
 
         model_other = Transformer(config_other, is_return_dist=True)  
         model_other = model_other.to(device)   
@@ -651,7 +671,7 @@ if __name__ == '__main__':
         model_other.eval()    
         outputs_other, attention_weights_other, g_dists_other = model_other(X[None].to(device))   
         g_dist_other = g_dists_other[0]              
-        attention_weight_other = attention_weights_other[0]
+        attention_weight_other = attention_weights_other[0]        
         if 'L-hidden' in args.models_root.split('/')[1]:
             SAVE_DIR = njoin(FIGS_DIR, 'pretrained_analysis', args.models_root.split('/')[1])
         else:
@@ -660,9 +680,10 @@ if __name__ == '__main__':
         if not isdir(SAVE_DIR): makedirs(SAVE_DIR)       
         qk_affix = 'qqv' if config['qk_share'] else 'qkv'
         # Save numerical results
-        np.savez(njoin(SAVE_DIR, f'attn_graph_results_dp.npz'), attention_weights=attention_weight_other.detach())
+        np.savez(njoin(SAVE_DIR, f'attn_graph_results_dp.npz'), 
+                 attention_weights=attention_weight_other.detach() if 'cuda' not in device else attention_weight_other.cpu().detach())
         # Save corresponding text
         with open(njoin(SAVE_DIR, f'text_dp.txt'), 'w') as f:
             for word in txts:
                 f.write(f"{word}\n")
-        print(SAVE_DIR)
+        print(SAVE_DIR)        

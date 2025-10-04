@@ -26,6 +26,7 @@ from UTILS.figure_utils import matrixify_axs, label_axs
 from UTILS.mutils import njoin, str2bool, collect_model_dirs, AttrDict, load_model_files, dist_to_score
 from UTILS.mutils import dijkstra_matrix, fdm_kernel
 from models.model import Transformer
+import networkx as nx
 
 matplotlib.use("Agg")
 
@@ -363,6 +364,25 @@ if __name__ == '__main__':
                     #assert (H_q.numel()==(H_q==H_q.T).sum()), 'H_q is asymmetric'
 
                     eigvals, eigvecs = torch.linalg.eigh(H_q)
+                    
+                # Shortest path length vs sequence length
+                target_lengths = np.arange(50,501,50)
+                shortest_path_lengths = np.zeros((len(target_lengths), int(500*500)))
+                for tlen_idx, tlen in enumerate(target_lengths):
+                    tlen_idxs = np.where(np.array(X_lens) == tlen)[0]
+                    X, Y = train_loader.dataset[target_len_idxs[idx]]
+                    outputs, attention_weights, g_dists = model(X[None].to(device))   
+                    attention_weights = np.squeeze(attention_weights[0].detach().numpy())[:tlen, :tlen]
+                    edge_weights = 1/np.abs(attention_weights)
+                    np.fill_diagonal(edge_weights, 0)
+                    G = nx.from_numpy_array(edge_weights, create_using=nx.DiGraph)
+                    shortest_path_length = np.full(attention_weights.shape, np.inf)
+                    np.fill_diagonal(shortest_path_length, 0)
+                    for source in range(shortest_path_length.shape[0]):
+                        lengths, shortest_paths = nx.single_source_dijkstra(G, source) # Compute shortest paths using Dijkstra's algorithm
+                        for target in lengths:
+                            shortest_path_length[source, target] = len(shortest_paths[target]) - 1
+                    shortest_path_lengths[tlen_idx,:int(tlen*tlen)] = shortest_path_length.flatten()
                 
                 if 'L-hidden' in args.models_root.split('/')[1]:
                     SAVE_DIR = njoin(FIGS_DIR, 'pretrained_analysis', args.models_root.split('/')[1])
@@ -375,7 +395,7 @@ if __name__ == '__main__':
                 alpha = attn_setup['alpha']
                 np.savez(njoin(SAVE_DIR, f'attn_graph_results_{alpha}.npz'), diffusion_map=eigvecs, far_xy_idxs=far_xy_idxs, 
                          attention_weights=attention_weight.detach() if 'cuda' not in device else attention_weight.cpu().detach(), 
-                         embeddings=data[0])
+                         embeddings=data[0], shortest_path_lengths=shortest_path_lengths)
                 # Save corresponding text
                 with open(njoin(SAVE_DIR, f'text_{alpha}.txt'), 'w') as f:
                     for word in txts:
@@ -649,8 +669,8 @@ if __name__ == '__main__':
         # #print(f'Time 5: {t5 - t4}s')
         
         # RESULTS FOR DPFORMER
-        #model_dir_other = '/taiji1/taijishare1/fractional-attn/nlp-tutorial/.droot/L-d-grid-v2/1L-hidden=8-max_len=512-rescaled/config_qqv/imdb/layers=1-heads=1-qqv/opdpformer-imdb-qqv/model=4'
-        model_dir_other = '.droot/L-d-grid-v2/1L-hidden=8-max_len=512-rescaled/config_qqv/imdb/layers=1-heads=1-qqv/opdpformer-imdb-qqv/model=4'
+        model_dir_other = '/taiji1/taijishare1/fractional-attn/nlp-tutorial/.droot/L-d-grid-v2/1L-hidden=8-max_len=512-rescaled/config_qqv/imdb/layers=1-heads=1-qqv/opdpformer-imdb-qqv/model=4'
+        # model_dir_other = '.droot/L-d-grid-v2/1L-hidden=8-max_len=512-rescaled/config_qqv/imdb/layers=1-heads=1-qqv/opdpformer-imdb-qqv/model=4'
 
         attn_setup_other, config_other, run_performance_other, train_setting_other =\
             load_model_files(model_dir_other)
@@ -671,7 +691,27 @@ if __name__ == '__main__':
         model_other.eval()    
         outputs_other, attention_weights_other, g_dists_other = model_other(X[None].to(device))   
         g_dist_other = g_dists_other[0]              
-        attention_weight_other = attention_weights_other[0]        
+        attention_weight_other = attention_weights_other[0]  
+        
+        # Shortest path length vs sequence length
+        target_lengths = np.arange(50,501,50)
+        shortest_path_lengths = np.zeros((len(target_lengths), int(500*500)))
+        for tlen_idx, tlen in enumerate(target_lengths):
+            tlen_idxs = np.where(np.array(X_lens) == tlen)[0]
+            X, Y = train_loader.dataset[target_len_idxs[idx]]
+            outputs, attention_weights, g_dists = model_other(X[None].to(device))   
+            attention_weights = np.squeeze(attention_weights[0].detach().numpy())[:tlen, :tlen]
+            edge_weights = 1/np.abs(attention_weights)
+            np.fill_diagonal(edge_weights, 0)
+            G = nx.from_numpy_array(edge_weights, create_using=nx.DiGraph)
+            shortest_path_length = np.full(attention_weights.shape, np.inf)
+            np.fill_diagonal(shortest_path_length, 0)
+            for source in range(shortest_path_length.shape[0]):
+                lengths, shortest_paths = nx.single_source_dijkstra(G, source) # Compute shortest paths using Dijkstra's algorithm
+                for target in lengths:
+                    shortest_path_length[source, target] = len(shortest_paths[target]) - 1
+            shortest_path_lengths[tlen_idx,:int(tlen*tlen)] = shortest_path_length.flatten()
+              
         if 'L-hidden' in args.models_root.split('/')[1]:
             SAVE_DIR = njoin(FIGS_DIR, 'pretrained_analysis', args.models_root.split('/')[1])
         else:
@@ -681,7 +721,7 @@ if __name__ == '__main__':
         qk_affix = 'qqv' if config['qk_share'] else 'qkv'
         # Save numerical results
         np.savez(njoin(SAVE_DIR, f'attn_graph_results_dp.npz'), 
-                 attention_weights=attention_weight_other.detach() if 'cuda' not in device else attention_weight_other.cpu().detach())
+                 attention_weights=attention_weight_other.detach() if 'cuda' not in device else attention_weight_other.cpu().detach(), shortest_path_lengths=shortest_path_lengths)
         # Save corresponding text
         with open(njoin(SAVE_DIR, f'text_dp.txt'), 'w') as f:
             for word in txts:

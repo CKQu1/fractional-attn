@@ -56,7 +56,6 @@ if __name__ == '__main__':
     parser.add_argument('--train_mask_type', default=None, type=str)
 
     #parser.add_argument('--eval_bs', default=10, type=int)
-    #parser.add_argument('--weight_decay', default=0.01, type=float)
     parser.add_argument('--weight_decay', default=0, type=float)
     parser.add_argument('--beta1', default=0.9, type=float) 
     parser.add_argument('--beta2', default=0.999, type=float)  # 0.95       
@@ -139,9 +138,6 @@ if __name__ == '__main__':
     # adamw optimizer
     learning_rate = args.max_lr  # max learning rate
     max_iters = args.max_iters # total number of training iterations
-    weight_decay = args.weight_decay
-    beta1 = args.beta1
-    beta2 = args.beta2
     grad_clip = args.grad_clip # clip gradients at this value, or disable if == 0.0
     # learning rate decay settings
     decay_lr = args.decay_lr # whether to decay the learning rate
@@ -418,8 +414,8 @@ if __name__ == '__main__':
 
     # optimizer
     #optimizer = Adam(model.parameters(), lr=learning_rate)  # sinkformer
-    optimizer = Adam(model.parameters(), lr=learning_rate, betas=(beta1,beta2), weight_decay=args.weight_decay)
-    #optimizer = AdamW(model.parameters(), lr=learning_rate, betas=(beta1,beta2), weight_decay=args.weight_decay)    
+    optimizer = Adam(model.parameters(), lr=learning_rate, betas=(args.beta1,args.beta2), weight_decay=args.weight_decay)
+    #optimizer = AdamW(model.parameters(), lr=learning_rate, betas=(args.beta1,args.beta2), weight_decay=args.weight_decay)    
 
     # helps estimate an arbitrarily accurate loss over either split using many batches
     @torch.no_grad()

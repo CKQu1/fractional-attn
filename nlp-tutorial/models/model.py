@@ -106,7 +106,7 @@ class Transformer(nn.Module):
         if not self.fix_embed:
             self.sinusoid_table = self.get_sinusoid_table(self.seq_len+1, self.d_model) # (seq_len+1, d_model)
             self.embedding = nn.Embedding(self.vocab_size, self.d_model)
-            #self.pos_embedding = nn.Embedding(self.vocab_size, self.d_model)
+            # self.pos_embedding = nn.Embedding(self.seq_len+1, self.d_model)
             self.pos_embedding = nn.Embedding.from_pretrained(self.sinusoid_table, freeze=True)
         elif (self.fix_embed and config['pretrained_model_name'] == 'glove'):
             self.sinusoid_table = self.get_sinusoid_table(self.seq_len+1, self.d_model) # (seq_len+1, d_model)

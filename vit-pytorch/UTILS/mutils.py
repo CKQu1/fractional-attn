@@ -130,11 +130,11 @@ def structural_model_root(**kwargs):
 # collects pretrained model_dir
 def collect_model_dirs(models_root, **kwargs):
 
-    suffix = kwargs.get('suffix', 'vit')  # i.e. 'former', 'vit'
+    suffix = kwargs.get('suffix', 'vit') 
     contained_strs = kwargs.get('contained_strs')
 
     model_dirs = []  # full path
-    model_names = []  # i.e. spopfnsformer, dpformer, etc
+    model_names = []  # i.e. dpvit, etc
     for dirname in os.listdir(models_root):
         if suffix in dirname:
             model_dirs.append(njoin(models_root, dirname))
@@ -148,7 +148,8 @@ def collect_model_dirs(models_root, **kwargs):
         if 'fns' in model_name.lower():
             cols = ['alpha', 'bandwidth', 'a']
         elif 'sink' in model_name.lower():
-            cols = ['n_it', 'bandwidth']
+            #cols = ['n_it', 'bandwidth']
+            cols = ['n_it']
         elif 'dp' in model_name.lower():
             cols = []    
         metrics = ['train_loss', 'val_loss', 'train_acc', 'val_acc']   
@@ -156,8 +157,9 @@ def collect_model_dirs(models_root, **kwargs):
         for metric in metrics:
             metrics_dict[metric] = []        
         #cols_attn = ['fix_embed', 'qk_share', 'qkv_bias', 'dataset_name']
-        cols_attn = ['qk_share', 'qkv_bias', 'dataset_name']
-        cols_config = ['num_attention_heads', 'num_hidden_layers', 'patch_size', 'hidden_size', 'is_op',]
+        cols_attn = ['qk_share', 'qkv_bias', 'is_op', 'dataset_name']
+        #cols_config = ['n_heads', 'n_layers', 'hidden']
+        cols_config = ['num_attention_heads', 'num_hidden_layers', 'patch_size', 'hidden_size']
         cols_train = ['steps_per_epoch']
         #cols_train = []
         cols_other = ['ensembles', 'seeds', 'model_dir']
@@ -179,10 +181,6 @@ def collect_model_dirs(models_root, **kwargs):
                             run_perf = pd.read_csv(njoin(fpath, 'run_performance.csv'), index_col=False)                         
                             for metric in metrics:
                                 metrics_dict[metric].append(run_perf.loc[run_perf.index[-1],metric])
-                        elif isfile(njoin(fpath, '_run_performance.csv')):
-                            run_perf = pd.read_csv(njoin(fpath, '_run_performance.csv'), index_col=False)                         
-                            for metric in metrics:
-                                metrics_dict[metric].append(run_perf.loc[run_perf.index[-1],metric])                                
                         else:
                             for metric in metrics:
                                 metrics_dict[metric].append(None)                            
@@ -198,6 +196,10 @@ def collect_model_dirs(models_root, **kwargs):
 
                             # attn-hyperparameters + attn-setup
                             for col in cols[:-len(metrics + cols_config + cols_train + cols_other)]:
+                                if 'is_op' in attn_setup.keys():
+                                    model_dir_dct[col] = attn_setup[col]
+                                else:
+                                    continue
                                 model_dir_dct[col] = attn_setup[col]
                             # config
                             for col in cols_config:
@@ -218,6 +220,7 @@ def collect_model_dirs(models_root, **kwargs):
         DCT_ALL[model_name] = df
 
     return DCT_ALL
+
 
 def load_model_files(model_dir):
     train_setting = pd.read_csv(njoin(model_dir, 'train_setting.csv'))

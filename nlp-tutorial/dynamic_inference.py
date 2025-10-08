@@ -73,6 +73,8 @@ if __name__ == '__main__':
 
     # ----- load pretrained_model -----    
     attn_setup, config, run_performance, train_setting = load_model_files(model_dir)
+    if 'model_name' not in config.keys():
+        config['model_name'] = attn_setup['model_name']
     fix_embed = attn_setup['fix_embed']
     pretrained_model_name = config['pretrained_model_name'] if fix_embed else False
     dataset_name = config['dataset_name'] = attn_setup['dataset_name']
@@ -92,10 +94,6 @@ if __name__ == '__main__':
     checkpoint = njoin(model_dir, 'ckpt.pt')
     is_checkpoint_exist = isfile(checkpoint)
 
-    # ---------- seed ----------
-    #torch.manual_seed(seed)
-    seed_everything(seed)
-
     if isfile(njoin(model_dir, 'run_performance.csv')) and is_checkpoint_exist:
         run = pd.read_csv(njoin(model_dir, 'run_performance.csv'))
     else:
@@ -109,6 +107,9 @@ if __name__ == '__main__':
         main_args.vocab_file = 'wiki.vocab'
 
     # ---------------------------------------- poor man's data loader ----------------------------------------
+    # seed train_loader/test_loader
+    torch.manual_seed(seed)
+    # seed_everything(seed)
     tokenizer, train_loader, test_loader, train_size, eval_size, steps_per_epoch, num_classes =\
         load_dataset_and_tokenizer(main_args, batch_size)     
     test_n_batches, test_n_samples = len(test_loader), len(test_loader.dataset)  
@@ -180,19 +181,30 @@ if __name__ == '__main__':
     # ----- dynamic inference -----
     else:  
 
+        ##### ONLY WORKS FOR 1-LAYER MODELS #####
         def eval_model(model):
             dynamic_metrics = []
             for dataset_loader in [train_loader, test_loader]:
                 dynamic_inference_acc, dynamic_inference_loss = 0, 0  
                 n_batches = len(dataset_loader)
                 n_samples = len(dataset_loader.dataset)  
-                for batch in dataset_loader:
+                for seed_ii, batch in tqdm(enumerate(dataset_loader)):
                     inputs, labels = batch
                     
                     inputs = inputs.to(device)
                     labels = labels.to(device)            
 
-                    outputs, attention_weights = model(inputs)
+                    if not args.is_dist_based:  # only 
+                        torch.manual_seed(seed_ii)  # set seet for eval_mask
+                        eval_mask = torch.bernoulli(torch.full((config['max_len'],config['max_len']),
+                                                    controlled_variable))
+                        # FIRST LAYER/BLOCK ONLY
+                        if is_fns:
+                            model.layers[0].mha.fns_attn.eval_mask = eval_mask.bool().to(device)
+                        else:
+                            model.layers[0].mha.scaled_dot_product_attn.eval_mask = eval_mask.bool().to(device)   
+
+                    outputs, _ = model(inputs)
                     
                     loss = loss_fn(outputs, labels)
                     dynamic_inference_loss += loss.item()
@@ -202,6 +214,7 @@ if __name__ == '__main__':
                 dynamic_inference_loss = dynamic_inference_loss / n_batches
                 dynamic_metrics += [dynamic_inference_acc , dynamic_inference_loss]
             return dynamic_metrics
+        ########################################
 
         if args.is_dist_based:
             #controlled_variables = [2**(-p) for p in range(-4,3)]
@@ -222,12 +235,11 @@ if __name__ == '__main__':
             ##### Probability based #####
             else:  
                 config['is_add_eval_mask'] = True                      
-                eval_mask = torch.bernoulli(torch.full((config['max_len'],config['max_len']),
-                                            controlled_variable))
-                config['eval_mask'] = eval_mask.bool().to(device)                                                                                                                                            
+                # place holder
+                config['eval_mask'] = None                                                                                                                                            
 
             # load weights  
-            model = RDFNSformer(config) if is_fns else DPformer(config)
+            model = Transformer(config)
             model = model.to(device)                                  
             ckpt = torch.load(checkpoint, map_location=torch.device(device))                            
             model.load_state_dict(ckpt['model'])                            

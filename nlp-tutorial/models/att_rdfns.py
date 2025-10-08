@@ -7,7 +7,6 @@ from torch.nn.utils.parametrizations import orthogonal
 class FNSSelfAttention(nn.Module):
     def __init__(self, config, is_return_dist=False):
         super(FNSSelfAttention, self).__init__()
-        #self.d_k = d_k
         self.head_dim = config['head_dim']
         self.alpha = config['alpha']
         self.bandwidth = config['bandwidth']
@@ -24,9 +23,11 @@ class FNSSelfAttention(nn.Module):
             else:
                 #self.dist_scale = (self.head_dim)**(1/self.alpha)
                 #self.dist_scale = self.head_dim**0.5 / (self.head_dim**(1/self.head_dim) - 1)
-                self.dist_scale = self.head_dim**0.5 / (2**(1/self.head_dim) - 1)
 
-            # self.dist_scale = self.head_dim
+                self.dist_scale = self.head_dim**0.5 / (2**(1/self.head_dim) - 1)
+                #self.dist_scale = self.head_dim**0.5 / (self.head_dim**(1/self.head_dim) - 1)
+                #self.dist_scale = self.head_dim**1.5
+                #self.dist_scale = self.head_dim
 
         # dependence on d for non-local kernel (rd), otherwise v2_rd   
         if self.alpha < 2: 
@@ -58,11 +59,8 @@ class FNSSelfAttention(nn.Module):
         if self.alpha < 2: 
             d_intrinsic = self.d_intrinsic
 
-        if self.is_rescale_dist:            
-            #g_dist = torch.cdist(q, k, p=2) / (self.head_dim)**0.5
+        if self.is_rescale_dist:                        
             g_dist = torch.cdist(q, k, p=2) / self.dist_scale            
-            #g_dist = torch.cdist(q, k, p=2) / (2 * self.head_dim)**0.5
-            #g_dist = torch.cdist(self.layernorm_q(q), self.layernorm_k(k), p=2)
             # if self.alpha < 2:                
             #     g_dist = g_dist * self.intersection
         else:            
@@ -103,7 +101,6 @@ class FNSSelfAttention(nn.Module):
         if self.train_mask_type is not None:      
             attn_mask = attn_mask | self.train_mask
 
-        #attn_score.masked_fill_(attn_mask, 1e-9)
         #attn_score = attn_score.masked_fill(attn_mask, 1e-9)
         attn_score = attn_score.masked_fill(attn_mask, 0)
         # |attn_score| : (batch_size, n_heads, q_len, k_len)

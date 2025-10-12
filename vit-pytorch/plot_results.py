@@ -36,14 +36,15 @@ colors = list(mcl.TABLEAU_COLORS.keys())
 # ------------------------------------------
 
 MARKERSIZE = 4
-BIGGER_SIZE = 10
+BIGGER_SIZE = 8
+LEGEND_SIZE = 7
 TRANSP = 1  # transparency (corresponding to alpha in plot)
 plt.rc('font', size=BIGGER_SIZE)          # controls default text sizes
 plt.rc('axes', titlesize=BIGGER_SIZE)     # fontsize of the axes title
 plt.rc('axes', labelsize=BIGGER_SIZE)    # fontsize of the x and y labels
 plt.rc('xtick', labelsize=BIGGER_SIZE)    # fontsize of the tick labels
 plt.rc('ytick', labelsize=BIGGER_SIZE)    # fontsize of the tick labels
-plt.rc('legend', fontsize=BIGGER_SIZE-2)    # legend fontsize
+plt.rc('legend', fontsize=LEGEND_SIZE)    # legend fontsize
 plt.rc('figure', titlesize=BIGGER_SIZE)  # fontsize of the figure title
 
 # -------------------- FUNCTIONS --------------------
@@ -283,7 +284,7 @@ def phase_ensembles(models_root, selected_dataset='cifar10',
             #ax.set_ylabel(NAMES_DICT[metric])
             if row_idx == 0:
                 #ax.set_title(NAMES_DICT[metric])
-                ax_title = r'$W \in O(d)$' if is_ops[col_idx] else r'$W \notin O(d)$'
+                ax_title = r'$\mathbf{W}_{Q,K} \in O(d)$' if is_ops[col_idx] else r'$\mathbf{W}_{Q,K} \notin O(d)$'
                 ax.set_title(ax_title)
             
             axs[row_idx,col_idx].sharey(axs[row_idx, 0])

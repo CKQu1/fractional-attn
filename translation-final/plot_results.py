@@ -21,6 +21,19 @@ from constants import *
 from utils.mutils import njoin, str2bool, str2ls, create_model_dir, convert_train_history
 from utils.mutils import collect_model_dirs, find_subdirs
 
+MARKERSIZE = 4
+#BIGGER_SIZE = 10
+BIGGER_SIZE = 8
+LEGEND_SIZE = 7
+TRANSP = 1  # transparency (corresponding to alpha in plot)
+plt.rc('font', size=BIGGER_SIZE)          # controls default text sizes
+plt.rc('axes', titlesize=BIGGER_SIZE)     # fontsize of the axes title
+plt.rc('axes', labelsize=BIGGER_SIZE)    # fontsize of the x and y labels
+plt.rc('xtick', labelsize=BIGGER_SIZE)    # fontsize of the tick labels
+plt.rc('ytick', labelsize=BIGGER_SIZE)    # fontsize of the tick labels
+plt.rc('legend', fontsize=LEGEND_SIZE)    # legend fontsize
+plt.rc('figure', titlesize=BIGGER_SIZE)  # fontsize of the figure title
+
 # -------------------- FUNCTIONS --------------------
 # return median, 25/75 percentile
 def get_metric_curves(run_perf_all,lq=0.25,uq=0.75):
@@ -31,7 +44,7 @@ def get_metric_curves(run_perf_all,lq=0.25,uq=0.75):
 
 # aggregate all runs
 def load_seed_runs(model_dir, seeds, metric):
-    assert metric in ['bleu', 'train_loss', 'val_loss'], f'metric = {metric} does not exist!'
+    assert metric in ['bleu', 'train_loss', 'val_loss', 'lr'], f'metric = {metric} does not exist!'
     runs = []
     for seed in seeds:
         seed_path = njoin(model_dir, f'model={seed}')
@@ -55,6 +68,12 @@ def load_seed_runs(model_dir, seeds, metric):
             if not isfile(fpath):
                 continue
             run = pd.read_csv(fpath, header=None, index_col=False, names=['epoch', 'val_loss'])   
+        # learning rate
+        elif metric == 'lr':
+            fpath = njoin(dirname, 'lr.csv')
+            if not isfile(fpath):
+                continue
+            run = pd.read_csv(fpath, header=None, index_col=False, names=['epoch', 'lr'])
         else:
             run = None
         if run is not None:
@@ -88,7 +107,7 @@ def matrixify_axs(axs, nrows, ncols):
 
 def phase_ensembles(models_root, selected_dataset='en-de',
                     fns_manifold='rd', selected_alphas='1.2,2',
-                    metrics='bleu,train_loss',  # train_loss, val_loss
+                    metrics='lr',  # bleu,train_loss lr
                     is_ops = [False,True],  # [False,True]
                     cbar_separate=False, display=False):
 
@@ -143,8 +162,11 @@ def phase_ensembles(models_root, selected_dataset='en-de',
     print(f'model_types_to_plot: {model_types_to_plot}')
 
     nrows, ncols = len(metrics), len(is_ops)     
-    figsize = (2.5*len(is_ops),2*len(metrics))
-    #figsize = (1,1)
+    # figsize = (2.5*len(is_ops),2*len(metrics))
+    if len(metrics) == 2:
+        figsize = (5,4)
+    elif len(metrics) == 1:
+        figsize = (5, 2.3)
     fig, axs = plt.subplots(nrows,ncols,figsize=figsize,sharex=True)
     axs = matrixify_axs(axs, nrows, ncols)  # convert axs to 2D array
     # label_axs(fig, axs)  # alphabetically label subfigures             
@@ -229,30 +251,32 @@ def phase_ensembles(models_root, selected_dataset='en-de',
         print('\n')                    
 
     for cidx in range(ncols):
-        axs[0,cidx].set_ylim(0,35)
         axs[0,cidx].margins(0)
-        #ax.set_yticks([70,75,80])
-        # axs[1,cidx].set_ylim([0.6,2.1])
-        # axs[1,cidx].set_yticks([1, 1.5, 2])
-        axs[1,cidx].margins(0)
+        if len(metrics) == 2:
+            axs[1,cidx].margins(0)
 
     # legend
     axs[0,0].legend(loc='best', frameon=False)                     
 
     for row_idx in range(nrows):
+        if metrics[row_idx] == 'bleu':
+            axs[row_idx,0].set_ylim(0,35)
+        if metrics[row_idx] == 'lr':
+            axs[row_idx,0].ticklabel_format(style='sci', axis='y', scilimits=(0,0))
+            # axs[row_idx,0].ticklabel_format(useOffset=True, useMathText=True, axis='y')
+            # plt.ticklabel_format(style='sci', axis='y', scilimits=(0,0))
         for col_idx, is_op in enumerate(is_ops):  
             ax = axs[row_idx, col_idx]
             if row_idx == 0:                
                 ax_title = r'$\mathbf{W}_{Q,K} \in O(d)$' if is_ops[col_idx] else r'$\mathbf{W}_{Q,K} \notin O(d)$'
-                ax.set_title(ax_title)            
+                ax.set_title(ax_title)          
             axs[row_idx,col_idx].sharey(axs[row_idx, 0])
             axs[-1,col_idx].set_xlabel('Epochs')
     # axs[row_idx,0].set_ylabel(NAMES_DICT[metrics[row_idx]])
-    axs[0,0].set_ylabel('Bleu score (%)')
-    if metrics[1] == 'val_loss':
-        axs[1,0].set_ylabel('Testing loss')
-    elif metrics[1] == 'train_loss':
-        axs[1,0].set_ylabel('Training loss')
+    ylabel_dict = {'val_loss': 'Testing loss', 'train_loss': 'Training loss', 'bleu': 'Bleu score (%)',
+                   'lr': 'Learning rate'}
+    for row_idx, metric in enumerate(metrics):
+        axs[row_idx,0].set_ylabel(ylabel_dict[metric])
 
     # Adjust layout
     plt.subplots_adjust(wspace=0.4, hspace=0.3)            
@@ -273,7 +297,10 @@ def phase_ensembles(models_root, selected_dataset='en-de',
     SAVE_DIR = njoin(FIGS_DIR, 'translation-task')   
     if not isdir(SAVE_DIR):
         os.makedirs(SAVE_DIR) 
-    fig_file = models_root.split('/')[1] + '-' + 'phase_ensembles'
+    if len(metrics) == 2:
+        fig_file = models_root.split('/')[1] + '-' + 'phase_ensembles'
+    elif len(metrics) == 1:
+        fig_file = models_root.split('/')[1] + '-' + f'{metrics[0]}'
     fig_file += '.pdf'
     plt.savefig(njoin(SAVE_DIR, fig_file), bbox_inches='tight')
     # plt.show()    

@@ -39,7 +39,7 @@ COLORS_ALPHA = ["#636363", "#469C76", "#2E63A6", "#C17DA5", "#C66526", "#EEE461"
 MARKERSIZE = 4
 #BIGGER_SIZE = 10
 BIGGER_SIZE = 8
-LEGEND_SIZE = 8
+LEGEND_SIZE = 7
 TRANSP = 1  # transparency (corresponding to alpha in plot)
 plt.rc('font', size=BIGGER_SIZE)          # controls default text sizes
 plt.rc('axes', titlesize=BIGGER_SIZE)     # fontsize of the axes title
@@ -101,7 +101,7 @@ python -i plot_results.py phase_ensembles frac_attn/fractional-attn/nlp-tutorial
 python -i plot_results.py phase_ensembles frac_attn/fractional-attn/nlp-tutorial/droot/6L-v4-hidden=256-max_len=512-rescaled (to be trained and plotted)
 """
 def phase_ensembles(models_root, selected_dataset='imdb',
-                    fns_manifold='rd', qk_share=True, selected_alphas='1.2,2',
+                    fns_manifold='rd', qk_share=False, selected_alphas='1.2,2',
                     metrics='val_acc,val_loss',
                     is_ops = [False,True],  # [False,True]
                     cbar_separate=False, display=False):
@@ -283,7 +283,7 @@ def phase_ensembles(models_root, selected_dataset='imdb',
             #ax.set_ylabel(NAMES_DICT[metric])
             if row_idx == 0:
                 #ax.set_title(NAMES_DICT[metric])
-                ax_title = r'$W \in O(d)$' if is_ops[col_idx] else r'$W \notin O(d)$'
+                ax_title = r'$\mathbf{W}_{Q,K} \in O(d)$' if is_ops[col_idx] else r'$\mathbf{W}_{Q,K} \notin O(d)$'
                 ax.set_title(ax_title)
             
             axs[row_idx,col_idx].sharey(axs[row_idx, 0])
@@ -318,7 +318,7 @@ def phase_ensembles(models_root, selected_dataset='imdb',
         fig_file += 'qqv-' if qk_share else 'qkv-'
         fig_file += '_'.join(model_types_short)+ '-' + metrics[0] + '-' + f'ds={dataset_name_short}'
         fig_file += '.pdf'
-        plt.savefig(njoin(SAVE_DIR, fig_file))            
+        plt.savefig(njoin(SAVE_DIR, fig_file), bbox_inches='tight')            
         print(f'Figure saved in {njoin(SAVE_DIR, fig_file)}')
 
     # separate colorbar
@@ -925,7 +925,7 @@ def len_inference(models_root, n_layer=6, max_len_adj=1024,
     if not isdir(SAVE_DIR): makedirs(SAVE_DIR)    
     qkv = 'qqv' if qk_share else 'qkv'
     fig_file = f'{n_layer}L-len={max_len_adj}-is_op={is_op}-{metric}-inference.pdf'
-    plt.savefig(njoin(SAVE_DIR, fig_file))            
+    plt.savefig(njoin(SAVE_DIR, fig_file), bbox_inches='tight')            
     print(f'Figure saved in {njoin(SAVE_DIR, fig_file)}')  
 
 

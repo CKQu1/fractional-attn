@@ -12,16 +12,33 @@ from string import ascii_lowercase
 from tqdm import tqdm
 
 from constants import *
-from mutils import njoin
+from UTILS.mutils import njoin
 
-from schematic.fdm_utils import get_markov_matrix, plot_vmf_density, get_vmf_samples, uniform_sphere_rvs
+from UTILS.fdm_utils import get_markov_matrix, plot_vmf_density, get_vmf_samples, uniform_sphere_rvs
+
+# ---------- Global plot settings ----------
+COLORS_ALPHA = ["#636363", "#469C76", "#2E63A6", "#C17DA5", "#C66526", "#EEE461", "#A4292F"]
+# ------------------------------------------
+
+MARKERSIZE = 4
+#BIGGER_SIZE = 10
+BIGGER_SIZE = 8
+LEGEND_SIZE = 8
+TRANSP = 1  # transparency (corresponding to alpha in plot)
+plt.rc('font', size=BIGGER_SIZE)          # controls default text sizes
+plt.rc('axes', titlesize=BIGGER_SIZE)     # fontsize of the axes title
+plt.rc('axes', labelsize=BIGGER_SIZE)    # fontsize of the x and y labels
+plt.rc('xtick', labelsize=BIGGER_SIZE)    # fontsize of the tick labels
+plt.rc('ytick', labelsize=BIGGER_SIZE)    # fontsize of the tick labels
+plt.rc('legend', fontsize=LEGEND_SIZE)    # legend fontsize
+plt.rc('figure', titlesize=BIGGER_SIZE)  # fontsize of the figure title
 
 # figure set up
 l_ratio = 2.5
 #fig = plt.figure(figsize = (l_ratio*3, (l_ratio+0.1)*2))
 #spec = mpl.gridspec.GridSpec(ncols=6, nrows=4) # 6 columns evenly divides both 2 & 3
 
-fig = plt.figure(figsize = (l_ratio*3, (l_ratio+0.3)*1))
+fig = plt.figure(figsize = (5.95, 2.32))
 spec = mpl.gridspec.GridSpec(ncols=6, nrows=2)
 ax1 = fig.add_subplot(spec[0:2,0:2])                     # (a)
 ax2 = fig.add_subplot(spec[0:2,2:4], projection='3d')    # (b)
@@ -55,6 +72,7 @@ bandwidth1 = 1e-4
 n = g_dists_2.shape[0]
 d = 1
 
+# hard set distance along diagonals to be zero
 for ii in range(n):
     g_dists_2[ii,ii] = 0
 
@@ -65,7 +83,8 @@ idx_mid = int(n/2)
 ax = axs[0][0]
 for aidx, alpha in enumerate(alphas1):
 
-    c_alpha = HYP_CMAP(HYP_CNORM(alpha))
+    # c_alpha = HYP_CMAP(HYP_CNORM(alpha))
+    c_alpha = COLORS_ALPHA[round((alpha - 1)/0.2) + 1]
 
     t = bandwidth1**(alpha/2)
     K, D, K_tilde, D_tilde = get_markov_matrix(g_dists_2, alpha, bandwidth1, d, a)
@@ -95,46 +114,14 @@ for aidx, alpha in enumerate(alphas1):
         ax.plot(idxs, eigvals_transformed, c=c_alpha, label=rf'$\alpha = {{{alpha}}}$')  
         ax.plot(idxs, eigvals_theory, c=c_alpha, alpha=0.5, linewidth=1, linestyle='--')
 
-        ax.set_xlim([1, n])
+        ax.set_xlim([1, n - 30])
         if d == 1:
-            ax.set_ylim([1, 1e6])
+            #ax.set_ylim([1, 1e6])
+            ax.set_ylim([1, 1e5])
         ax.set_xscale('log'); ax.set_yscale('log')
 
 ax.tick_params(axis='both', which='minor')
 ax.legend(frameon=False)
-
-# true_eigvecs = [np.ones(n)]
-# for j in range(2,n+1):
-#     if j % 2 == 0:
-#         true_eigvecs.append(np.sin(j//2 * uniform_radians))
-#     else:
-#         true_eigvecs.append(np.cos(j//2 * uniform_radians))
-
-# true_eigvecs = np.stack(true_eigvecs).T
-
-# bandwidths = [0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5]
-# RMSEs = np.zeros([len(alphas1), len(bandwidths)])
-# for a_ii, alpha in enumerate(alphas1):
-#     for b_ii, bandwidth in tqdm(enumerate(bandwidths)):
-
-#         c_alpha = HYP_CMAP(HYP_CNORM(alpha))
-
-#         t = bandwidth**(alpha/2)
-#         K, D, K_tilde, D_tilde = get_markov_matrix(g_dists_2, alpha, bandwidth, d, a)
-#         K_hat = np.diag(D_tilde**(-1/2)) @ K_tilde @ np.diag(D_tilde**(-1/2))
-#         K_hat_sym = 0.5*(K_hat + K_hat.T)
-
-#         eigvals, eigvecs = np.linalg.eigh(K_hat_sym)
-#         eigvecs_transformed = np.diag(D_tilde**(-0.5)) @ eigvecs
-
-#         # eigvals
-#         eidx = np.argsort(eigvals)[::-1]
-#         eigvals = eigvals[eidx]; eigvecs = eigvecs[:,eidx]
-
-#         RMSEs[a_ii, b_ii] = ((true_eigvecs - eigvecs_transformed)**2).sum(0).mean()**0.5
-
-#     axs[0,1].plot(bandwidths, RMSEs[a_ii,:], label=rf'$\alpha$ = {alpha}')
-
 
 # ----- Global plot settings -----
 
@@ -172,74 +159,8 @@ for idx in range(all_xyzs.shape[0]):
     phi = np.arctan(np.sqrt(all_xyzs[idx][:,0]**2 + all_xyzs[idx][:,1]**2)/all_xyzs[idx][:,2])
     all_radians[idx] = np.vstack([theta, phi]).T
 
-
-dist_types = ['Non-uniform', 'Uniform']
-ds_iis = [1,0]  # dist type
-
 alphas2 = [1.2, 2]
-#alphas2 = [1.2, 1.6, 2]
-#bandwidth2 = 1e-4
 bandwidth2 = 1e-5
-
-# for bidx, ds_ii in enumerate(ds_iis[0:1]):  # 3d uniform
-
-#     n = all_xyzs[ds_ii].shape[0]
-#     d = all_xyzs[ds_ii].shape[1] - 1
-#     dist_type = dist_types[ds_ii]         
-
-#     dot = all_xyzs[ds_ii] @ all_xyzs[ds_ii].T    
-#     dot[dot>1] = 1; dot[dot<-1] = -1  # clip values
-#     g_dists_2 = np.arccos(dot)
-    
-#     for ii in range(n):
-#         g_dists_2[ii,ii] = 0
-
-#     idxs = np.arange(1,large_sample_size+1)
-#     idx_mid = int(n/2)
-#     for alpidx, alpha in enumerate(alphas2):
-
-#         c_alpha = HYP_CMAP(HYP_CNORM(alpha))
-
-#         t = bandwidth2**(alpha/2)
-#         K, D, K_tilde, D_tilde = get_markov_matrix(g_dists_2, alpha, bandwidth2, d, a)
-
-#         # ---------- Eigvals ----------
-
-#         ax = axs[1][bidx]
-
-#         # ----- (a) -----
-#         if a == 0:
-
-#             ax.set_xlim([1, n])
-#             if d == 1:
-#                 ax.set_ylim([1, 1e6])
-#             elif d == 2:
-#                 ax.set_ylim([1e-11, 1e6])
-
-#             #ax.set_ylim([1e2, 5e4])
-#             ax.set_xscale('log'); ax.set_yscale('log')            
-
-#             ##### keep initial sampling density #####
-
-#             # original markov matrix np.diag(D_tilde**(-1)) @ K_tilde
-#             K_hat = np.diag(D_tilde**(-1/2)) @ K_tilde @ np.diag(D_tilde**(-1/2))
-#             K_hat_sym = 0.5*(K_hat + K_hat.T)
-#             eigvals, eigvecs = np.linalg.eigh(K_hat_sym)            
-
-#             eidx = np.argsort(eigvals)[::-1]  # large to small
-#             eigvals = eigvals[eidx]; eigvecs = eigvecs[:,eidx]   
-
-#             # eigvals
-#             eigvals_transformed = -1/t * np.log(eigvals)
-#             eigvecs_transformed = np.diag(D_tilde**(-0.5)) @ eigvecs
-
-#             ax.plot(idxs, eigvals_transformed, c=c_alpha, label=rf'$\alpha = {{{alpha}}}$')    
-#             # eye guide
-#             power = alpha if alpha <= 2 else 2
-#             eigvals_theory = idxs**power  
-#             # eigvals_theory = eigvals_theory / eigvals_theory[idx_mid]
-#             # eigvals_theory = eigvals_theory * eigvals[idx_mid] * 10
-#             ax.plot(idxs, eigvals_theory, c=c_alpha, alpha=0.5, linewidth=1, linestyle='--')                       
 
 n_grid = 100
 u = np.linspace(0, np.pi, n_grid)
@@ -286,7 +207,8 @@ for bidx, alpha in enumerate(alphas1):
     print('\n')    
 
     ax = axs[0][bidx+2]
-    c_alpha = HYP_CMAP(HYP_CNORM(alpha))
+    # c_alpha = HYP_CMAP(HYP_CNORM(alpha))
+    c_alpha = COLORS_ALPHA[round((alpha - 1)/0.2) + 1]
 
     if alpha < 2:
         thresh = M.min()
@@ -316,90 +238,6 @@ for bidx, alpha in enumerate(alphas1):
     ax.axis('off')
     #ax.set_ylabel(rf'$\alpha = {alpha}$')
 
-# ---------- (d,e) ----------
-# for bidx, ds_ii in enumerate(ds_iis[1:]):  # 3d non-uniform
-
-#     n = all_xyzs[ds_ii].shape[0]
-#     d = all_xyzs[ds_ii].shape[1] - 1
-#     dist_type = dist_types[ds_ii]
-
-#     dot = all_xyzs[ds_ii] @ all_xyzs[ds_ii].T    
-#     dot[dot>1] = 1; dot[dot<-1] = -1  # clip values
-#     g_dists_2 = np.arccos(dot)
-    
-#     for ii in range(n):
-#         g_dists_2[ii,ii] = 0
-
-#     idxs = np.arange(1,large_sample_size+1)
-#     idx_mid = int(n/2)
-#     for alpidx, alpha in enumerate(alphas2):
-
-#         c_alpha = HYP_CMAP(HYP_CNORM(alpha))
-
-#         t = bandwidth2**(alpha/2)
-#         K, D, K_tilde, D_tilde = get_markov_matrix(g_dists_2, alpha, bandwidth2, d, a)
-
-#         # ---------- Eigvals ----------
-
-#         #ax = axs[1][0]
-
-#         if a == 0:
-
-#             # removing initial sampling effect
-
-#             # ax.set_xlim([1, n])
-#             # ax.set_xlim([1, 100])
-#             # ax.set_ylim([1e-5, 1.1])
-
-#             ##### keep initial sampling density #####
-
-#             # original markov matrix np.diag(D_tilde**(-1)) @ K_tilde
-#             K_hat = np.diag(D_tilde**(-1/2)) @ K_tilde @ np.diag(D_tilde**(-1/2))
-#             K_hat_sym = 0.5*(K_hat + K_hat.T)
-#             eigvals, eigvecs = np.linalg.eigh(K_hat_sym)
-#             eigvecs_transformed = np.diag(D_tilde**(-0.5)) @ eigvecs
-
-#             eidx = np.argsort(eigvals)[::-1]  # large to small
-#             eigvals = eigvals[eidx]; eigvecs = eigvecs[:,eidx]
-
-#             # ---------- Eigvals ----------
-#             # eigvals_transformed = -1/t * np.log(eigvals)
-
-#             # ---------- Eigvals (alternative) ----------
-#             #eigvals_transformed_2, _ = np.linalg.eigh(np.diag(D_tilde**(-1/2)) @ K_tilde @ np.diag(D_tilde**(-1/2))) 
-
-#             #ax.plot(idxs, eigvals_transformed, c=c_alpha, label=rf'$\alpha = {{{alpha}}}$')    
-#             #ax.plot(idxs, eigvals, c=c_alpha, label=rf'$\alpha = {{{alpha}}}$')
-
-#             #quit()
-
-#             # eye guide
-#             # power = alpha if alpha <= 2 else 2
-#             # eigvals_theory = idxs**power  
-#             # eigvals_theory = eigvals_theory / eigvals_theory[idx_mid]
-#             # eigvals_theory = eigvals_theory * eigvals[idx_mid] * 10
-#             #ax.plot(idxs, eigvals_theory, c=c_alpha, alpha=0.5, linewidth=1, linestyle='--')   
-
-#             # ---------- Eigvecs ----------
-#             if dist_type == 'Non-uniform':
-#                 #eidx1, eidx2 = large_sample_size-1, large_sample_size-2
-#                 eidx1, eidx2 = -1, -2
-#                 #eidx1, eidx2 = 1, 2
-
-#                 #ax = axs[1][alpidx+1]
-#                 ax = axs[1][alpidx]
-
-#                 #ax.plot(large_sample_radians, np.exp(t * eigvals[eidx]) * eigvecs[:,eidx], c=c_alpha)
-#                 ax.scatter(eigvecs_transformed[:,eidx1], eigvecs_transformed[:,eidx2], c=c_alpha, s=1)
-#                 #ax.scatter(all_radians[ds_ii][:,0], eigvecs[:,eidx1-1], c=c_alpha, s=1)
-
-#                 #ax.ticklabel_format(axis='both', style='sci', scilimits=(0,0))
-
-#                 print(f'alpidx = {alpidx}, alpha = {alpha}')
-#                 print(f'{eigvecs_transformed[:,eidx1].min()}, {eigvecs_transformed[:,eidx1].max()}')
-#                 print(f'{eigvecs_transformed[:,eidx2].min()}, {eigvecs_transformed[:,eidx2].max()}')
-#                 print('\n')
-
 # ----- plot settings/labels -----
 
 axs[0][0].set_title('Operator')
@@ -411,21 +249,25 @@ for row in range(len(axs)):
     for col in range(len(axs[row])):  
         if (row,col) != (0,3):
             ax = axs[row][col]
-            if '3d' in ax.name:
-                ax.text2D(
-                    0.0, 1.0, f'({ascii_lowercase[ii]})', transform=(
-                        ax.transAxes + ScaledTranslation(-20/72, +7/72, fig.dpi_scale_trans)),
-                    fontsize=label_size, va='bottom', fontfamily='sans-serif')    
-            else:
-                ax.text(
-                    0.0, 1.0, f'({ascii_lowercase[ii]})', transform=(
-                        ax.transAxes + ScaledTranslation(-20/72, +7/72, fig.dpi_scale_trans)),
-                    fontsize=label_size, va='bottom', fontfamily='sans-serif')       
+            # subfigure labels
+            # if '3d' in ax.name:
+            #     ax.text2D(
+            #         0.0, 1.0, f'({ascii_lowercase[ii]})', transform=(
+            #             ax.transAxes + ScaledTranslation(-20/72, +7/72, fig.dpi_scale_trans)),
+            #         fontsize=label_size, va='bottom', fontfamily='sans-serif')    
+            # else:
+            #     ax.text(
+            #         0.0, 1.0, f'({ascii_lowercase[ii]})', transform=(
+            #             ax.transAxes + ScaledTranslation(-20/72, +7/72, fig.dpi_scale_trans)),
+            #         fontsize=label_size, va='bottom', fontfamily='sans-serif')       
 
             ii += 1
+
+axs[0][0].spines['top'].set_visible(False)
+axs[0][0].spines['right'].set_visible(False)
 
 plt.tight_layout()
 FIGS_DIR = njoin(FIGS_DIR, 'schematic')
 if not isdir(FIGS_DIR): makedirs(FIGS_DIR)
-plt.savefig(njoin(FIGS_DIR, 'figure_fdm_v4.pdf'))
+plt.savefig(njoin(FIGS_DIR, 'figure_fdm_v4.pdf'), bbox_inches='tight')
 print(f'Figure saved in {FIGS_DIR}')

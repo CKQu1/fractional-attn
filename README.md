@@ -6,7 +6,11 @@ The script `batch_exps.py` contains all the experiments ran in the manuscript, i
 
 ## vit-pytorch
 
-Add later...
+A single instance of training can be realized through:
+`python main.py`
+
+For batch submitting all the training instances in the manuscript:
+`python batch_submit_main.py`
 
 ## long-range-arena
 
@@ -37,9 +41,9 @@ Double-check `modules/attention.py`
     - Can use `tests/model.py` to check things too
     - Can use `demo.py` to check translation output of model
 
-### Model training
+### Batch job submission
 
-Run `python main.py`
+Run `python batch_submit_main.py`
 
 ## Code References
 

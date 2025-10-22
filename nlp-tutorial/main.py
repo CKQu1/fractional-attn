@@ -287,22 +287,23 @@ if __name__ == '__main__':
             model_name = 'sp' + model_name
             config['is_rescale_dist'] = args.is_rescale_dist
             if args.alpha < 2:
-                if 'v2_' in args.manifold:  
-                    config['d_intrinsic'] = attn_setup['d_intrinsic']
+                if args.n_attn_heads == 1:
+                    config['d_intrinsic'] = attn_setup['d_intrinsic'] = args.hidden - 1
+                    if config['is_rescale_dist']:
+                        config['sphere_radius'] = ((np.pi**(1/config['d_intrinsic']) - 1)/np.pi)    
                 else:
-                    if args.n_attn_heads == 1:
-                        config['d_intrinsic'] = attn_setup['d_intrinsic'] = args.hidden//args.n_attn_heads - 1
-                        #config['sphere_radius'] = ((np.pi**(1/config['d_intrinsic'])-1)/np.pi)   
-                        #config.sphere_radius = 1   
-                    else:
-                        config['d_intrinsic'] = attn_setup['d_intrinsic'] = args.hidden//args.n_attn_heads
-                        #config['sphere_radius'] = ((np.pi**(1/config['d_intrinsic']))/np.pi)                                   
-            #elif args.alpha >= 2:
-            config['sphere_radius'] = attn_setup['sphere_radius'] = 1                 
-        
+                    config['d_intrinsic'] = attn_setup['d_intrinsic'] = args.hidden//args.n_attn_heads
+                    if config['is_rescale_dist']:
+                        config['sphere_radius'] = ((np.pi**(1/config['d_intrinsic']) - 1)/np.pi)                                   
+            else:
+                config['is_rescale_dist'] = False              
+
             # mask for distance
-            config['mask_val'] = attn_setup['mask_val'] = config['sphere_radius'] * np.pi
-            attn_setup['sphere_radius'] = config['sphere_radius']   
+            if config['is_rescale_dist']:
+                attn_setup['sphere_radius'] = config['sphere_radius']
+                config['mask_val'] = attn_setup['mask_val'] = config['sphere_radius'] * np.pi   
+            else:
+                config['mask_val'] = attn_setup['mask_val'] = np.pi 
 
         elif 'rd' in args.manifold:                            
 

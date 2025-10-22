@@ -1,11 +1,10 @@
 import numpy as np
 import torch
 import torch.nn as nn
+from torch.nn import functional as F
 from torch.nn.utils.parametrizations import orthogonal
 
 from .model_utils import PositionWiseFeedForwardNetwork
-from .att_dp import MultiHeadAttention, OPMultiHeadAttention
-from .att_rdfns import FNSAttention, OPFNSAttention
 
 class EncoderLayer(nn.Module):
     def __init__(self, config, is_return_dist=False):
@@ -20,12 +19,22 @@ class EncoderLayer(nn.Module):
         if self.is_resnet_scale:
             self.n_layers = config['n_layers']
 
-        if config['model_name'][-8:] == 'dpformer':
+        self.model_name = config['model_name']
+        if self.model_name[-8:] == 'dpformer':
+            from .att_dp import MultiHeadAttention, OPMultiHeadAttention
             if not config['is_op']:
                 self.mha = MultiHeadAttention(config, is_return_dist)
             else:
                 self.mha = OPMultiHeadAttention(config, is_return_dist)
-        elif config['model_name'][-11:] == 'rdfnsformer':
+        elif self.model_name[-11:] == 'rdfnsformer':
+            from .att_rdfns import FNSAttention, OPFNSAttention
+            if not config['is_op']:
+                self.mha = FNSAttention(config, is_return_dist)
+            else:
+                self.mha = OPFNSAttention(config, is_return_dist)
+
+        elif self.model_name[-11:] == 'spfnsformer':
+            from .att_spfns import FNSAttention, OPFNSAttention
             if not config['is_op']:
                 self.mha = FNSAttention(config, is_return_dist)
             else:
@@ -44,6 +53,10 @@ class EncoderLayer(nn.Module):
         # |inputs| : (batch_size, seq_len, d_model)
         # |attn_mask| : (batch_size, seq_len, seq_len)
         
+        # only normalize if is spherical
+        if self.model_name[-11:] == 'spfnsformer':
+            inputs = F.normalize(inputs, p=2, dim=-1)
+
         if not self.is_return_dist:
             attn_outputs, attn_weights = self.mha(inputs, inputs, inputs, attn_mask)
         else:

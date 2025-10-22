@@ -81,9 +81,9 @@ class FNSSelfAttention(nn.Module):
                 # quit()
             
         if alpha < 2:                      
-            attn_score = (1 + g_dist / bandwidth**0.5)**(-d_intrinsic-alpha)
+            attn_score = (1 + g_dist / bandwidth**(1/alpha))**(-d_intrinsic-alpha)
         else:             
-            attn_score = torch.exp(-(g_dist / bandwidth**0.5)**(alpha/(alpha-1)))    
+            attn_score = torch.exp(-(g_dist / bandwidth**(1/alpha))**(alpha/(alpha-1)))    
 
         if self.qk_share:  # Q = K
             attn_score = attn_score.masked_fill(torch.diag_embed(torch.ones(q_len, device=q.device))==1, 0)

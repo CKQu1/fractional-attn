@@ -279,10 +279,10 @@ def dist_to_score(g_dist, alpha, bandwidth, **kwargs):
     if alpha < 2:                    
         d_intrinsic = kwargs.get('d_intrinsic')
         #attn_score = (1 + g_dist / head_dim**0.5 / bandwidth**0.5)**(-d_intrinsic-alpha)        
-        attn_score = (1 + g_dist / bandwidth**0.5)**(-d_intrinsic-alpha)
+        attn_score = (1 + g_dist / bandwidth**(1/alpha))**(-d_intrinsic-alpha)
     else:             
         #attn_score = torch.exp(-(g_dist / head_dim**0.5 / bandwidth**0.5)**(alpha/(alpha-1)))
-        attn_score = torch.exp(-(g_dist / bandwidth**0.5)**(alpha/(alpha-1)))      
+        attn_score = torch.exp(-(g_dist / bandwidth**(1/alpha))**(alpha/(alpha-1)))      
 
     return attn_score    
 

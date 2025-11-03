@@ -13,20 +13,27 @@ torchrun --nnodes=1 --nproc_per_node=2 ddp_main.py --max_iters=5 --eval_interval
 if __name__ == '__main__':
           
     parser = argparse.ArgumentParser(description='batch_submit_main.py args')   
-    parser.add_argument('--is_qsub', type=str2bool, nargs='?', const=True, default=False) 
+    parser.add_argument('--is_qsub', type=str2bool, nargs='?', const=True, default=False)
+    parser.add_argument('--exp', default='exp1', type=str) 
     args = parser.parse_args()
     
     batch_script_name = "batch_main.py"
 
-    exp_type = 'exp3'
-    if exp_type == 'exp1':                           # train full-sized models
+    exp_type = args.exp
+    if exp_type == 'exp0':                           # finetuning full-sized models
+        EXPS_TO_RUN = full_trial(); EXP_NAME = '6-layer model finetuning'
+    elif exp_type == 'exp1':                           # train full-sized models
         EXPS_TO_RUN = train_exps_full(); EXP_NAME = '6-layer model training'
-    if exp_type == 'exp2':                           # train models of depth 1, 2 and 3
+    elif exp_type == 'exp2':                           # train models of depth 1, 2 and 3
         EXPS_TO_RUN = train_exps_hyperparam(); EXP_NAME = 'hyperparam model training'        
-    elif exp_type == 'exp3':                         # dynamic inference
-        EXPS_TO_RUN = dynamic_inference_exps(); EXP_NAME = 'dynamic inference'
-    elif exp_type == 'exp4':                         # attn graph from pretrained models
-        EXPS_TO_RUN = attn_graph_exps(); EXP_NAME = 'attn graph construction'
+    elif exp_type == 'exp3':                         # dynamic inference for small models
+        EXPS_TO_RUN = dynamic_inference_small(); EXP_NAME = 'dynamic inference (small models)'
+    elif exp_type == 'exp4':                         # dynamic inference for large models
+        EXPS_TO_RUN = dynamic_inference_full(); EXP_NAME = 'dynamic inference (large models)'
+    elif exp_type == 'exp5':                         # spectral gap from pretrained models
+        EXPS_TO_RUN = attn_graph_exps('attn_graph_v2.py'); EXP_NAME = 'spectral gap'
+    elif exp_type == 'exp6':                         # attn graph from pretrained models
+        EXPS_TO_RUN = attn_graph_exps('attn_graph_final.py'); EXP_NAME = 'attn graph reconstruction'
 
     print('-----------------------')
     print(f'{exp_type}: {EXP_NAME}')

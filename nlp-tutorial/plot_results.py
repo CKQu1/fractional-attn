@@ -350,7 +350,7 @@ python -i plot_results.py hyperparam_effects .droot/L-d-grid/
 """
 def hyperparam_effects(models_root, fns_manifold='rd', is_rescale_dist=True,
                        qk_shares=[False, True], selected_alphas='1.2,2',
-                       metric='val_acc', selected_dataset='imdb',
+                       metric='val_acc', selected_dataset='imdb', depths=[1],
                        is_op=True):
 
     # PROCESSING
@@ -491,9 +491,14 @@ def hyperparam_effects(models_root, fns_manifold='rd', is_rescale_dist=True,
     
     ax = axs[0]
     ax.set_title(r'$\mathbf{Q} \neq \mathbf{K}$')
+
+    if len(depths) == 1:
+        trans = [1]
+    else:
+        trans = [0.5, 1]
+
     for aidx in range(len(selected_alphas) + 1):
-        #for l in [1,2]:
-        for l in [1]:
+        for lidx, l in enumerate(depths):
             average_metrics = average_metric_matrix[0,aidx,l-1]
             std_metrics = std_metric_matrix[0,aidx,l-1]
             is_fns = aidx < len(selected_alphas)
@@ -508,7 +513,8 @@ def hyperparam_effects(models_root, fns_manifold='rd', is_rescale_dist=True,
                 color = COLORS_ALPHA[round((alpha - 1)/0.2) + 1]
                 #transparency = 1 - 1/(l+1)
                 #transparency = l/(l+1)
-                transparency = 1 - np.exp(-l)                     
+                #transparency = 1 - np.exp(-l)
+                transparency = trans[lidx]                     
                 model_type = fns_type       
             else: 
                 legend_label = 'DP'
@@ -518,6 +524,8 @@ def hyperparam_effects(models_root, fns_manifold='rd', is_rescale_dist=True,
                 # color = 'k'
             linestyle = (0, (2,1)) if l == 2 else '-'
             X = np.array([1,2,3,4])
+            if len(depths) > 1:
+                legend_label = legend_label + r' $(L={})$'.format(l)
             ax.errorbar(X, average_metrics, yerr=std_metrics, 
                         fmt='.', linestyle=linestyle, 
                         label=legend_label + r' $(L=1)$', 
@@ -528,8 +536,7 @@ def hyperparam_effects(models_root, fns_manifold='rd', is_rescale_dist=True,
     average_metrics = average_metric_matrix[1,0,0]
     std_metrics = std_metric_matrix[1,0,0]
     for aidx in range(len(selected_alphas) + 1):
-        #for l in [1,2]:
-        for l in [1]:
+        for lidx, l in enumerate(depths):
             average_metrics = average_metric_matrix[1,aidx,l-1]
             std_metrics = std_metric_matrix[1,aidx,l-1]
             is_fns = aidx < len(selected_alphas)
@@ -542,7 +549,8 @@ def hyperparam_effects(models_root, fns_manifold='rd', is_rescale_dist=True,
                 # elif (alpha == 2.0):
                 #     color = '#A4292F' if l == 2 else '#C86653'   
                 color = COLORS_ALPHA[round((alpha - 1)/0.2) + 1]
-                transparency = 1 - 1/(l+1)  
+                # transparency = 1 - 1/(l+1)  
+                transparency = trans[lidx] 
                 model_type = fns_type       
             else: 
                 legend_label = 'DP'
@@ -550,8 +558,10 @@ def hyperparam_effects(models_root, fns_manifold='rd', is_rescale_dist=True,
                 color = 'k' if l == 2 else '#636363'
             linestyle = (0, (2,1)) if l == 2 else '-'
             X = np.array([1,2,3,4])
+            if len(depths) > 1:
+                legend_label = legend_label + r' $(L={})$'.format(l)
             ax.errorbar(X, average_metrics, yerr=std_metrics, 
-                        fmt='.', linestyle=linestyle, label=legend_label + r' $(L={})$'.format(l), 
+                        fmt='.', linestyle=linestyle, label=legend_label, 
                         c=color, alpha=transparency, clip_on=False)
 
     for i, ax in enumerate(axs):

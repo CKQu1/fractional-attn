@@ -20,7 +20,7 @@ from UTILS.data_utils import create_examples, glove_create_examples
 
 from models.model import Transformer
 from constants import *
-from UTILS.mutils import njoin, str2bool, collect_model_dirs, AttrDict, load_model_files, dist_to_score
+from UTILS.mutils import njoin, str2bool, collect_model_dirs, AttrDict, load_model_files
 from UTILS.figure_utils import matrixify_axs, label_axs
 from UTILS.dataloader import load_dataset_and_tokenizer
 

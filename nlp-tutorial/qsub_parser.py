@@ -97,7 +97,7 @@ echo "pbs_array_args = ${{args[*]}}"
 END"""        
 
             os.system(f'qsub {PBS_SCRIPT}')
-            #print(PBS_SCRIPT)
+            # print(PBS_SCRIPT)
 
     # ---------- end{GADI} ----------
 
@@ -416,7 +416,7 @@ def command_setup_ddp(**kwargs):
 
     additional_command = ''
     #if max(ngpus, ncpus) <= 1:
-    if ngpus == 1:
+    if ngpus == 1 or ncpus == 1:
         command += " python3"
     elif ngpus > 1:
         #command += f" CUDA_VISIBLE_DEVICES=0,1 python3 -m torch.distributed.launch --nproc_per_node={ngpus}"

@@ -10,7 +10,7 @@ from os.path import isdir, isfile
 from matplotlib.transforms import ScaledTranslation
 from string import ascii_lowercase
 from torch.nn import functional as F  
-from UTILS.mutils import njoin, str2bool, collect_model_dirs, AttrDict, load_model_files, dist_to_score
+from UTILS.mutils import njoin, str2bool, collect_model_dirs, AttrDict, load_model_files
 from constants import HYP_CMAP, HYP_CNORM, MODEL_SUFFIX, DROOT
 from models.model import Transformer
 from torchtext.data.utils import get_tokenizer
@@ -64,6 +64,7 @@ if __name__ == '__main__':
 
     # ----- set up -----
     device = f'cuda' if torch.cuda.is_available() else "cpu"
+    # device = 'cpu'
     print(f'device: {device} \n')
     loss_fn = nn.CrossEntropyLoss()      
 
@@ -119,20 +120,20 @@ if __name__ == '__main__':
     model.eval()
 
     # Random downsample
-    np.random.seed(0)
+    np.random.seed(seed)
     N_sample = 100
     sample_idxs = np.random.choice(len(train_loader.dataset), N_sample, replace=False)
     # Results
     X_lens = np.zeros(len(sample_idxs))
+    spectral_gap = np.zeros(N_sample)
     spectrum = np.zeros((len(sample_idxs), config['max_len']))
     top_left_eigvecs = np.zeros((len(sample_idxs), config['max_len']))
     dist_matrices = np.zeros((len(sample_idxs), config['max_len'], config['max_len']))
     hop_matrices = np.zeros((len(sample_idxs), config['max_len'], config['max_len']))
     all_weights = np.zeros((len(sample_idxs), config['max_len'], config['max_len']))
     res_idx = 0
-    for ii in tqdm(range(len(train_loader.dataset))):
-        if ii not in sample_idxs:
-            continue
+    for iidx in tqdm(range(N_sample)):
+        ii = sample_idxs[iidx]
         X, Y = train_loader.dataset[ii]
         X_len = config['max_len'] - count_trailing_zeros(X)
         if is_dp: # opdpformer
@@ -149,6 +150,16 @@ if __name__ == '__main__':
             all_weights[res_idx, :X_len, :X_len] = data 
             # Spectrum
             eigvals, eigvecs = np.linalg.eig(data.T)
+
+            # if iidx == 1:
+            #     quit()  # delete
+
+            # sort eigvals
+            iis_sorted = eigvals.argsort()
+            eigvecs = eigvecs[:,iis_sorted]
+            eigvals = eigvals[iis_sorted] 
+            spectral_gap[iidx] = eigvals[-1] - eigvals[-2]
+
             spectrum[res_idx, :len(eigvals)] = eigvals
             top_left_eigvecs[res_idx, :eigvecs.shape[0]] = eigvecs[:,-1].T
             # Shortest path
@@ -185,7 +196,7 @@ if __name__ == '__main__':
     mean_spectral_gaps = []
     mean_shortest_paths = []    
 
-    spectral_gap = spectrum[:, -1] - spectrum[:, -2]
+    # spectral_gap = spectrum[:, -1] - spectrum[:, -2]
     mean_spectral_gap = np.mean(spectral_gap)
     mean_spectral_gaps.append(mean_spectral_gap)
     # Find mean shortest path
@@ -203,11 +214,13 @@ if __name__ == '__main__':
     if is_fns:
         alpha, bandwidth, a = attn_setup['alpha'], attn_setup['bandwidth'], attn_setup['a']
         fns_type = attn_setup['model_name']
-        spectrum_file = f'attn_graph-{fns_type}-seed={seed}-alpha={alpha}-pretrained_embd={pretrained_model_name}-same_token={args.use_same_token}.npz'
-        eval_file = f'evaluate-{fns_type}-seed={seed}-alpha={alpha}-pretrained_embd={pretrained_model_name}.npz'
+        # spectrum_file = f'attn_graph-{fns_type}-seed={seed}-alpha={alpha}-pretrained_embd={pretrained_model_name}-same_token={args.use_same_token}.npz'
+        spectrum_file = 'spectrum_file.npz'
+        # eval_file = f'evaluate-{fns_type}-seed={seed}-alpha={alpha}-pretrained_embd={pretrained_model_name}.npz'
     else:
-        spectrum_file = f'attn_graph-dpformer-seed={seed}.npz'
-        eval_file = f'evaluate-dpformer-seed={seed}.npz'
+        # spectrum_file = f'attn_graph-dpformer-seed={seed}.npz'
+        spectrum_file = 'spectrum_file.npz'
+        # eval_file = f'evaluate-dpformer-seed={seed}.npz'
     # ii = 0
     # model_dir_split = args.model_dir.split('/')
     # while ii < len(model_dir_split):

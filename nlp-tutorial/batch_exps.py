@@ -154,7 +154,7 @@ def full_trial():
     return kwargss_all, script_name, q, ncpus, ngpus, select, walltime, mem, job_path, nstack
 
 # ----- model training experiments (full) -----
-def train_exps_full():
+def train_exps_full(manifold):
 
     script_name = 'main.py'    
     #CLUSTER = 'PHYSICS'  # can manually enter here too
@@ -162,7 +162,7 @@ def train_exps_full():
 
     # -------------------- CHANGE HERE --------------------
     # ensembles
-    seeds = list(range(1))
+    seeds = list(range(5))
     # dataset
     DATASET_NAMES = ['imdb']  # 'imdb', 'glue-sst2', 'ag_news', 'emotion', 'yelp_polarity'
     # embeddings
@@ -180,12 +180,12 @@ def train_exps_full():
     qkv_bias = False     
     hiddens = [256]     
 
-    is_ops = [False]
+    is_ops = [False, True]
     qk_shares = [False]
 
     # model root dir
-    #ROOT = njoin(DROOT, 'full_models')
-    ROOT = njoin(DROOT, 'full_models-v22')
+    #ROOT = njoin(DROOT, 'full_models-v2')
+    ROOT = njoin(DROOT, 'trial-full-sphere-v6')
     #ROOT = njoin(DROOT, f'full_models-qkv_bias={qkv_bias}-gscalev5-3')
     job_path = njoin(ROOT, 'jobs_all')    
 
@@ -199,8 +199,11 @@ def train_exps_full():
     cfg = RESOURCE_CONFIGS[CLUSTER][is_use_gpu]
     q, ngpus, ncpus = cfg["q"], cfg["ngpus"], cfg["ncpus"]              
 
-    nstack = 1                               
-    single_walltime, mem = '01:29:59', '12GB'  # for n = 512  
+    nstack = 2                   
+    if manifold == 'rd':            
+        single_walltime, mem = '01:20:59', '12GB'  # for n = 512  
+    elif manifold == 'sphere':
+        single_walltime, mem = '01:35:59', '12GB'  # for n = 512
     walltime = time_to_str(str_to_time(single_walltime) * nstack)      
     select = 1
 
@@ -209,7 +212,7 @@ def train_exps_full():
     # FNS
     alphas = [1.2, 2]
     bandwidths = [1]      
-    manifolds = ['rd']  # 'rd', 'v2_rd', 'sphere'       
+    # manifolds = ['rd']  # 'rd', 'v2_rd', 'sphere'       
     # other types
     is_train_others = False
 
@@ -241,7 +244,8 @@ def train_exps_full():
                 "weight_decay":      0,
                 'n_layers':          n_layers,
                 'hidden':            hidden,
-                'ffn_hidden':        hidden*4,
+                'ffn_hidden':        hidden,
+                # 'ffn_hidden':        hidden*4,
                 'n_attn_heads':      n_attn_heads                             
             }  
             #common_kwargs['max_len'] = MAX_LENS_DICT[dataset_name] if max_len is None else max_len                        
@@ -255,9 +259,13 @@ def train_exps_full():
             # if n_layers > 3:
             common_kwargs["epochs"] = 20
             common_kwargs["train_bs"] = 32
-            common_kwargs["max_lr"] = 1e-4  # full_model-v2, full_model-v3, gscale, gscalev2, gscalev5
-            #common_kwargs["max_lr"] = 2e-4  # gscalev5-2                               
-            common_kwargs["min_lr"] = common_kwargs["max_lr"] / 10
+            if manifold == 'rd':
+                common_kwargs["max_lr"] = 1e-4  # full_model-v2, full_model-v3, gscale, gscalev2, gscalev5
+                #common_kwargs["max_lr"] = 2e-4  # gscalev5-2                               
+                common_kwargs["min_lr"] = common_kwargs["max_lr"] / 10
+            elif manifold == 'sphere':
+                common_kwargs["max_lr"] = 1.2e-4                             
+                common_kwargs["min_lr"] = common_kwargs["max_lr"] / 10
 
             # ----- add more settings here -----                                           
             model_root_dirname = structural_model_root(dataset_name=dataset_name, **common_kwargs)                                                  
@@ -266,8 +274,10 @@ def train_exps_full():
             kwargss = []
             qkv = 'qqv' if qk_share else 'qkv'
             # FNS
-            for alpha, bandwidth, manifold in product(alphas, bandwidths, manifolds):
-                model_name = manifold + 'fns' +  MODEL_SUFFIX
+            # for alpha, bandwidth, manifold in product(alphas, bandwidths, manifolds):
+            for alpha, bandwidth in product(alphas, bandwidths):
+                manifold_prefix = 'sp' if manifold == 'sphere' else manifold
+                model_name = manifold_prefix + 'fns' +  MODEL_SUFFIX
                 model_name = 'op' + model_name if is_op else model_name
                 model_dir = njoin(model_root,
                 f'{model_name}-{dataset_name}-{qkv}-alpha={float(alpha)}-eps={float(bandwidth)}',

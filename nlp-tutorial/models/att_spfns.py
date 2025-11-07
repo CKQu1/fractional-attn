@@ -63,25 +63,11 @@ class FNSSelfAttention(nn.Module):
         else:            
             g_dist = torch.acos_(dot)
         g_dist.masked_fill_(attn_mask, self.mask_val)  # special token mask
-
-        if isinstance(bandwidth, str):
-            if bandwidth.lower() == 'median':
-                bandwidth_lb = 1e-3
-                bandwidth = torch.median((g_dist**alpha).reshape((g_dist.shape[0], g_dist.shape[1], -1)), dim=-1).values.detach()
-                #bandwidth = torch.max(bandwidth[:,:,None,None],0.01*torch.ones_like(g_dist))
-                bandwidth = torch.max(bandwidth[:,:,None,None], bandwidth_lb*torch.ones_like(g_dist))
-            elif bandwidth.lower() == 'mean':
-                bandwidth_lb = 1e-3
-                bandwidth = torch.mean((g_dist).reshape((g_dist.shape[0], g_dist.shape[1], -1)), dim=-1).detach()**2
-                #bandwidth = torch.max(bandwidth[:,:,None,None],0.01*torch.ones_like(g_dist))
-                bandwidth = torch.max(bandwidth[:,:,None,None], bandwidth_lb*torch.ones_like(g_dist))
-                # print(f'bandwidth shape: {bandwidth.shape}')
-                # quit()
             
         if alpha < 2:                      
-            attn_score = (1 + g_dist / bandwidth**0.5)**(-d_intrinsic-alpha)
+            attn_score = (1 + g_dist / bandwidth**(1/alpha))**(-d_intrinsic-alpha)
         else:             
-            attn_score = torch.exp(-(g_dist / bandwidth**0.5)**(alpha/(alpha-1)))    
+            attn_score = torch.exp(-(g_dist / bandwidth**(1/alpha))**(alpha/(alpha-1)))    
 
         if self.qk_share:  # Q = K
             attn_score = attn_score.masked_fill(torch.diag_embed(torch.ones(q_len, device=q.device))==1, 0)
@@ -122,9 +108,9 @@ class FNSSelfAttention(nn.Module):
         else:
             return output, attn_weights, g_dist
 
-class FNSAttention(nn.Module):
+class SPFNSAttention(nn.Module):
     def __init__(self, config, is_return_dist=False):
-        super(FNSAttention, self).__init__()
+        super(SPFNSAttention, self).__init__()
 
         #self.d_k = self.d_v = config['d_model']//self.n_heads
         self.head_dim = head_dim = config['head_dim']
@@ -148,14 +134,16 @@ class FNSAttention(nn.Module):
         # |attn_mask| : (batch_size, seq_len(=q_len), seq_len(=k_len))
         batch_size = Q.size(0)
         
-        q_heads = self.WQ(Q).view(batch_size, -1, self.n_heads, self.head_dim).transpose(1, 2) 
+        q_heads = F.normalize(self.WQ(Q).view(batch_size, -1, self.n_heads, self.head_dim).transpose(1, 2),
+                              p=2,dim=-1) 
         v_heads = self.WV(V).view(batch_size, -1, self.n_heads, self.head_dim).transpose(1, 2) 
         # |q_heads| : (batch_size, n_heads, q_len, d_k), |k_heads| : (batch_size, n_heads, k_len, d_k), |v_heads| : (batch_size, n_heads, v_len, d_v)
         
         attn_mask = attn_mask.unsqueeze(1).repeat(1, self.n_heads, 1, 1)
         # |attn_mask| : (batch_size, n_heads, seq_len(=q_len), seq_len(=k_len))
         if not self.qk_share:
-            k_heads = self.WK(K).view(batch_size, -1, self.n_heads, self.head_dim).transpose(1, 2)     
+            k_heads = F.normalize(self.WK(K).view(batch_size, -1, self.n_heads, self.head_dim).transpose(1, 2),
+                                  p=2,dim=-1)     
             if not self.is_return_dist:    
                 attn, attn_weights = self.fns_attn(q_heads, k_heads, v_heads, attn_mask)
             else:
@@ -179,9 +167,9 @@ class FNSAttention(nn.Module):
         else:
             return output, attn_weights, g_dist
 
-class OPFNSAttention(nn.Module):
+class OPSPFNSAttention(nn.Module):
     def __init__(self, config, is_return_dist=False):
-        super(OPFNSAttention, self).__init__()         
+        super(OPSPFNSAttention, self).__init__()         
         self.n_heads = n_heads = config['n_heads']
         self.d_model = d_model = config['d_model']
         #self.d_k = self.d_v = config['d_model']//self.n_heads

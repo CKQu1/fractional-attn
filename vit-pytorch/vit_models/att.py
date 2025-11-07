@@ -135,7 +135,11 @@ class RDFNSMultiHeadAttention(nn.Module):
             else:
                 #self.dist_scale = (self.attention_head_size)**(1/self.alpha)
                 #self.dist_scale = self.attention_head_size**0.5 / (self.attention_head_size**(1/self.attention_head_size) - 1)
-                self.dist_scale = self.attention_head_size**0.5 / (2**(1/self.attention_head_size) - 1)        
+
+                #self.dist_scale = self.attention_head_size**0.5 / (2**(1/self.attention_head_size) - 1)        
+                #self.dist_scale = self.attention_head_size**0.5 / (self.attention_head_size**(1/self.attention_head_size) - 1)
+                #self.dist_scale = 2 * self.attention_head_size**1.5
+                self.dist_scale = self.attention_head_size
 
     def forward(self, x, output_attentions=False):
         alpha, bandwidth = self.alpha, self.bandwidth

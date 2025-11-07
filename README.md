@@ -4,25 +4,30 @@
 
 The script `batch_exps.py` contains all the experiments ran in the manuscript, i.e. including `exps1`, `exps2`, `exps3`. These experiemtns can be submitted to the cluster through `batch_submit_main.py`. Otherwise, the single jobs could be ran through `main.py`.
 
+### Experiments
+
+1. Training models of 6 layers and 8 attention heads (Euclidean FNA):
+    - `python batch_submit_main.py --exp=exp1`
+2. Training models of single-layers and various embedding dimension:
+    - `python batch_submit_main.py --exp=exp2`
+3. Dynamic inference for single-layer models:
+    - `python batch_submit_main.py --exp=exp3`
+4. Spectral gap analysis for single-layer models:
+    - `python batch_submit_main.py --exp=exp5`
+5. Attention graph analysis for single-layer models:
+    - `python batch_submit_main.py --exp=exp6`
+6. Training models of 6 layers and 8 attention heads (spherical FNA):
+    - `python batch_submit_main.py --exp=exp7`
+
 ## vit-pytorch
 
 A single instance of training can be realized through:
 `python main.py`
 
-For batch submitting all the training instances in the manuscript:
+### Experiments
+
+Training models in the paper:
 `python batch_submit_main.py`
-
-## long-range-arena
-
-### Data preparation
-
-Run `lra_dl.sh` or submit job via `qsub lra_dl.sh`, then execute python `aan_script.py` to download datasets.
-
-### Train models
-
-We focus on 2 types of experiments:
-    1. `python main.py --dataset_name=aan-classification`
-    2. `python main.py --dataset_name=pathfinder-classification`
 
 ## translation-final
 
@@ -41,7 +46,7 @@ Double-check `modules/attention.py`
     - Can use `tests/model.py` to check things too
     - Can use `demo.py` to check translation output of model
 
-### Batch job submission
+### Experiments
 
 Run `python batch_submit_main.py`
 

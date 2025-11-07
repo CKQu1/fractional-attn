@@ -28,7 +28,10 @@ class MultiHeadAttention(Module):
                 if self.alpha < 2:            
                     #self.dist_scale = d_k**0.5 / (2**(1/d_k) - 1)
                     #self.dist_scale = d_k**0.5 / (d_k**(1/d_k) - 1)
-                    self.dist_scale = (d_k**(1/d_k) - 1)
+                    #self.dist_scale = (d_k**(1/d_k) - 1)
+                    #self.dist_scale = 2*d_k**1.5
+                    #self.dist_scale = d_k**1.5
+                    self.dist_scale = d_k
                 else:
                     self.dist_scale = math.sqrt(d_k)
 

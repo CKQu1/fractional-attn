@@ -6,6 +6,7 @@ from torch.nn.utils.parametrizations import orthogonal
 
 from .model_utils import PositionWiseFeedForwardNetwork
 
+# ----- Euclidean embeddings -----
 class EncoderLayer(nn.Module):
     def __init__(self, config, is_return_dist=False):
         super(EncoderLayer, self).__init__()
@@ -34,11 +35,11 @@ class EncoderLayer(nn.Module):
                 self.mha = OPFNSAttention(config, is_return_dist)
 
         elif self.model_name[-11:] == 'spfnsformer':
-            from .att_spfns import FNSAttention, OPFNSAttention
+            from .att_spfns import SPFNSAttention, OPSPFNSAttention
             if not config['is_op']:
-                self.mha = FNSAttention(config, is_return_dist)
+                self.mha = SPFNSAttention(config, is_return_dist)
             else:
-                self.mha = OPFNSAttention(config, is_return_dist)
+                self.mha = OPSPFNSAttention(config, is_return_dist)
 
         self.dropout1 = nn.Dropout(p_drop)
         self.layernorm1 = nn.LayerNorm(d_model, eps=1e-6)
@@ -80,6 +81,86 @@ class EncoderLayer(nn.Module):
         else:
             return ffn_outputs, attn_weights, g_dist
 
+# ----- Spherical embeddings -----
+"""
+class SPEncoderLayer(nn.Module):
+    def __init__(self, config, is_return_dist=False):
+        super(SPEncoderLayer, self).__init__()
+
+        self.d_model = d_model = config['d_model']
+        self.n_heads = n_heads = config['n_heads']
+        self.p_drop = p_drop = config['p_drop']
+        self.d_ff = d_ff = config['d_ff']
+
+        self.is_op = config['is_op']
+        self.is_resnet_scale = config['is_resnet_scale']
+        if self.is_resnet_scale:
+            self.n_layers = config['n_layers']
+
+        self.model_name = config['model_name']
+        assert self.model_name[-11:] == 'spfnsformer', f'{self.model_name} is not spfnsformer type!'
+        from .att_spfns import SPFNSAttention, OPSPFNSAttention
+        if not config['is_op']:
+            self.mha = SPFNSAttention(config, is_return_dist)
+        else:
+            self.mha = OPSPFNSAttention(config, is_return_dist)
+
+        self.dropout1 = nn.Dropout(p_drop)
+        # self.layernorm1 = nn.LayerNorm(d_model, eps=1e-6)  # REPLACED BY F.normalize
+        
+        self.ffn = PositionWiseFeedForwardNetwork(d_model, d_ff)
+        self.dropout2 = nn.Dropout(p_drop)
+        self.layernorm2 = nn.LayerNorm(d_model, eps=1e-6)
+
+        self.is_return_dist = is_return_dist
+
+    def forward(self, inputs, attn_mask):
+        # |inputs| : (batch_size, seq_len, d_model)
+        # |attn_mask| : (batch_size, seq_len, seq_len)
+        
+        # L2 normalization
+        # if self.is_op:
+        inputs = F.normalize(inputs, p=2, dim=-1)
+
+        if not self.is_return_dist:
+            attn_outputs, attn_weights = self.mha(inputs, inputs, inputs, attn_mask)
+        else:
+            attn_outputs, attn_weights, g_dist = self.mha(inputs, inputs, inputs, attn_mask)
+
+        attn_outputs = self.dropout1(attn_outputs)
+        # ----- post-LN -----
+        # if self.is_resnet_scale:  
+        #     attn_outputs = self.layernorm1(inputs + attn_outputs/(self.n_layers)**0.5)
+        # else:
+        #     attn_outputs = self.layernorm1(inputs + attn_outputs)
+        # # |attn_outputs| : (batch_size, seq_len(=q_len), d_model)
+        # # |attn_weights| : (batch_size, n_heads, q_len, k_len)
+
+        # ffn_outputs = self.ffn(attn_outputs)
+        # ffn_outputs = self.dropout2(ffn_outputs)
+        # ffn_outputs = self.layernorm2(attn_outputs + ffn_outputs)
+        # # |ffn_outputs| : (batch_size, seq_len, d_model)
+        
+        # ----- pre-LN -----
+        if self.is_resnet_scale:  
+            attn_outputs = inputs + attn_outputs/(self.n_layers)**0.5
+        else:
+            attn_outputs = inputs + attn_outputs
+        # |attn_outputs| : (batch_size, seq_len(=q_len), d_model)
+        # |attn_weights| : (batch_size, n_heads, q_len, k_len)
+
+        ffn_outputs = self.ffn(self.layernorm2(attn_outputs))
+        ffn_outputs = self.dropout2(ffn_outputs)
+        ffn_outputs = attn_outputs + ffn_outputs
+        # |ffn_outputs| : (batch_size, seq_len, d_model)
+
+        if not self.is_return_dist:
+            return ffn_outputs, attn_weights
+        else:
+            return ffn_outputs, attn_weights, g_dist
+"""
+# ------------------------------
+
 class Transformer(nn.Module):
     
     # def __init__(self, vocab_size, seq_len, d_model=512, n_layers=6, n_heads=8, p_drop=0.1, d_ff=2048, pad_id=0):
@@ -99,6 +180,7 @@ class Transformer(nn.Module):
     def __init__(self, config, is_return_dist=False):
         super(Transformer, self).__init__()
 
+        self.model_name = config['model_name']
         self.vocab_size = config['vocab_size']
         self.seq_len = config['seq_len']
         self.d_model = config['d_model']
@@ -135,7 +217,10 @@ class Transformer(nn.Module):
             self.embedding = nn.Embedding(self.vocab_size, self.d_model)                  
 
         # layers        
+        # if self.model_name[-11:] == 'rdfnsformer' or self.model_name[-8:] == 'dpformer':
         self.layers = nn.ModuleList([EncoderLayer(config, self.is_return_dist) for _ in range(self.n_layers)])
+        # elif self.model_name[-11:] == 'spfnsformer':
+        #     self.layers = nn.ModuleList([SPEncoderLayer(config, self.is_return_dist) for _ in range(self.n_layers)])
 
         # layers to classify
         self.linear = nn.Linear(self.d_model, self.num_classes)

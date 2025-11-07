@@ -20,10 +20,10 @@ if __name__ == '__main__':
     batch_script_name = "batch_main.py"
 
     exp_type = args.exp
-    if exp_type == 'exp0':                           # finetuning full-sized models
+    if exp_type == 'exp0':                           # finetuning full-sized models 
         EXPS_TO_RUN = full_trial(); EXP_NAME = '6-layer model finetuning'
-    elif exp_type == 'exp1':                           # train full-sized models
-        EXPS_TO_RUN = train_exps_full(); EXP_NAME = '6-layer model training'
+    elif exp_type == 'exp1':                           # train full-sized models (R^d)
+        EXPS_TO_RUN = train_exps_full('rd'); EXP_NAME = '6-layer model training for Euclidean case'
     elif exp_type == 'exp2':                           # train models of depth 1, 2 and 3
         EXPS_TO_RUN = train_exps_hyperparam(); EXP_NAME = 'hyperparam model training'        
     elif exp_type == 'exp3':                         # dynamic inference for small models
@@ -34,6 +34,8 @@ if __name__ == '__main__':
         EXPS_TO_RUN = attn_graph_exps('attn_graph_v2.py'); EXP_NAME = 'spectral gap'
     elif exp_type == 'exp6':                         # attn graph from pretrained models
         EXPS_TO_RUN = attn_graph_exps('attn_graph_final.py'); EXP_NAME = 'attn graph reconstruction'
+    elif exp_type == 'exp7':                           # train full-sized models (sphere)
+        EXPS_TO_RUN = train_exps_full('sphere'); EXP_NAME = '6-layer model training for spherical case'
 
     print('-----------------------')
     print(f'{exp_type}: {EXP_NAME}')

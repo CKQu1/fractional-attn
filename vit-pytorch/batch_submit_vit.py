@@ -27,14 +27,14 @@ if __name__ == '__main__':
     # general settings
     #n_layers = [4]
     n_layer = 4
-    seeds = list(range(5))   
-    is_force_train = False   
+    seeds = list(range(1))   
+    is_force_train = False
     is_train_others = True  
 
-    patch_size = 4
+    patch_size = 2
     is_preln = True  # default is True            
     qk_shares = [False]
-    is_ops = [True]
+    is_ops = [False,True]
 
     # FNS settings
     is_rescale_dist = True
@@ -43,7 +43,7 @@ if __name__ == '__main__':
     bandwidths = [1]
 
     # Resources
-    nstack = 4
+    nstack = 1
     mem = '8GB'      
     is_use_gpu = True
 
@@ -52,11 +52,14 @@ if __name__ == '__main__':
     select = 1
    
     for is_op in is_ops:
-        single_walltime = '01:09:59' if not is_op else '01:45:59'    
+        if patch_size == 4:
+            single_walltime = '01:00:00' if not is_op else '01:25:00'
+        elif patch_size == 2:
+            single_walltime = '01:30:00' if not is_op else '01:55:00'    
         walltime = time_to_str(str_to_time(single_walltime) * nstack)
         dirname = f'{n_layer}L-ps={patch_size}' 
         dirname = dirname + '-preln' if is_preln else dirname + '-postln'
-        ROOT = njoin(DROOT, 'full_models-v6', dirname)
+        ROOT = njoin(DROOT, 'full_models-gscalev5-2', dirname)  # CHANGE FOLDER NAME
         job_path = njoin(ROOT, 'jobs_all')
 
         kwargss_all = []    
@@ -89,11 +92,11 @@ if __name__ == '__main__':
                     common_kwargs['binary_ratio'] = 4/5
                 # common_kwargs['max_lr'] = 5e-4  # v2
                 if is_op:
-                    common_kwargs['max_lr'] = 6e-4  # v3 (best for is_op True)             
+                    common_kwargs['max_lr'] = 6e-4  # gscalev4-1            
                 else:
-                    #common_kwargs['max_lr'] = 7e-4  # v4
-                    #common_kwargs['max_lr'] = 1e-3  # v5                    
-                    common_kwargs['max_lr'] = 2e-3  # v6
+                    #common_kwargs['max_lr'] = 1e-3  # gscalev4-1
+                    common_kwargs['max_lr'] = 6e-4  # gscalev4-2                      
+
                 common_kwargs['min_lr'] = common_kwargs['max_lr'] / 10         
 
                 common_kwargs['epochs'] = 125                                                        
@@ -170,4 +173,4 @@ if __name__ == '__main__':
         if args.is_qsub:
             print(f'----- SUBMITTING ----- \n')
             for i in range(len(commands)):
-                qsub(f'{commands[i]} {batch_script_names[i]}', pbs_array_trues[i], path=job_path, **kwargs_qsubs[i])                
+                qsub(f'{commands[i]} {batch_script_names[i]}', pbs_array_trues[i], path=job_path, **kwargs_qsubs[i])

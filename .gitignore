@@ -1,6 +1,9 @@
 # Ignore all dotfiles
 .*
 
+# Ignore data folders
+**/.droot/
+
 # But keep this file
 !.gitignore
 

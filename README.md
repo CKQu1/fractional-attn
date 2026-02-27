@@ -58,6 +58,6 @@ Run `python batch_submit_main.py`
 
 [1] `nlp-tutorial`, `vit-pytorch` based on https://github.com/michaelsdr/sinkformers/
 
-[2] `translation-final` based on https://github.com/tanjeffreyz/attention-is-all-you-need
+[2] `translation` based on https://github.com/tanjeffreyz/attention-is-all-you-need
 
 [3] NanoGPT: https://github.com/karpathy/nanoGPT

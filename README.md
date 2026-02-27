@@ -1,5 +1,9 @@
 # Fractional neural attention for processing long sequences
 
+## Environment information
+
+I used `Python 3.11.13` throughout. For `nlp-tutorial` and `vit-pytorch`, the requirements are as in `requirements_fsa.txt`; for `translation` in `requirements_nmt.txt`.
+
 ## nlp-tutorial
 
 The script `batch_exps.py` contains all the experiments ran in the manuscript, i.e. including `exps1`, `exps2`, `exps3`. These experiemtns can be submitted to the cluster through `batch_submit_main.py`. Otherwise, the single jobs could be ran through `main.py`.
@@ -29,7 +33,7 @@ A single instance of training can be realized through:
 Training models in the paper:
 `python batch_submit_main.py`
 
-## translation-final
+## translation
 
 ### Data preparation
 
@@ -54,10 +58,6 @@ Run `python batch_submit_main.py`
 
 [1] `nlp-tutorial`, `vit-pytorch` based on https://github.com/michaelsdr/sinkformers/
 
-[2] `long-range-arena` based on https://github.com/state-spaces/s4
+[2] `translation-final` based on https://github.com/tanjeffreyz/attention-is-all-you-need
 
-[3] `nmt` based on https://github.com/sgrvinod/a-PyTorch-Tutorial-to-Transformers
-
-[4] `translation-final` based on https://github.com/tanjeffreyz/attention-is-all-you-need
-
-[5] NanoGPT: https://github.com/karpathy/nanoGPT
+[3] NanoGPT: https://github.com/karpathy/nanoGPT

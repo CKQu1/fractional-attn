@@ -61,3 +61,22 @@ Run `python batch_submit_main.py`
 [2] `translation` based on https://github.com/tanjeffreyz/attention-is-all-you-need
 
 [3] NanoGPT: https://github.com/karpathy/nanoGPT
+
+## Cite Our Paper
+
+@ARTICLE{fna_model,
+       author = {{Qu}, Cheng Kevin and {Ly}, Andrew and {Gong}, Pulin},
+        title = "{Fractional neural attention for efficient multiscale sequence processing}",
+      journal = {arXiv e-prints},
+     keywords = {Machine Learning, Artificial Intelligence, Dynamical Systems, Probability, Biological Physics},
+         year = 2025,
+        month = nov,
+          eid = {arXiv:2511.10208},
+        pages = {arXiv:2511.10208},
+          doi = {10.48550/arXiv.2511.10208},
+archivePrefix = {arXiv},
+       eprint = {2511.10208},
+ primaryClass = {stat.ML},
+       adsurl = {https://ui.adsabs.harvard.edu/abs/2025arXiv251110208Q},
+      adsnote = {Provided by the SAO/NASA Astrophysics Data System}
+}

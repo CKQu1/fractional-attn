@@ -64,6 +64,8 @@ Run `python batch_submit_main.py`
 
 ## Cite Our Paper
 
+Preprint link: https://arxiv.org/abs/2511.10208 
+
 @ARTICLE{fna_model,
        author = {{Qu}, Cheng Kevin and {Ly}, Andrew and {Gong}, Pulin},
         title = "{Fractional neural attention for efficient multiscale sequence processing}",

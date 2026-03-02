@@ -1,6 +1,9 @@
 # Fractional neural attention for processing long sequences
 
-![A fractional diffusion implementation of self-attention by our FNA.](https://raw.githubusercontent.com/CKQu1/fractional-attn/main/_figures/fna.png)
+<p align="center">
+  <img src="_figure/fna.png" alt="FNA schematic" width="650" />
+</p>
+
 
 ## Environment information
 

@@ -1,5 +1,7 @@
 # Fractional neural attention for processing long sequences
 
+![A fractional diffusion implementation of self-attention by our FNA.](_figures_/fna.png)
+
 ## Environment information
 
 I used `Python 3.11.13` throughout. For `nlp-tutorial` and `vit-pytorch`, the requirements are as in `requirements_fsa.txt`; for `translation` in `requirements_nmt.txt`.

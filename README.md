@@ -1,7 +1,7 @@
 # Fractional neural attention for processing long sequences
 
 <p align="center">
-  <img src="_figure/fna.png" alt="FNA schematic" width="650" />
+  <img src="_figures/fna.png" alt="FNA schematic" width="650" />
 </p>
 
 

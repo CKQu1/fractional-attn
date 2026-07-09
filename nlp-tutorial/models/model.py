@@ -33,13 +33,18 @@ class EncoderLayer(nn.Module):
                 self.mha = FNSAttention(config, is_return_dist)
             else:
                 self.mha = OPFNSAttention(config, is_return_dist)
-
         elif self.model_name[-11:] == 'spfnsformer':
             from .att_spfns import SPFNSAttention, OPSPFNSAttention
             if not config['is_op']:
                 self.mha = SPFNSAttention(config, is_return_dist)
             else:
                 self.mha = OPSPFNSAttention(config, is_return_dist)
+        elif self.model_name[-10:] == 'sinkformer':
+            from .att_sink import SinkAttention, OPSinkAttention
+            if not config['is_op']:
+                self.mha = SinkAttention(config, is_return_dist)
+            else:
+                self.mha = OPSinkAttention(config, is_return_dist)
 
         self.dropout1 = nn.Dropout(p_drop)
         self.layernorm1 = nn.LayerNorm(d_model, eps=1e-6)
@@ -270,9 +275,31 @@ class Transformer(nn.Module):
         else:
             return outputs, attention_weights, g_dists
 
+    # def get_attention_padding_mask(self, q, k, pad_id):
+    #     attn_pad_mask = k.eq(pad_id).unsqueeze(1).repeat(1, q.size(1), 1)
+    #     # |attn_pad_mask| : (batch_size, q_len, k_len)
+
+    #     return attn_pad_mask
+
     def get_attention_padding_mask(self, q, k, pad_id):
-        attn_pad_mask = k.eq(pad_id).unsqueeze(1).repeat(1, q.size(1), 1)
-        # |attn_pad_mask| : (batch_size, q_len, k_len)
+        # q, k: (batch_size, seq_len)
+        q_len = q.size(1)
+
+        # Original behavior: mask padded keys for every query
+        # key_pad_mask = k.eq(pad_id)                            # (B, K)
+        # attn_pad_mask = key_pad_mask.unsqueeze(1).expand(-1, q_len, -1).clone()  # (B, Q, K)
+        attn_pad_mask = k.eq(pad_id).unsqueeze(1).repeat(1, q_len, 1)
+
+        # Extra behavior: if a query is PAD, mask its whole row
+        k_len = k.size(1)
+        query_pad_mask = q.eq(pad_id)                          # (B, Q)
+        attn_pad_mask |= query_pad_mask.unsqueeze(2).expand(-1, -1, k_len)
+
+        # For self-attention only: let each padded query attend to itself
+        if q_len == k_len:
+            eye = torch.eye(q_len, dtype=torch.bool, device=q.device).unsqueeze(0)   # (1, Q, K)
+            pad_self = query_pad_mask.unsqueeze(2) & eye                              # (B, Q, K)
+            attn_pad_mask &= ~pad_self
 
         return attn_pad_mask
 

@@ -33,7 +33,8 @@ RESOURCE_CONFIGS = {
 
 # ----- GADI -----
 GADI_PROJECTS = ['uu69']
-GADI_SOURCE = '/scratch/uu69/cq5024/myenvs/fsa/bin/activate'
+# GADI_SOURCE = '/scratch/uu69/cq5024/myenvs/fsa/bin/activate'
+GADI_SOURCE = '/scratch/uu69/cq5024/venvs/fsa/bin/activate'
 # -------------------
 
 # ----- PHYSICS -----
@@ -78,6 +79,7 @@ for MODEL_PREFIX in MODEL_PREFIXES:
         NAMES_DICT[MODEL_PREFIX + MODEL_SUFFIX] = MODEL_PREFIX.upper()    
 
 NAMES_DICT.update({'imdb': 'IMDb', 'rotten_tomatoes': 'Rotten Tomatoes',
+                   'ag_news': 'AG News',
                    'train_loss': 'Train Loss', 'train_acc': 'Train Acc.',
                    'val_loss': 'Test Loss', 'val_acc': 'Test Acc.', 
                    'train_loss': 'Train Loss', 'train_acc': 'Train Acc.'}
@@ -125,8 +127,8 @@ DEPTH_TO_MARKER = {1: '^', 2: 's', 3: 'p', 4: 'hexagon2'}
 #               'imdb': 'IMDb', 'rotten_tomatoes': 'Rotten Tomatoes',
 #               'eval_loss': 'Loss', 'eval_accuracy': 'Accuracy', 'eval_f1_score': r'$F_1$ score'}              
 
-DATASET_NAMES = ['rotten_tomatoes','imdb','emotion']     
-MAX_LENS = [128, 512, 128]
+DATASET_NAMES = ['rotten_tomatoes','imdb','emotion','ag_news']     
+MAX_LENS = [128, 512, 128, 128]
 MAX_LENS_DICT = {}
 for ii, dataset_name in enumerate(DATASET_NAMES):
     MAX_LENS_DICT[dataset_name] = MAX_LENS[ii]

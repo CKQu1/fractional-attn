@@ -64,10 +64,10 @@ def load_seed_runs(model_dir, seeds, metric):
         seed_path = njoin(model_dir, f'model={seed}')
         fpath = njoin(seed_path, 'run_performance.csv')
         if not isfile(fpath):
-            # fpath = njoin(seed_path, '_run_performance.csv')
-            # if not isfile(fpath):
-            #     continue
-            continue
+            fpath = njoin(seed_path, '_run_performance.csv')
+            if not isfile(fpath):
+                continue
+            # continue
         run = pd.read_csv(fpath)
         if int(run.loc[0,'iter']) > 0:
             epochs = run['iter'].astype(int) // int(run.loc[0,'iter'])
@@ -100,10 +100,10 @@ python -i plot_results.py phase_ensembles .droot/L-d-grid/1L-hidden=8-max_len=51
 python -i plot_results.py phase_ensembles frac_attn/fractional-attn/nlp-tutorial/droot/6L-hidden=256-max_len=None-rescaled (Figure 2)
 python -i plot_results.py phase_ensembles frac_attn/fractional-attn/nlp-tutorial/droot/6L-v4-hidden=256-max_len=512-rescaled (to be trained and plotted)
 """
-def phase_ensembles(models_root, selected_dataset='imdb',
-                    fns_manifold='rd', qk_share=False, selected_alphas='1.2,2',
+def phase_ensembles(models_root, selected_dataset='imdb', 
+                    qk_share=False, is_ops='False,True',
+                    fns_manifold='rd', selected_alphas='1.2,2',
                     metrics='val_acc,val_loss',
-                    is_ops = [False,True],  # [False,True]
                     cbar_separate=False, display=False):
     pd.set_option('display.max_rows', None)
     pd.set_option('display.max_columns', None)
@@ -113,6 +113,7 @@ def phase_ensembles(models_root, selected_dataset='imdb',
     assert fns_manifold in ['sp', 'rd', 'v2_rd'], f'{fns_manifold} does not exist!'
     qk_share, cbar_separate, display = map(str2bool, (qk_share, cbar_separate, display))
     metrics, is_ops = str2ls(metrics), str2ls(is_ops)
+    is_ops = [str2bool(is_op) for is_op in is_ops]
 
     # collect subdirs containing the model directories
     model_root_dirs = models_roots = find_subdirs(models_root, MODEL_SUFFIX)
@@ -158,7 +159,7 @@ def phase_ensembles(models_root, selected_dataset='imdb',
 
     # ----- models to plot -----
     fns_model_type = fns_manifold + 'fns' + MODEL_SUFFIX    
-    other_model_types = ['dp' + MODEL_SUFFIX]  # 'sink' + MODEL_SUFFIX
+    other_model_types = ['dp' + MODEL_SUFFIX, 'sink' + MODEL_SUFFIX]  # 
     model_types_to_plot = [fns_model_type] + other_model_types
             
     nrows, ncols = len(metrics), len(is_ops)     
@@ -202,7 +203,10 @@ def phase_ensembles(models_root, selected_dataset='imdb',
                     color = '#2E63A6' if alpha == 1.2 else '#A4292F'
                 else:
                     # color = 'k'
-                    color = '#636363'
+                    if 'dpformer' in model_type:
+                        color = '#636363'
+                    elif 'sinkformer' in model_type:
+                        color = 'k'
                 # color = HYP_CMAP(HYP_CNORM(alpha)) if is_fns else OTHER_COLORS_DICT[model_type]  
                 # -------------------- SINK, DP -------------------- 
                 model_info = matching_df 
@@ -221,7 +225,13 @@ def phase_ensembles(models_root, selected_dataset='imdb',
                 if run_perf_all is not None:
                     counter = run_perf_all.shape[1] - run_perf_all.tail(1).isna().sum(1).item()
                     metric_curves = get_metric_curves(run_perf_all)      
-                    exe_plot = ax.plot(epochs, metric_curves[1], linestyle='-', c=color, alpha=1, clip_on=False, label='DP' if not is_fns else rf'$\alpha = {alpha}$')
+                    if is_fns:
+                        plot_label = rf'$\alpha = {alpha}$'
+                    elif 'sink' in model_type:
+                        plot_label = 'SINK'
+                    elif 'dp' in model_type:
+                        plot_label = 'DP'
+                    exe_plot = ax.plot(epochs, metric_curves[1], linestyle='-', c=color, alpha=1, clip_on=False, label=plot_label)
                     if (row_idx,col_idx) == (0,0):
                         im = exe_plot                      
                     # Calculate std                       
@@ -265,7 +275,7 @@ def phase_ensembles(models_root, selected_dataset='imdb',
     #             model_labels.append(model_label)
 
     # # legend
-    axs[0,0].legend(loc='best', frameon=False)                     
+    axs[0,0].legend(loc='best', frameon=False, ncols=2)                     
     # for alpha in selected_alphas[::-1]:
     #     axs[0,0].plot([], [], c=HYP_CMAP(HYP_CNORM(alpha)), linestyle='solid', 
     #                   label=rf'$\alpha$ = {alpha}')         
@@ -291,6 +301,12 @@ def phase_ensembles(models_root, selected_dataset='imdb',
         # axs[row_idx,0].set_ylabel(NAMES_DICT[metrics[row_idx]])
     axs[0,0].set_ylabel('Testing accuracy (%)')
     axs[1,0].set_ylabel('Testing loss')
+
+    # subfigure labels
+    for ii, ax in enumerate(axs.flatten()):
+        ax.text(-0.1, 1.13, rf"$\mathbf{{{ascii_lowercase[ii]}}}$",
+            transform=ax.transAxes, ha='left',  va='top',
+            usetex=False)
 
     # Adjust layout
     plt.subplots_adjust(wspace=0.4, hspace=0.3)
@@ -362,16 +378,33 @@ def hyperparam_effects(models_root, fns_manifold='rd', is_rescale_dist=True,
 
     assert fns_manifold in ['sphere', 'rd', 'v2_rd'], f'{fns_manifold} does not exist!'
     assert metric in ['train_acc', 'train_loss', 'val_acc', 'val_loss']    
+    is_op, is_rescale_dist = str2bool(is_op), str2bool(is_rescale_dist)
     fns_type = fns_manifold + 'fns' + MODEL_SUFFIX 
-    other_model_type = 'dpformer'
+    # other_model_type = 'dpformer'
+    other_model_types = ['dpformer', 'sinkformer']
     if is_op:
         fns_type = 'op' + fns_type
-        other_model_type = 'op' + other_model_type
-    model_types_to_plot = [fns_type, other_model_type]
+        other_model_types = ['op' + other_model_type for other_model_type in other_model_types]
+    model_types_to_plot = [fns_type] + other_model_types
 
-    is_op, is_rescale_dist = str2bool(is_op), str2bool(is_rescale_dist)
     qk_shares = str2ls(qk_shares)        
     selected_alphas = [float(selected_alpha) for selected_alpha in str2ls(selected_alphas)]
+    other_model_type_to_idx = {
+        model_type: len(selected_alphas) + other_idx
+        for other_idx, model_type in enumerate(other_model_types)
+    }
+    idx_to_other_model_type = {
+        model_idx: model_type
+        for model_type, model_idx in other_model_type_to_idx.items()
+    }
+
+    def other_model_plot_settings(model_type):
+        if 'dpformer' in model_type:
+            return 'DP', 'k'
+        if 'sinkformer' in model_type:
+            return 'SINK', '#636363'
+        return model_type, '#636363'
+
     eps = 1
 
     # Regular expression pattern
@@ -400,7 +433,7 @@ def hyperparam_effects(models_root, fns_manifold='rd', is_rescale_dist=True,
     nrows, ncols = len(qk_shares), len(layers)
 
     # (model_types, qk_share, L, d_model)
-    N_model_types = len(selected_alphas) + 1
+    N_model_types = len(selected_alphas) + len(other_model_types)
     average_metric_matrix = np.zeros([nrows, N_model_types, len(layers), len(emb_ds)])
     std_metric_matrix = np.zeros([nrows, N_model_types, len(layers), len(emb_ds)])
     max_metric_matrix = np.zeros([nrows, N_model_types, len(layers), len(emb_ds)])
@@ -457,7 +490,7 @@ def hyperparam_effects(models_root, fns_manifold='rd', is_rescale_dist=True,
                     condition = (matching_df['alpha']==alpha) & (matching_df['bandwidth']==eps)
                     model_info = model_info[condition]
                 else:
-                    alpha_idx = len(selected_alphas)
+                    alpha_idx = other_model_type_to_idx[model_type]
                 
                 if model_info.shape[0] > 0:
                     seeds, qk_share = (model_info[k].item() for k in ('seeds', 'qk_share'))                
@@ -487,7 +520,7 @@ def hyperparam_effects(models_root, fns_manifold='rd', is_rescale_dist=True,
                     break  # only do once if model is NOT FNS type                            
     
     # PLOTTING (Just the two I think are most relevant)
-    fig, axs = plt.subplots(1,2,figsize=(5, 2))
+    fig, axs = plt.subplots(1,2,figsize=(5, 2),sharex=True)  # ,sharey=True
     
     ax = axs[0]
     ax.set_title(r'$\mathbf{Q} \neq \mathbf{K}$')
@@ -497,7 +530,8 @@ def hyperparam_effects(models_root, fns_manifold='rd', is_rescale_dist=True,
     else:
         trans = [0.5, 1]
 
-    for aidx in range(len(selected_alphas) + 1):
+    N_model_types = len(selected_alphas) + len(other_model_types)
+    for aidx in range(N_model_types):
         for lidx, l in enumerate(depths):
             average_metrics = average_metric_matrix[0,aidx,l-1]
             std_metrics = std_metric_matrix[0,aidx,l-1]
@@ -516,26 +550,31 @@ def hyperparam_effects(models_root, fns_manifold='rd', is_rescale_dist=True,
                 #transparency = 1 - np.exp(-l)
                 transparency = trans[lidx]                     
                 model_type = fns_type       
-            else: 
-                legend_label = 'DP'
-                model_type = other_model_type
+            elif aidx in idx_to_other_model_type:
+                model_type = idx_to_other_model_type[aidx]
+                legend_label, color = other_model_plot_settings(model_type)
+                transparency = trans[lidx]
                 #
-                color = 'k' if l == 2 else COLORS_ALPHA[0]
+                # color = 'k' if l == 2 else '#636363'
                 # color = 'k'
+            else:
+                continue
             linestyle = (0, (2,1)) if l == 2 else '-'
             X = np.array([1,2,3,4])
+            if np.all(np.isnan(average_metrics)):
+                continue
             if len(depths) > 1:
                 legend_label = legend_label + r' $(L={})$'.format(l)
             ax.errorbar(X, average_metrics, yerr=std_metrics, 
                         fmt='.', linestyle=linestyle, 
-                        label=legend_label + r' $(L=1)$', 
+                        label=legend_label, 
                         c=color, alpha=transparency, clip_on=False)
 
     ax = axs[1]
     ax.set_title(r'$\mathbf{Q} = \mathbf{K}$')
     average_metrics = average_metric_matrix[1,0,0]
     std_metrics = std_metric_matrix[1,0,0]
-    for aidx in range(len(selected_alphas) + 1):
+    for aidx in range(N_model_types):
         for lidx, l in enumerate(depths):
             average_metrics = average_metric_matrix[1,aidx,l-1]
             std_metrics = std_metric_matrix[1,aidx,l-1]
@@ -552,12 +591,17 @@ def hyperparam_effects(models_root, fns_manifold='rd', is_rescale_dist=True,
                 # transparency = 1 - 1/(l+1)  
                 transparency = trans[lidx] 
                 model_type = fns_type       
-            else: 
-                legend_label = 'DP'
-                model_type = other_model_type
-                color = 'k' if l == 2 else '#636363'
+            elif aidx in idx_to_other_model_type:
+                model_type = idx_to_other_model_type[aidx]
+                legend_label, color = other_model_plot_settings(model_type)
+                transparency = trans[lidx]
+                # color = 'k' if l == 2 else '#636363'
+            else:
+                continue
             linestyle = (0, (2,1)) if l == 2 else '-'
             X = np.array([1,2,3,4])
+            if np.all(np.isnan(average_metrics)):
+                continue
             if len(depths) > 1:
                 legend_label = legend_label + r' $(L={})$'.format(l)
             ax.errorbar(X, average_metrics, yerr=std_metrics, 
@@ -574,6 +618,12 @@ def hyperparam_effects(models_root, fns_manifold='rd', is_rescale_dist=True,
 
     axs[0].set_yticks([75,80,85])
     axs[0].set_ylabel('Testing accuracy (%)')
+
+    # subfigure labels
+    for ii, ax in enumerate(axs.flatten()):
+        ax.text(-0.1, 1.13, rf"$\mathbf{{{ascii_lowercase[ii]}}}$",
+            transform=ax.transAxes, ha='left',  va='top',
+            usetex=False)
 
     axs[1].legend(frameon=False, bbox_to_anchor=(1, 1))
 
@@ -593,7 +643,7 @@ def dynamic_inference(models_root, n_layer=1,
                       is_op=True, qk_share=False, metric='test_acc',
                       batch_size=64, is_dist_based=False):
 
-    global model_dirs, emb_ds
+    global model_dirs, layers, emb_ds, all_model_dirs, other_types, model_dir, fname
 
     # general setting
     batch_size = int(batch_size)
@@ -629,22 +679,32 @@ def dynamic_inference(models_root, n_layer=1,
     all_model_dirs = [str(p) for p in Path(models_root).rglob("*") if p.is_dir() and pattern.search(str(p))]    
     model_dirs = []
     fns_type = manifold + 'fns' + MODEL_SUFFIX
-    other_type = 'dp'+MODEL_SUFFIX
+    # other_type = 'dp'+MODEL_SUFFIX
+    other_types = ['dp' + MODEL_SUFFIX, 'sink' + MODEL_SUFFIX]
     if is_op:
         fns_type = 'op' + fns_type
-        other_type = 'op' + other_type
-    model_types_to_plot = [fns_type, other_type]
+        # other_type = 'op' + other_type
+        other_types = ['op' + other_type for other_type in other_types]
+    print(f'fns_type = {fns_type}')
+    print(f'other_types: {other_types} \n')
+    # model_types_to_plot = [fns_type, other_type]
+    model_types_to_plot = [fns_type] + other_types
     for model_dir in all_model_dirs:
-        is_fns = f'/{fns_type}' in model_dir
-        is_dp = f'/{other_type}' in model_dir
-        if is_fns:
+        # is_fns = f'/{fns_type}' in model_dir
+        # is_fns = f'{fns_type}' in model_dir
+        # is_dp = f'/{other_type}' in model_dir
+        # if is_fns:
+        if f'{fns_type}' in model_dir:
             for alpha in selected_alphas:
                 if f'alpha={float(alpha)}' in model_dir:
                     if model_dir is not None and isfile(njoin(model_dir, fname)):
                         model_dirs.append(model_dir)
-        elif is_dp:
-            if model_dir is not None and isfile(njoin(model_dir, fname)):
-                model_dirs.append(model_dir)
+        else:
+            for other_type in other_types:
+                # if f'/{other_type}' in model_dir:
+                if f'{other_type}' in model_dir:
+                    if model_dir is not None and isfile(njoin(model_dir, fname)):
+                        model_dirs.append(model_dir)
 
     # number of controlled variables
     inference = pd.read_csv(njoin(model_dirs[0], fname))
@@ -652,7 +712,7 @@ def dynamic_inference(models_root, n_layer=1,
     N_control_var = len(controlled_vars)
     ensembles = 5  # figure out how to extract this
 
-    metrics_dynamic = np.zeros([len(selected_alphas)+1, 1, 
+    metrics_dynamic = np.zeros([len(selected_alphas)+len(other_types), 1, 
                                 len(emb_ds), N_control_var, ensembles])
     metrics_dynamic[:] = np.nan
     for model_dir in model_dirs:
@@ -662,11 +722,15 @@ def dynamic_inference(models_root, n_layer=1,
             seed, model_name = attn_setup['seed'], attn_setup['model_name']
             hidden = config['hidden']
             is_fns = model_name[-9:] == 'fns' + MODEL_SUFFIX
+            is_dp = model_name[-8:] == 'dp' + MODEL_SUFFIX
+            is_sink = model_name[-10:] == 'sink' + MODEL_SUFFIX
             if is_fns:
                 alpha = attn_setup['alpha']
                 alpha_idx = selected_alphas.index(alpha)
-            else:
+            elif is_dp:
                 alpha_idx = len(selected_alphas)
+            elif is_sink:
+                alpha_idx = len(selected_alphas) + 1
             inference = pd.read_csv(njoin(model_dir, fname))
             metrics_dynamic[alpha_idx, 0, list(emb_ds).index(hidden), :, seed] =\
                 inference.loc[:,metric]
@@ -675,23 +739,27 @@ def dynamic_inference(models_root, n_layer=1,
     fig, axs = plt.subplots(1,4,figsize=(6,1.7))
     
     for didx, alpha_idx in\
-          product(range(len(emb_ds)), range(len(selected_alphas)+1)):
+          product(range(len(emb_ds)), range(len(selected_alphas)+len(other_types))):
         is_fns = alpha_idx < len(selected_alphas)
+        is_dp = alpha_idx == len(selected_alphas)
+        is_sink = alpha_idx == len(selected_alphas) + 1
         if is_fns:
             alpha = selected_alphas[alpha_idx]
             # color = HYP_CMAP(HYP_CNORM(alpha))
             color = '#2E63A6' if alpha == 1.2 else '#A4292F'
-        else:
+        elif is_sink:
             # color = OTHER_COLORS_DICT[other_type]
-            # color = 'k'
             color = '#636363'
+        elif is_dp:
+            color = 'k'
 
         metric_mean = np.nanmean(metrics_dynamic[alpha_idx,0,didx,:,:],-1)
         metric_std = np.nanstd(metrics_dynamic[alpha_idx,0,didx,:,:],-1)
               
         if didx == 0:
+            model_label = rf'$\alpha$ = {alpha}' if is_fns else 'DP' if is_dp else 'SINK'
             axs[didx].plot(controlled_vars, metric_mean,
-                                markersize=MARKERSIZE, label=rf'$\alpha$ = {alpha}' if is_fns else 'DP',
+                                markersize=MARKERSIZE, label=model_label,
                                 c=color, linestyle=LINESTYLE_DICT[fns_type])  
         else:
             axs[didx].plot(controlled_vars, metric_mean,
@@ -719,13 +787,19 @@ def dynamic_inference(models_root, n_layer=1,
     #     axs[0,0].plot([], [], c=c_hyp, linestyle=LINESTYLE_DICT[fns_type],
     #                 label=rf'$\alpha$ = {alpha}')    
     # axs[0,0].plot([],[], c=OTHER_COLORS_DICT[other_type],linestyle=LINESTYLE_DICT[other_type])                      
-    fig.legend(frameon=False, bbox_to_anchor=(0.75,0.1), ncol=3)
+    fig.legend(frameon=False, bbox_to_anchor=(0.75,0.1), ncol=len(selected_alphas)+len(other_types))
                         
     # control_var_name = 'Distance threshold' if is_dist_based else 'Removal probability'
     # for col in range(2):
     #     axs[0].set_title(rf'$d = {emb_ds[col]}$')
         # axs[0].set_xlabel(control_var_name)
     axs[0].set_ylabel('Testing accuracy (%)')
+
+    # subfigure labels
+    for ii, ax in enumerate(axs.flatten()):
+        ax.text(-0.1, 1.21, rf"$\mathbf{{{ascii_lowercase[ii]}}}$",
+            transform=ax.transAxes, ha='left',  va='top',
+            usetex=False)
 
     # abbreviate dataset_name
     dataset = attn_setup['dataset_name']
@@ -937,6 +1011,207 @@ def len_inference(models_root, n_layer=6, max_len_adj=1024,
     fig_file = f'{n_layer}L-len={max_len_adj}-is_op={is_op}-{metric}-inference.pdf'
     plt.savefig(njoin(SAVE_DIR, fig_file), bbox_inches='tight')            
     print(f'Figure saved in {njoin(SAVE_DIR, fig_file)}')  
+
+
+def fna_alpha_effects(models_root, selected_dataset='imdb',
+                      fns_manifold='rd', qk_share=False, selected_alphas='none',
+                      bandwidth=1, metric='val_acc', is_ops=[False, True],
+                      display=False):
+    global summary_stats
+
+    pd.set_option('display.max_rows', None)
+    pd.set_option('display.max_columns', None)
+
+    assert fns_manifold in ['sp', 'rd', 'v2_rd'], f'{fns_manifold} does not exist!'
+    qk_share, display = map(str2bool, (qk_share, display))
+    if isinstance(is_ops, bool):
+        is_ops = [is_ops]
+    else:
+        is_ops = [str2bool(is_op) for is_op in str2ls(is_ops)]
+    if isinstance(bandwidth, str) and bandwidth.lower() == 'none':
+        bandwidth = None
+    elif bandwidth is not None:
+        bandwidth = float(bandwidth)
+
+    model_root_dirs = find_subdirs(njoin(models_root), MODEL_SUFFIX)
+    print(model_root_dirs)
+
+    DCT_ALL = {}
+    for model_root_dir in model_root_dirs:
+        DCT_cur = collect_model_dirs(model_root_dir, suffix=MODEL_SUFFIX)
+        for model_type, df_model_cur in DCT_cur.items():
+            df_clean = df_model_cur.dropna(subset=['alpha']) if 'alpha' in df_model_cur.columns else df_model_cur
+            if model_type not in DCT_ALL:
+                DCT_ALL[model_type] = df_clean
+            else:
+                DCT_ALL[model_type] = pd.concat([DCT_ALL[model_type], df_clean], ignore_index=True)
+
+    fns_model_type = fns_manifold + 'fns' + MODEL_SUFFIX
+    fns_model_types = [model_type for model_type in [fns_model_type, 'op' + fns_model_type]
+                       if model_type in DCT_ALL]
+    assert len(fns_model_types) > 0, f'{fns_model_type} setting does not exist!'
+
+    df_fns_all = pd.concat([DCT_ALL[model_type] for model_type in fns_model_types], ignore_index=True)
+    qk_shares = list(df_fns_all.loc[:, 'qk_share'].unique())
+    assert qk_share in qk_shares, f'qk_share = {qk_share} setting does not exist!'
+    assert selected_dataset in df_fns_all.loc[:, 'dataset_name'].unique(), 'selected_dataset does not exist'
+
+    alphas = sorted(df_fns_all.loc[:, 'alpha'].dropna().unique())
+    if selected_alphas is None or (isinstance(selected_alphas, str) and selected_alphas.lower() == 'none'):
+        selected_alphas = alphas
+    else:
+        selected_alphas = sorted([float(selected_alpha) for selected_alpha in str2ls(selected_alphas)])
+
+    def normalize_training_seeds(seeds):
+        if seeds is None:
+            return []
+        if isinstance(seeds, str):
+            try:
+                seeds = literal_eval(seeds)
+            except (SyntaxError, ValueError):
+                seeds = str2ls(seeds)
+        if isinstance(seeds, (int, np.integer)):
+            return [int(seeds)]
+        if isinstance(seeds, (float, np.floating)):
+            return [] if np.isnan(seeds) else [int(seeds)]
+        return [int(seed) for seed in list(seeds)]
+
+    def load_seed_final_values(model_dir, seeds):
+        rows = []
+        for seed in normalize_training_seeds(seeds):
+            seed_path = njoin(model_dir, f'model={seed}')
+            fpath = njoin(seed_path, 'run_performance.csv')
+            if not isfile(fpath):
+                fpath = njoin(seed_path, '_run_performance.csv')
+                if not isfile(fpath):
+                    continue
+            run = pd.read_csv(fpath)
+            if metric not in run.columns:
+                continue
+            seed_metric = run[metric].dropna()
+            if len(seed_metric) == 0:
+                continue
+            if 'acc' in metric and seed_metric.iloc[-1] <= 1:
+                seed_metric *= 100
+            rows.append({'seed': seed, metric: seed_metric.iloc[-1]})
+        return pd.DataFrame(rows)
+
+    ncols = len(is_ops)
+    fig, axs = plt.subplots(1, ncols, figsize=(2.5*ncols, 2.2), sharex=True, sharey=True,
+                            squeeze=False)
+    axs = axs[0]
+    row_stats = []
+    marker_color = '#2E63A6'
+    marker_shape = 'o'
+
+    for col_idx, is_op in enumerate(is_ops):
+        ax = axs[col_idx]
+        model_type = ('op' if is_op else '') + fns_model_type
+        if model_type not in DCT_ALL:
+            continue
+
+        df_model = DCT_ALL[model_type]
+        condition = (df_model['ensembles'] > 0) & (df_model['qk_share'] == qk_share) &\
+                    (df_model['is_op'] == is_op) &\
+                    ((df_model['dataset_name'] == selected_dataset) |
+                     (df_model['model_dir'].str.contains(selected_dataset, regex=False))) &\
+                    (df_model['model_dir'].str.contains(f'{model_type}-', regex=False))
+        matching_df = df_model[condition].copy()
+        if bandwidth is not None:
+            matching_df = matching_df[matching_df['bandwidth'] == bandwidth]
+
+        plot_rows = []
+        for alpha in selected_alphas:
+            model_info = matching_df[matching_df['alpha'] == alpha]
+            seed_values_all = []
+            for _, model_row in model_info.iterrows():
+                seed_values = load_seed_final_values(model_row['model_dir'], model_row['seeds'])
+                if len(seed_values) > 0:
+                    seed_values_all.append(seed_values)
+
+            if len(seed_values_all) == 0:
+                continue
+
+            seed_values_all = pd.concat(seed_values_all, ignore_index=True).dropna(subset=[metric])
+            if len(seed_values_all) == 0:
+                continue
+
+            final_values = seed_values_all[metric]
+            counter = len(final_values)
+            mean = final_values.mean()
+            std = final_values.std() if counter > 1 else 0
+            sem = std / math.sqrt(counter) if counter > 0 else np.nan
+            median = final_values.median()
+            min_val = final_values.min()
+            max_val = final_values.max()
+
+            row_stats.append([model_type, alpha, is_op, qk_share, bandwidth,
+                              mean, std, sem, median, min_val, max_val, counter])
+            plot_rows.append([alpha, mean, std, counter])
+
+        if len(plot_rows) == 0:
+            continue
+
+        plot_df = pd.DataFrame(plot_rows, columns=['alpha', 'mean', 'std', 'counter']).sort_values('alpha')
+        x = plot_df['alpha'].to_numpy()
+        y = plot_df['mean'].to_numpy()
+        yerr = plot_df['std'].fillna(0).to_numpy()
+
+        ax.plot(x, y, c='0.35', linewidth=1, alpha=0.8, zorder=1)
+        ax.errorbar(x, y, yerr=yerr, fmt='none', ecolor='0.65',
+                    elinewidth=0.8, capsize=2, zorder=1)
+        ax.scatter(x, y, marker=marker_shape, c=marker_color,
+                   s=36, edgecolor='white', linewidth=0.5, zorder=2)
+
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        ax.set_xlabel(r'$\alpha$')
+        ax.set_xticks(selected_alphas)
+        ax_title = r'$\mathbf{W}_{Q,K} \in O(d)$' if is_op else r'$\mathbf{W}_{Q,K} \notin O(d)$'
+        ax.set_title(ax_title)
+        ax.tick_params(axis='y', labelleft=True)
+
+    # Subfigure labels
+    for ii, ax in enumerate(axs.flatten()):
+        ax.text(-0.1, 1.1, rf"$\mathbf{{{ascii_lowercase[ii]}}}$",
+            transform=ax.transAxes, ha='left',  va='top',
+            usetex=False)
+
+    axs[0].set_ylabel('Testing accuracy (%)' if 'acc' in metric else NAMES_DICT.get(metric, metric))
+    summary_stats = pd.DataFrame(
+        data=row_stats,
+        columns=['model_type', 'alpha', 'is_op', 'qk_share', 'bandwidth',
+                 'mean', 'std', 'sem', 'median', 'min', 'max', 'counter']
+    )
+    print(metric)
+    print(f'qk_share = {qk_share}, bandwidth = {bandwidth}')
+    print(summary_stats.round(3))
+    print('\n')
+
+    plt.tight_layout()
+
+    SAVE_DIR = njoin(FIGS_DIR, 'nlp-task')
+    if display:
+        plt.show()
+    else:
+        if not isdir(SAVE_DIR): makedirs(SAVE_DIR)
+
+        dataset_name_short = ''
+        if isinstance(selected_dataset, str):
+            if '_' in selected_dataset:
+                for s in selected_dataset.split('_'):
+                    dataset_name_short += s[0]
+            else:
+                dataset_name_short += selected_dataset
+
+        fig_file = Path(models_root).name + '-'
+        fig_file += fns_model_type.replace(MODEL_SUFFIX, '') + '-'
+        fig_file += 'qqv-' if qk_share else 'qkv-'
+        fig_file += f'alpha_effects-{metric}-ds={dataset_name_short}.pdf'
+        plt.savefig(njoin(SAVE_DIR, fig_file), bbox_inches='tight')
+        print(f'Figure saved in {njoin(SAVE_DIR, fig_file)}')
+
+    return fig, axs, summary_stats
 
 
 if __name__ == '__main__':

@@ -33,6 +33,13 @@ def str2ls(s):
         else: 
             return [s]
 
+def is_numeric(val):
+    try:
+        float(val)
+        return True
+    except ValueError:
+        return False
+
 def find_subdirs(root_dir, matching_str):
     matches = []
     for dirpath, dirnames, _ in os.walk(root_dir):
@@ -72,7 +79,7 @@ def get_seed(dir, *args):  # for enumerating each seed of training
 # create model_dir which determines the seed for the specific model/training setting
 def create_model_dir(model_root_dir, **kwargs):
     model_name = kwargs.get('model_name', 'fnsformer')    
-    dataset_name = kwargs.get('dataset_name', 'cifar10')
+    dataset_name = kwargs.get('dataset_name', 'imdb')
     if '_' in dataset_name:
         dataset_code = ''.join([s[0] for s in dataset_name.split('_')])
     else:
@@ -93,7 +100,7 @@ def create_model_dir(model_root_dir, **kwargs):
         # if alpha < 2:
         #     d_intrinsic = kwargs.get('d_intrinsic')
         #     dirname += f'-dman={d_intrinsic}'
-    elif model_name == 'sinkformer':
+    elif 'sink' in model_name:
         bandwidth = kwargs.get("bandwidth", 1)     
         n_it = kwargs.get("n_it", 1)        
         dirname += f'-n_it={n_it}-eps={bandwidth}'

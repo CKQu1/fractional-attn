@@ -33,8 +33,8 @@ RESOURCE_CONFIGS = {
 
 # ----- GADI -----
 GADI_PROJECTS = ['uu69']
-GADI_SOURCE = '/scratch/uu69/cq5024/myenvs/fsa/bin/activate'
-GADI_SOURCE_2 = '/scratch/uu69/cq5024/myenvs/nmt/bin/activate'
+# GADI_SOURCE = '/scratch/uu69/cq5024/myenvs/fsa/bin/activate'
+GADI_SOURCE = '/scratch/uu69/cq5024/venvs2/nmt/bin/activate'
 # -------------------
 
 # ----- PHYSICS -----

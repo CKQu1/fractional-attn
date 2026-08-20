@@ -4,7 +4,7 @@ import os
 import torch
 import CONFIG
 from data import Dataset
-from modules import Transformer
+from modules.transformer import Transformer
 from nltk.translate.bleu_score import sentence_bleu
 #import sacrebleu
 from utils.experiment import Experiment
@@ -81,7 +81,7 @@ if __name__ == '__main__':
     config['model_name'] = model_name
     train_config = {'lr': args.lr, 'min_lr': args.min_lr, 
                     'lr_reduction_factor': args.lr_reduction_factor,
-                    'beta1': CONFIG.BETA1, 'beta2': CONFIG.BETA1, 'eps': CONFIG.EPS,
+                    'beta1': CONFIG.BETA1, 'beta2': CONFIG.BETA2, 'eps': CONFIG.EPS,
                     'batch_size': CONFIG.BATCH_SIZE, 'epochs': CONFIG.NUM_EPOCHS 
     }
 

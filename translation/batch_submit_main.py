@@ -4,14 +4,15 @@ from datetime import datetime, timedelta
 from itertools import product
 from os.path import isfile, isdir
 from time import sleep
-from constants import MODEL_SUFFIX, DROOT, CLUSTER, PHYSICS_CONDA, RESOURCE_CONFIGS, GADI_SOURCE_2
+from constants import MODEL_SUFFIX, DROOT, CLUSTER, PHYSICS_CONDA, RESOURCE_CONFIGS, GADI_SOURCE
 from utils.mutils import njoin, get_seed, structural_model_root, str2bool
 from qsub_parser import job_setup, qsub, add_common_kwargs, str_to_time, time_to_str
     
 if __name__ == '__main__':
       
     parser = argparse.ArgumentParser(description='batch_submit_main.py args')   
-    parser.add_argument('--is_qsub', type=str2bool, nargs='?', const=True, default=False) 
+    parser.add_argument('--is_qsub', type=str2bool, nargs='?', const=True, default=False)
+    parser.add_argument('--nstack', type=int, default=1) 
     args = parser.parse_args()
 
     batch_script_name = "batch_main.py"
@@ -19,13 +20,16 @@ if __name__ == '__main__':
 
     is_train_others = True
 
-    seeds = list(range(5))
-    is_ops = [False,True]
+    # seeds = list(range(5))
+    seeds = list(range(2))
+    # is_ops = [False,True]
+    is_ops = [True]
 
     # FNS settings
     is_rescale_dist = True
     manifolds = ['rd']
     alphas = [1.2, 2]
+    # alphas = [1.0, 1.4, 1.6, 1.8]
     bandwidths = [1]
     # traning setting
     #lr = 2e-4  # v3
@@ -36,31 +40,55 @@ if __name__ == '__main__':
     #lr, lr_reduction_factor, min_lr = 2e-4, 0.7, 1.8e-4  # gscale2    
 
     # Resources
-    nstack = 5
-    mem = '9GB'      
+    nstack = args.nstack
+    mem = '6GB'      
     is_use_gpu = True
 
     cfg = RESOURCE_CONFIGS[CLUSTER][is_use_gpu]
     q, ngpus, ncpus = cfg["q"], cfg["ngpus"], cfg["ncpus"]         
     select = 1
    
+    scheduler = 'warmup_cosine'
     for is_op in is_ops:
+        ##### Original settings for reduce_on_plateau #####
+        # if not is_op:
+        #     lr, lr_reduction_factor, min_lr = 2e-4, 0.75, 0  # gscale3
+        # else:
+        #     lr, lr_reduction_factor, min_lr = 2.2e-4, 0.75, 0  # gscale3
+        ##### New setting for warmup_cosine #####
         if not is_op:
-            lr, lr_reduction_factor, min_lr = 2e-4, 0.75, 0  # gscale3
+            # lr, min_lr = 4e-4, 1e-6  # gscale3
+            lr, min_lr = 5e-4, 2e-6  # lr5 (insane for multiscale with 35 epochs)
+            # lr, min_lr = 7e-4, 5e-6  # lr6 (dp too good)
+            # lr, min_lr = 1e-3, 5e-6  # lr7 (bad for all)
+            # lr, min_lr = 6e-4, 3e-6  # lr8
         else:
-            lr, lr_reduction_factor, min_lr = 2.2e-4, 0.75, 0  # gscale3
-        single_walltime = '00:25:59' if not is_op else '00:40:00'  # 30 epochs    
+            # lr, min_lr = 5e-4, 2e-6  # lr3
+            # lr, min_lr = 6e-4, 3e-6  # lr4
+            # lr, min_lr = 8e-4, 5e-6  # lr5 (best for multiscale 30 epochs)
+            # lr, min_lr = 1e-3, 8e-6  # lr6 (bad for all)
+            # lr, min_lr = 9e-4, 5e-6  # lr7
+            # lr, min_lr = 7e-4, 6e-6  # lr8
+            lr, min_lr = 5e-4, 1e-6  # lr9
+        # single_walltime = '00:25:59' if not is_op else '00:35:00'  # 30 epochs 
+        single_walltime = '00:40:59' if not is_op else '00:55:00'  # 35 - 40 epochs
         walltime = time_to_str(str_to_time(single_walltime) * nstack)
-        ROOT = njoin(DROOT, 'exps_gscale3')
+        # ROOT = njoin(DROOT, 'exps_gscale3')
+        ROOT = njoin(DROOT, f'full_model-{scheduler}-lr9')
         job_path = njoin(ROOT, 'jobs_all')
 
         kwargss_all = []    
-        for seed in seeds:                              
+        for seed in seeds:                             
                 
             common_kwargs = {'seed':               seed, 
                             'is_op':               is_op,
                             'lr':                  lr,
-                            'lr_reduction_factor': lr_reduction_factor}                                                          
+                            'scheduler':           scheduler
+                            }       
+
+            if scheduler == 'reduce_on_plateau':
+                common_kwargs['lr_reduction_factor'] = lr_reduction_factor
+                                                        
             model_root = ROOT
             
             kwargss = []            
@@ -122,5 +150,5 @@ if __name__ == '__main__':
             print(f'----- SUBMITTING ----- \n')
             for i in range(len(commands)):
                 # use different source
-                kwargs_qsubs[i]['source'] = GADI_SOURCE_2
+                kwargs_qsubs[i]['source'] = GADI_SOURCE
                 qsub(f'{commands[i]} {batch_script_names[i]}', pbs_array_trues[i], path=job_path, **kwargs_qsubs[i])                

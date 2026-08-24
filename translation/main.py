@@ -1,5 +1,6 @@
 import argparse
 import json
+import math
 import os
 import torch
 import CONFIG
@@ -8,7 +9,7 @@ from modules.transformer import Transformer
 from nltk.translate.bleu_score import sentence_bleu
 #import sacrebleu
 from utils.experiment import Experiment
-from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.optim.lr_scheduler import LambdaLR, ReduceLROnPlateau
 
 from constants import MODEL_SUFFIX, DROOT
 from utils.mutils import str2bool, njoin, structural_model_root, create_model_dir
@@ -44,8 +45,17 @@ if __name__ == '__main__':
     parser.add_argument('--lr', default=1e-4, type=float)
     parser.add_argument('--min_lr', default=0, type=float)
     parser.add_argument('--lr_reduction_factor', default=0.3, type=float)
+    parser.add_argument('--scheduler', default='reduce_on_plateau', type=str,
+                        choices=['reduce_on_plateau', 'warmup_cosine', 'noam', 'none'])
+    parser.add_argument('--warmup_steps', default=CONFIG.NUM_WARMUP, type=int)
+    parser.add_argument('--total_steps', default=0, type=int,
+                        help='Total optimizer steps for warmup_cosine. Inferred if unset.')
+    parser.add_argument('--steps_per_epoch', default=0, type=int,
+                        help='Optimizer steps per epoch for warmup_cosine. Inferred if unset.')
+    parser.add_argument('--noam_factor', default=0.5, type=float)
 
     args = parser.parse_args()
+    args.scheduler = args.scheduler.lower()
 
     print('[~] Training')
     print(f' ~  Using device: {Transformer.device}')
@@ -80,10 +90,17 @@ if __name__ == '__main__':
         config['is_rescale_dist'] = args.is_rescale_dist
     config['model_name'] = model_name
     train_config = {'lr': args.lr, 'min_lr': args.min_lr, 
-                    'lr_reduction_factor': args.lr_reduction_factor,
                     'beta1': CONFIG.BETA1, 'beta2': CONFIG.BETA2, 'eps': CONFIG.EPS,
-                    'batch_size': CONFIG.BATCH_SIZE, 'epochs': CONFIG.NUM_EPOCHS 
+                    'batch_size': CONFIG.BATCH_SIZE, 'epochs': CONFIG.NUM_EPOCHS,
+                    'scheduler': args.scheduler, 'warmup_steps': args.warmup_steps,
+                    'total_steps': args.total_steps, 'steps_per_epoch': args.steps_per_epoch
     }
+
+    train_config['scheduler'] = args.scheduler
+    if args.scheduler == 'reduce_on_plateau':
+        train_config['lr_reduction_factor'] = args.lr_reduction_factor
+    elif args.scheduler == 'noam':
+        train_config['noam_factor'] = args.noam_factor
 
     # Initialize model
     model = Transformer(config)
@@ -103,12 +120,6 @@ if __name__ == '__main__':
     # Set up experiment
     experiment = Experiment(model, root=out_dir)
 
-    # Save config, train_config
-    with open(njoin(out_dir,"config.json"), "w") as ofile: 
-        json.dump(config, ofile)    
-    with open(njoin(out_dir,"train_config.json"), "w") as ofile: 
-        json.dump(train_config, ofile)    
-
     # Optimizer
     optimizer = torch.optim.Adam(
         model.parameters(),
@@ -119,28 +130,77 @@ if __name__ == '__main__':
     )
 
 
-    #################### OPTION 1 ####################
-    # Lambda LR Scheduler as described in paper:
+    def infer_steps_per_epoch():
+        num_batches = 0
+        for _ in dataset.train_loader:
+            num_batches += 1
+        if num_batches == 0:
+            raise ValueError('Could not infer steps_per_epoch from an empty train loader')
+        return num_batches
 
-    # def get_lr(x):
-    #     x += 1      # x is originally zero-indexed
-    #     return (CONFIG.D_MODEL ** (-0.5)) * min(x ** (-0.5), x * (CONFIG.NUM_WARMUP ** (-1.5)))
 
-    # scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, get_lr)
+    def build_scheduler():
+        if args.scheduler == 'none':
+            return None, 'none', None, None
 
-    # plot LR scheduler
-    # import seaborn as sns
-    # from matplotlib import pyplot as plt    
-    # ax = sns.lineplot(
-    #     x=range(CONFIG.NUM_EPOCHS),
-    #     y=[get_lr(x) for x in range(CONFIG.NUM_EPOCHS)]
-    # )
-    # ax.set(xlabel='Epoch', ylabel='Learning Rate', title='Learning Rate Schedule')
-    # plt.savefig(os.path.join(experiment.path, 'lr_schedule.png'))    
+        if args.scheduler == 'reduce_on_plateau':
+            return (
+                ReduceLROnPlateau(optimizer, min_lr=args.min_lr, factor=args.lr_reduction_factor),
+                'validation_epoch',
+                None,
+                None
+            )
 
-    #################### OPTION 2 ####################
-    # Instead, reducing LR by factor on loss plateau works much, much better
-    scheduler = ReduceLROnPlateau(optimizer, min_lr=args.min_lr, factor=args.lr_reduction_factor)
+        if args.lr <= 0:
+            raise ValueError('--lr must be positive when using a LambdaLR scheduler')
+        if args.warmup_steps <= 0:
+            raise ValueError('--warmup_steps must be positive')
+
+        if args.scheduler == 'noam':
+            def noam_lr_lambda(step):
+                step = max(step + 1, 1)  # LambdaLR step is zero-indexed.
+                lr = args.noam_factor * (CONFIG.D_MODEL ** -0.5) * min(
+                    step ** -0.5,
+                    step * (args.warmup_steps ** -1.5)
+                )
+                return lr / args.lr
+
+            return LambdaLR(optimizer, noam_lr_lambda), 'train_batch', None, None
+
+        steps_per_epoch = args.steps_per_epoch if args.steps_per_epoch > 0 else infer_steps_per_epoch()
+        total_steps = args.total_steps if args.total_steps > 0 else CONFIG.NUM_EPOCHS * steps_per_epoch
+        if total_steps <= args.warmup_steps:
+            raise ValueError('--total_steps must be greater than --warmup_steps for warmup_cosine')
+
+        min_lr_ratio = args.min_lr / args.lr
+        if min_lr_ratio > 1:
+            raise ValueError('--min_lr must be less than or equal to --lr for warmup_cosine')
+
+        def warmup_cosine_lr_lambda(step):
+            step = max(step + 1, 1)  # LambdaLR step is zero-indexed.
+            if step <= args.warmup_steps:
+                return max(step / args.warmup_steps, min_lr_ratio)
+
+            progress = min((step - args.warmup_steps) / (total_steps - args.warmup_steps), 1)
+            cosine_decay = 0.5 * (1 + math.cos(math.pi * progress))
+            return min_lr_ratio + (1 - min_lr_ratio) * cosine_decay
+
+        return LambdaLR(optimizer, warmup_cosine_lr_lambda), 'train_batch', steps_per_epoch, total_steps
+
+
+    scheduler, scheduler_step, resolved_steps_per_epoch, resolved_total_steps = build_scheduler()
+    train_config['scheduler_step'] = scheduler_step
+    if resolved_steps_per_epoch is not None:
+        train_config['steps_per_epoch'] = resolved_steps_per_epoch
+    if resolved_total_steps is not None:
+        train_config['total_steps'] = resolved_total_steps
+    print(f' ~  Scheduler: {args.scheduler} ({scheduler_step})')
+
+    # Save config, train_config
+    with open(njoin(out_dir,"config.json"), "w") as ofile:
+        json.dump(config, ofile)
+    with open(njoin(out_dir,"train_config.json"), "w") as ofile:
+        json.dump(train_config, ofile)
 
     # Cross entropy loss
     loss_function = torch.nn.CrossEntropyLoss()
@@ -169,6 +229,8 @@ if __name__ == '__main__':
             )
             loss.backward()
             optimizer.step()
+            if scheduler_step == 'train_batch':
+                scheduler.step()
 
             train_loss += loss.item()
             num_batches += 1
@@ -214,11 +276,14 @@ if __name__ == '__main__':
                 bleu_score += batch_bleu / batch_size
 
                 valid_loss += loss.item()
-                scheduler.step(loss.item())
                 num_batches += 1
                 del src, trg
 
-            experiment.add_scalar('loss/validation', epoch, valid_loss / num_batches)
+            valid_loss /= num_batches
+            if scheduler_step == 'validation_epoch':
+                scheduler.step(valid_loss)
+
+            experiment.add_scalar('loss/validation', epoch, valid_loss)
             experiment.add_scalar('bleu', epoch, bleu_score / num_batches)
             experiment.add_scalar('lr', epoch, next(iter(optimizer.param_groups))['lr'])
 

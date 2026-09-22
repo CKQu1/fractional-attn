@@ -91,6 +91,8 @@ if __name__ == '__main__':
     qk_share = config['qk_share']
     model_name = attn_setup['model_name']
     is_fns = model_name[-9:] == 'fns' + MODEL_SUFFIX  # model type
+    is_dp = model_name[-8:] == 'dp' + MODEL_SUFFIX
+    is_sink = model_name[-10:] == 'sink' + MODEL_SUFFIX
     checkpoint = njoin(model_dir, 'ckpt.pt')
     is_checkpoint_exist = isfile(checkpoint)
 
@@ -201,8 +203,10 @@ if __name__ == '__main__':
                         # FIRST LAYER/BLOCK ONLY
                         if is_fns:
                             model.layers[0].mha.fns_attn.eval_mask = eval_mask.bool().to(device)
-                        else:
+                        elif is_dp:
                             model.layers[0].mha.scaled_dot_product_attn.eval_mask = eval_mask.bool().to(device)   
+                        elif is_sink:
+                            model.layers[0].mha.sink_attn.eval_mask = eval_mask.bool().to(device)
 
                     outputs, _ = model(inputs)
                     

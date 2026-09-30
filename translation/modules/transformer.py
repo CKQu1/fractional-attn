@@ -47,17 +47,33 @@ class Transformer(Module):
         # Re-seed afterward to allow shuffled data
         # torch.seed()
 
-    def forward(self, source, target):
+    def encode(self, source):
+        source_padding_mask = source.eq(self.src_pad_index)
+
         # Encoder stack
         enc_out = self.src_embedding(source)
         for layer in self.encoder_stack:
-            enc_out = layer(enc_out)
+            enc_out = layer(enc_out, padding_mask=source_padding_mask)
+
+        return enc_out, source_padding_mask
+
+    def decode(self, target, enc_out, source_padding_mask):
+        target_padding_mask = target.eq(self.trg_pad_index)
 
         # Decoder stack
         dec_out = self.trg_embedding(target)
         for layer in self.decoder_stack:
-            dec_out = layer(dec_out, enc_out)
+            dec_out = layer(
+                dec_out,
+                enc_out,
+                target_padding_mask=target_padding_mask,
+                source_padding_mask=source_padding_mask
+            )
 
         # Final linear layer to get word probabilities
         # DO NOT apply softmax here, as CrossEntropyLoss already does softmax!!!
         return self.linear(dec_out)
+
+    def forward(self, source, target):
+        enc_out, source_padding_mask = self.encode(source)
+        return self.decode(target, enc_out, source_padding_mask)

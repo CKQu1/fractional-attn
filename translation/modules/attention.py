@@ -6,7 +6,7 @@ from torch.nn import functional as F
 from torch.nn.utils.parametrizations import orthogonal
 
 class MultiHeadAttention(Module):
-    def __init__(self, config, use_mask=False):
+    def __init__(self, config, use_mask=False, attention_type=None):
         super().__init__()
 
         self.d_model = d_model = config['d_model']
@@ -17,8 +17,9 @@ class MultiHeadAttention(Module):
         self.use_mask = use_mask
 
         self.model_name = config['model_name']
+        self.attention_type = attention_type or self.model_name
         # FNS
-        if self.model_name == 'rdfnsformer':
+        if self.attention_type == 'rdfnsformer':
             self.alpha, self.bandwidth, self.a = config['alpha'], config['bandwidth'], config['a']
             self.is_rescale_dist = config['is_rescale_dist']
             d_k = self.d_model // self.num_heads
@@ -30,10 +31,18 @@ class MultiHeadAttention(Module):
                     #self.dist_scale = d_k**0.5 / (d_k**(1/d_k) - 1)
                     #self.dist_scale = (d_k**(1/d_k) - 1)
                     #self.dist_scale = 2*d_k**1.5
-                    #self.dist_scale = d_k**1.5
-                    self.dist_scale = d_k
+                    # self.dist_scale = d_k**1.5  #n4lr
+                    # self.dist_scale = d_k #m1lr1
+                    self.dist_scale = math.sqrt(d_k)  #n3lr
                 else:
                     self.dist_scale = math.sqrt(d_k)
+        # Sinkformer
+        elif self.attention_type == 'sinkformer':
+            self.n_it = config.get('n_it', 1)
+            if isinstance(self.n_it, bool) or not isinstance(self.n_it, int) or self.n_it < 1 or self.n_it % 2 == 0:
+                raise ValueError('n_it must be a positive odd integer')
+        elif self.attention_type != 'dpformer':
+            raise ValueError(f'Unsupported attention type: {self.attention_type}')
 
         # w_q_i projects D_MODEL to D_MODEL / NUM_HEADS. However, there are
         # NUM_HEADS parallel attention layers that are concatenated, so in the
@@ -49,7 +58,7 @@ class MultiHeadAttention(Module):
 
         self.softmax = nn.Softmax(dim=-1)
 
-    def forward(self, queries, keys, values):
+    def forward(self, queries, keys, values, query_padding_mask=None, key_padding_mask=None):
         # queries, keys, values = (batch, seq, 512)
         # w_q = (512, 512)
         # queries @ w_q.t = (batch, seq, 512)
@@ -58,18 +67,36 @@ class MultiHeadAttention(Module):
         k = self.split_heads(self.w_k(keys))
         v = self.split_heads(self.w_v(values))
 
+        query_padding_mask = self.prepare_padding_mask(
+            query_padding_mask, queries.size(0), queries.size(1), queries.device, 'query_padding_mask'
+        )
+        key_padding_mask = self.prepare_padding_mask(
+            key_padding_mask, keys.size(0), keys.size(1), keys.device, 'key_padding_mask'
+        )
+
         # Perform NUM_HEADS parallel single-head attention
-        if self.model_name == 'dpformer':
-            attention = self.scaled_dot_product_attention(q, k, v)
-        elif self.model_name == 'rdfnsformer':
-            attention = self.rdfns_attention(q, k, v)
+        if self.attention_type == 'dpformer':
+            attention = self.scaled_dot_product_attention(
+                q, k, v, query_padding_mask=query_padding_mask, key_padding_mask=key_padding_mask
+            )
+        elif self.attention_type == 'rdfnsformer':
+            attention = self.rdfns_attention(
+                q, k, v, query_padding_mask=query_padding_mask, key_padding_mask=key_padding_mask
+            )
+        elif self.attention_type == 'sinkformer':
+            attention = self.sinkhorn_attention(
+                q, k, v, query_padding_mask=query_padding_mask, key_padding_mask=key_padding_mask
+            )
 
         # Concatenate and return multi-headed results
         # (batch, 8, seq, 64) -> (batch, seq, 512)
         merged = self.merge_heads(attention)
 
         # Apply final projection matrix
-        return self.w_o(merged)
+        output = self.w_o(merged)
+        if query_padding_mask is not None:
+            output = output.masked_fill(query_padding_mask[:, :, None], 0)
+        return output
 
     def split_heads(self, x):
         batch_size, seq_len, _ = x.size()
@@ -93,7 +120,25 @@ class MultiHeadAttention(Module):
         # Merge last two dimensions
         return transposed.reshape(batch_size, seq_len, self.d_model)
 
-    def scaled_dot_product_attention(self, q, k, v):
+    @staticmethod
+    def prepare_padding_mask(padding_mask, batch_size, seq_len, device, mask_name):
+        if padding_mask is None:
+            return None
+        if padding_mask.dtype != torch.bool:
+            raise TypeError(f'{mask_name} must have dtype torch.bool')
+        if padding_mask.shape != (batch_size, seq_len):
+            raise ValueError(
+                f'{mask_name} must have shape {(batch_size, seq_len)}, got {tuple(padding_mask.shape)}'
+            )
+        return padding_mask.to(device=device)
+
+    @staticmethod
+    def zero_padded_queries(attention, query_padding_mask):
+        if query_padding_mask is None:
+            return attention
+        return attention.masked_fill(query_padding_mask[:, None, :, None], 0)
+
+    def scaled_dot_product_attention(self, q, k, v, query_padding_mask=None, key_padding_mask=None):
         # Inputs are size (batch, num_heads, seq, d_model/num_heads)
         d_k = self.d_model // self.num_heads
         compatibility = torch.matmul(q, k.transpose(2, 3)) / math.sqrt(d_k)
@@ -111,16 +156,31 @@ class MultiHeadAttention(Module):
         At seq=1, can attend to both seq=0 and seq=1
         And so on...
         """
+        invalid_mask = None
         if self.use_mask:
-            seq_len = compatibility.size(-1)
-            mask = torch.triu(  # Prevents leftward flow of information in target seq
-                torch.ones(seq_len, seq_len, dtype=torch.bool, requires_grad=False),
+            query_len, key_len = compatibility.size(-2), compatibility.size(-1)
+            invalid_mask = torch.triu(  # Prevents leftward flow of information in target seq
+                torch.ones(query_len, key_len, dtype=torch.bool, requires_grad=False,
+                           device=compatibility.device),
                 diagonal=1
-            ).to(self.device)
-            compatibility = torch.masked_fill(compatibility, mask, float('-inf'))
+            )[None, None, :, :]
+
+        if key_padding_mask is not None:
+            key_mask = key_padding_mask[:, None, None, :]
+            invalid_mask = key_mask if invalid_mask is None else invalid_mask | key_mask
+
+        if invalid_mask is not None:
+            compatibility = compatibility.masked_fill(
+                invalid_mask, torch.finfo(compatibility.dtype).min
+            )
 
         # Apply softmax along the last dimension
         value_weights = self.softmax(compatibility)
+        if invalid_mask is not None:
+            value_weights = value_weights.masked_fill(invalid_mask, 0)
+            value_weights = value_weights / value_weights.sum(-1, keepdim=True).clamp_min(
+                torch.finfo(value_weights.dtype).tiny
+            )
 
         # print(f'q shape: {q.shape}')  # delete
         # print(f'k shape: {k.shape}')  # delete
@@ -130,9 +190,76 @@ class MultiHeadAttention(Module):
         # quit()  # delete
 
         # Weight values by softmax results
-        return torch.matmul(value_weights, v)
+        attention = torch.matmul(value_weights, v)
+        return self.zero_padded_queries(attention, query_padding_mask)
+
+    def sinkhorn_normalization(self, compatibility, padding_mask=None):
+        """Alternately normalize rows and columns of square self-attention logits."""
+        if compatibility.dim() != 4 or compatibility.size(-2) != compatibility.size(-1):
+            raise ValueError('Sinkhorn normalization requires square attention logits')
+
+        original_dtype = compatibility.dtype
+        if original_dtype in (torch.float16, torch.bfloat16):
+            log_weights = compatibility.float()
+        else:
+            log_weights = compatibility
+
+        if padding_mask is None:
+            for iteration in range(self.n_it):
+                dim = -1 if iteration % 2 == 0 else -2
+                log_weights = log_weights - torch.logsumexp(log_weights, dim=dim, keepdim=True)
+            return log_weights.exp().to(dtype=original_dtype)
+
+        padding_mask = self.prepare_padding_mask(
+            padding_mask,
+            compatibility.size(0),
+            compatibility.size(-1),
+            compatibility.device,
+            'padding_mask'
+        )
+        valid_tokens = ~padding_mask
+        valid_queries = valid_tokens[:, None, :, None]
+        valid_keys = valid_tokens[:, None, None, :]
+        valid_entries = valid_queries & valid_keys
+        negative_infinity = torch.tensor(float('-inf'), dtype=log_weights.dtype, device=log_weights.device)
+        log_weights = log_weights.masked_fill(~valid_entries, negative_infinity)
+
+        for iteration in range(self.n_it):
+            if iteration % 2 == 0:
+                # Padded query rows contain only -inf. Replace those rows before
+                # logsumexp so both the forward and backward passes remain finite.
+                safe_log_weights = torch.where(valid_queries, log_weights, torch.zeros_like(log_weights))
+                normalizer = torch.logsumexp(safe_log_weights, dim=-1, keepdim=True)
+            else:
+                # The same protection is needed for padded key columns.
+                safe_log_weights = torch.where(valid_keys, log_weights, torch.zeros_like(log_weights))
+                normalizer = torch.logsumexp(safe_log_weights, dim=-2, keepdim=True)
+            log_weights = torch.where(valid_entries, log_weights - normalizer, negative_infinity)
+
+        value_weights = log_weights.exp()
+        value_weights = torch.where(valid_entries, value_weights, torch.zeros_like(value_weights))
+        return value_weights.to(dtype=original_dtype)
+
+    def sinkhorn_attention(self, q, k, v, query_padding_mask=None, key_padding_mask=None):
+        if q.size(-2) != k.size(-2):
+            raise ValueError('Sinkformer attention is only supported for square self-attention')
+
+        if query_padding_mask is None:
+            query_padding_mask = key_padding_mask
+        elif (
+            key_padding_mask is not None
+            and query_padding_mask is not key_padding_mask
+            and not torch.equal(query_padding_mask, key_padding_mask)
+        ):
+            raise ValueError('Sinkformer query and key padding masks must be identical')
+
+        d_k = self.d_model // self.num_heads
+        compatibility = torch.matmul(q, k.transpose(2, 3)) / math.sqrt(d_k)
+        value_weights = self.sinkhorn_normalization(compatibility, padding_mask=query_padding_mask)
+        attention = torch.matmul(value_weights, v)
+        return self.zero_padded_queries(attention, query_padding_mask)
     
-    def rdfns_attention(self, q, k, v):
+    def rdfns_attention(self, q, k, v, query_padding_mask=None, key_padding_mask=None):
         # Inputs are size (batch, num_heads, seq, d_model/num_heads)        
         g_dist = torch.cdist(q, k, p=2)
         if self.is_rescale_dist:
@@ -143,19 +270,30 @@ class MultiHeadAttention(Module):
         else:
             compatibility = torch.exp(-(g_dist/self.bandwidth**0.5)**(self.alpha/(self.alpha-1)))
 
+        invalid_mask = None
         # Same as above
         if self.use_mask:
-            seq_len = compatibility.size(-1)
-            mask = torch.triu(  # Prevents leftward flow of information in target seq
-                torch.ones(seq_len, seq_len, dtype=torch.bool, requires_grad=False),
+            query_len, key_len = compatibility.size(-2), compatibility.size(-1)
+            invalid_mask = torch.triu(  # Prevents leftward flow of information in target seq
+                torch.ones(query_len, key_len, dtype=torch.bool, requires_grad=False,
+                           device=compatibility.device),
                 diagonal=1
-            ).to(self.device)
-            # mask fractional attention score with 0
-            compatibility = torch.masked_fill(compatibility, mask, 0)  
+            )[None, None, :, :]
+
+        if key_padding_mask is not None:
+            key_mask = key_padding_mask[:, None, None, :]
+            invalid_mask = key_mask if invalid_mask is None else invalid_mask | key_mask
+        if query_padding_mask is not None:
+            query_mask = query_padding_mask[:, None, :, None]
+            invalid_mask = query_mask if invalid_mask is None else invalid_mask | query_mask
+        if invalid_mask is not None:
+            # Mask fractional attention scores with 0.
+            compatibility = compatibility.masked_fill(invalid_mask, 0)
 
         if self.a > 0:  # this case is not executed since we always set a = 0
-            N_R = compatibility.sum(-1)  # row sum
-            N_C = compatibility.sum(-2)  # col sum
+            tiny = torch.finfo(compatibility.dtype).tiny
+            N_R = compatibility.sum(-1).clamp_min(tiny)  # row sum
+            N_C = compatibility.sum(-2).clamp_min(tiny)  # col sum
             K_tilde = (N_R**(-self.a)).unsqueeze(-1) * compatibility * (N_C**(-self.a)).unsqueeze(-2)
 
             value_weights = F.normalize(K_tilde,p=1,dim=3)  # can do this as the attn weights are always positive
@@ -170,4 +308,5 @@ class MultiHeadAttention(Module):
         # quit()  # delete
 
         # Weight values by softmax results
-        return torch.matmul(value_weights, v)    
+        attention = torch.matmul(value_weights, v)
+        return self.zero_padded_queries(attention, query_padding_mask)

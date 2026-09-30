@@ -15,7 +15,8 @@ torchrun --nnodes=1 --nproc_per_node=2 ddp_main.py --max_iters=5 --eval_interval
 if __name__ == '__main__':
       
     parser = argparse.ArgumentParser(description='batch_submit_main.py args')   
-    parser.add_argument('--is_qsub', type=str2bool, nargs='?', const=True, default=False) 
+    parser.add_argument('--is_qsub', type=str2bool, nargs='?', const=True, default=False)
+    parser.add_argument('--nstack', default=1, type=int) 
     args = parser.parse_args()
 
     batch_script_name = "batch_main.py"
@@ -27,23 +28,31 @@ if __name__ == '__main__':
     # general settings
     #n_layers = [4]
     n_layer = 4
-    seeds = list(range(1))   
+    seeds = list(range(10))   
     is_force_train = False
-    is_train_others = True  
+    is_train_others = False
+    other_model_prefixes = ['dp', 'sink']  # 'dp', 'sink'
+    is_train_fns = True
 
-    patch_size = 2
+    # patch_size = 2
+    patch_size = 4
     is_preln = True  # default is True            
     qk_shares = [False]
     is_ops = [False,True]
 
+    # Sinkformer setting
+    n_its = [3]
+
     # FNS settings
     is_rescale_dist = True
     manifolds = ['rd']
-    alphas = [1.2, 2]
+    # alphas = [1.2, 2]
+    # alphas = [1, 1.2, 1.4, 1.6, 1.8, 2]
+    alphas = [1, 1.4, 1.6, 1.8]
     bandwidths = [1]
 
     # Resources
-    nstack = 1
+    nstack = args.nstack
     mem = '8GB'      
     is_use_gpu = True
 
@@ -53,13 +62,17 @@ if __name__ == '__main__':
    
     for is_op in is_ops:
         if patch_size == 4:
-            single_walltime = '01:00:00' if not is_op else '01:25:00'
+            # single_walltime = '01:00:00' if not is_op else '01:25:00'  # fna, dp
+            single_walltime = '01:05:00' if not is_op else '01:25:00'  # sink
         elif patch_size == 2:
             single_walltime = '01:30:00' if not is_op else '01:55:00'    
         walltime = time_to_str(str_to_time(single_walltime) * nstack)
         dirname = f'{n_layer}L-ps={patch_size}' 
         dirname = dirname + '-preln' if is_preln else dirname + '-postln'
-        ROOT = njoin(DROOT, 'full_models-gscalev5-2', dirname)  # CHANGE FOLDER NAME
+        # ROOT = njoin(DROOT, 'full_models-gscalev5-2', dirname)  # CHANGE FOLDER NAME
+        # ROOT = njoin(DROOT, 'full_models-kappa_v6', dirname)  # CHANGE FOLDER NAME
+        # ROOT = njoin(DROOT, 'full_models-v5scale', dirname)  # CHANGE FOLDER NAME
+        ROOT = njoin(DROOT, 'full_models-lr2d1', dirname)
         job_path = njoin(ROOT, 'jobs_all')
 
         kwargss_all = []    
@@ -90,14 +103,16 @@ if __name__ == '__main__':
                 common_kwargs['lr_scheduler_type'] = 'binary'
                 if common_kwargs['lr_scheduler_type'] == 'binary':
                     common_kwargs['binary_ratio'] = 4/5
-                # common_kwargs['max_lr'] = 5e-4  # v2
-                if is_op:
-                    common_kwargs['max_lr'] = 6e-4  # gscalev4-1            
-                else:
-                    #common_kwargs['max_lr'] = 1e-3  # gscalev4-1
-                    common_kwargs['max_lr'] = 6e-4  # gscalev4-2                      
+                common_kwargs['max_lr'] = 5e-4  # lr2
+                # common_kwargs['max_lr'] = 6e-4  # lr1
+                # if is_op:
+                #     common_kwargs['max_lr'] = 6e-4  # gscalev4-1            
+                # else:
+                #     #common_kwargs['max_lr'] = 1e-3  # gscalev4-1
+                #     common_kwargs['max_lr'] = 6e-4  # gscalev4-2                      
 
-                common_kwargs['min_lr'] = common_kwargs['max_lr'] / 10         
+                # common_kwargs['min_lr'] = common_kwargs['max_lr'] / 10 
+                common_kwargs['min_lr'] = common_kwargs['max_lr'] / 5  # d1         
 
                 common_kwargs['epochs'] = 125                                                        
                 common_kwargs['n_attn_heads'] = 6
@@ -116,26 +131,32 @@ if __name__ == '__main__':
             kwargss = []
             qkv = 'qqv' if qk_share else 'qkv'
             # FNS
-            for alpha, bandwidth, manifold in product(alphas, bandwidths, manifolds):
-                model_name = manifold + 'fns' +  MODEL_SUFFIX
-                model_name = 'op' + model_name if is_op else model_name
-                model_dir = njoin(model_root,
-                f'{model_name}-{dataset_name}-{qkv}-alpha={float(alpha)}-eps={float(bandwidth)}',
-                f'model={seed}')
-                if not isfile(njoin(model_dir, 'run_performance.csv')) or is_force_train:
-                    kwargss.append({'model_name':'fns' + MODEL_SUFFIX,'alpha':alpha,'a': 0,
-                                    'bandwidth':bandwidth,'manifold':manifold})
+            if is_train_fns:
+                for alpha, bandwidth, manifold in product(alphas, bandwidths, manifolds):
+                    model_name = manifold + 'fns' +  MODEL_SUFFIX
+                    model_name = 'op' + model_name if is_op else model_name
+                    model_dir = njoin(model_root,
+                    f'{model_name}-{dataset_name}-{qkv}-alpha={float(alpha)}-eps={float(bandwidth)}',
+                    f'model={seed}')
+                    if not isfile(njoin(model_dir, 'run_performance.csv')) or is_force_train:
+                        kwargss.append({'model_name':'fns' + MODEL_SUFFIX,'alpha':alpha,'a': 0,
+                                        'bandwidth':bandwidth,'manifold':manifold})
             
             # Other models
             if is_train_others:
-                model_name = 'dp' + MODEL_SUFFIX
-                model_name = 'op' + model_name if is_op else model_name
-                model_dir = njoin(model_root,f'{model_name}-{dataset_name}-{qkv}',f'model={seed}')                
-                if not isfile(njoin(model_dir, 'run_performance.csv')) or is_force_train:
-                    kwargss.append({'model_name':'dp' + MODEL_SUFFIX})
-                # for n_it in [3]:
-                #     kwargss.append({'model_name':'sink' + MODEL_SUFFIX,'n_it':n_it})      
-
+                for model_prefix in other_model_prefixes:
+                    model_name = model_prefix + MODEL_SUFFIX
+                    model_name = 'op' + model_name if is_op else model_name  
+                    if model_prefix == 'dp':      
+                        model_dir = njoin(model_root,f'{model_name}-{dataset_name}-{qkv}',f'model={seed}')        
+                        if not isfile(njoin(model_dir, 'run_performance.csv')) or is_force_train:
+                            kwargss.append({'model_name':model_prefix + MODEL_SUFFIX})
+                    elif model_prefix == 'sink':
+                        for n_it, bandwidth in product(n_its, bandwidths):
+                            model_dir = njoin(model_root,f'{model_name}-{dataset_name}-{qkv}-n_it={n_it}-eps={bandwidth}',
+                                              f'model={seed}')
+                            if not isfile(njoin(model_dir, 'run_performance.csv')) or is_force_train:
+                                kwargss.append({'model_name':model_prefix + MODEL_SUFFIX,'n_it':n_it})      
 
             for idx in range(len(kwargss)):
                 # function automatically creates dir

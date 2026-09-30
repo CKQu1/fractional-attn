@@ -183,7 +183,7 @@ if __name__ == '__main__':
     attn_setup = {'qk_share': args.qk_share, 'qkv_bias': args.qkv_bias, 'seed': args.seed,
                   'is_op': args.is_op, 'is_preln': args.is_preln}    
     attn_setup['dataset_name'] = args.dataset_name    
-    if 'fns' in model_name:
+    if model_name[-6:] == 'fnsvit':
         attn_setup['manifold'] = args.manifold
         config['alpha'] = attn_setup['alpha'] = args.alpha      
         config['bandwidth'] = attn_setup['bandwidth'] = args.bandwidth    
@@ -212,7 +212,7 @@ if __name__ == '__main__':
         # degree index
         config['a'] = attn_setup['a'] = args.a      
 
-    elif 'sinkvit' in model_name:
+    elif model_name[-7:] == 'sinkvit':
         config['n_it'] = attn_setup['n_it'] = args.n_it
         config['bandwidth'] = attn_setup['bandwidth'] = args.bandwidth            
 

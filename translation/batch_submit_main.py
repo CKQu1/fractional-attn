@@ -19,17 +19,30 @@ if __name__ == '__main__':
     script_name = "main.py"    
 
     is_train_others = True
+    model_names = ['sinkformer', 'dpformer']  # 'dpformer'
 
-    # seeds = list(range(5))
-    seeds = list(range(2))
+    seeds = list(range(5))
+    # seeds = list(range(2))
     # is_ops = [False,True]
     is_ops = [True]
+
+    # MODEL HYPERPARAMETERS
+    d_model = 64
+    num_layers = 4
+    num_heads = 8
+    # num_epochs = 20
+    # num_epochs = 25
+    # num_epochs = 30
+    # num_epochs = 35
+    num_epochs = 40
 
     # FNS settings
     is_rescale_dist = True
     manifolds = ['rd']
+    # alphas = [1.2]
     alphas = [1.2, 2]
     # alphas = [1.0, 1.4, 1.6, 1.8]
+    # alphas = [1, 1.2, 1.4, 1.6, 1.8, 2]
     bandwidths = [1]
     # traning setting
     #lr = 2e-4  # v3
@@ -49,6 +62,14 @@ if __name__ == '__main__':
     select = 1
    
     scheduler = 'warmup_cosine'
+
+    # scheduler = 'noam'; 
+    # noam_factor = 0.35  # m3
+
+    # scheduler = 'reduce_on_plateau'
+    # lr_reduction_factor = 0.75
+    # patience = 5  # r3
+
     for is_op in is_ops:
         ##### Original settings for reduce_on_plateau #####
         # if not is_op:
@@ -57,24 +78,54 @@ if __name__ == '__main__':
         #     lr, lr_reduction_factor, min_lr = 2.2e-4, 0.75, 0  # gscale3
         ##### New setting for warmup_cosine #####
         if not is_op:
-            # lr, min_lr = 4e-4, 1e-6  # gscale3
-            lr, min_lr = 5e-4, 2e-6  # lr5 (insane for multiscale with 35 epochs)
-            # lr, min_lr = 7e-4, 5e-6  # lr6 (dp too good)
-            # lr, min_lr = 1e-3, 5e-6  # lr7 (bad for all)
-            # lr, min_lr = 6e-4, 3e-6  # lr8
+            # lr, min_lr = 1e-3, 1e-5  # lr1
+            # lr, min_lr = 2e-3, 2e-5  # lr2
+            # lr, min_lr = 3e-3, 3e-5  # lr3
+            # lr, min_lr = 4e-3, 4e-5  # lr4
+            # lr, min_lr = 6e-3, 6e-5  # lr5
+            # lr, min_lr = 9e-3, 4e-5  # lr6
+            # lr, min_lr = 4.5e-3, 4e-5  # lr7
+            # lr, min_lr = 5e-3, 5e-5  # lr8
+            lr, min_lr = 4e-3, 3.5e-5  # lr9
         else:
-            # lr, min_lr = 5e-4, 2e-6  # lr3
-            # lr, min_lr = 6e-4, 3e-6  # lr4
-            # lr, min_lr = 8e-4, 5e-6  # lr5 (best for multiscale 30 epochs)
-            # lr, min_lr = 1e-3, 8e-6  # lr6 (bad for all)
-            # lr, min_lr = 9e-4, 5e-6  # lr7
-            # lr, min_lr = 7e-4, 6e-6  # lr8
-            lr, min_lr = 5e-4, 1e-6  # lr9
+            # lr, min_lr = 1e-3, 1e-5  # lr1
+            # lr, min_lr = 2e-3, 2e-5  # lr2
+            # lr, min_lr = 3e-3, 3e-5  # lr3
+            # lr, min_lr = 4e-3, 4e-5  # lr4
+            # lr, min_lr = 6e-3, 6e-5  # lr5
+            # lr, min_lr = 9e-3, 4e-5  # lr6
+            # lr, min_lr = 4.5e-3, 4e-5  # lr7
+            # lr, min_lr = 5e-3, 5e-5  # lr8
+            # lr, min_lr = 4e-3, 3.5e-5  # lr9
+            lr, min_lr = 6e-3, 4.5e-5  # lr10
+
+        ##### New setting for noam #####
+        # if not is_op:
+        #     lr = 1e-3  # lr1
+        # else:
+        #     lr = 1e-3  # lr1
+
+        ##### reduce_on_plateau #####
+        # if not is_op:
+        #     # lr, min_lr = 2e-4, 1e-5  # lr1
+        #     lr, min_lr = 3e-4, 1e-5  # lr2
+        # else:
+        #     # lr, min_lr = 1e-4, 1e-5  # lr1
+        #     lr, min_lr = 3e-4, 1e-5  # lr2
+
         # single_walltime = '00:25:59' if not is_op else '00:35:00'  # 30 epochs 
-        single_walltime = '00:40:59' if not is_op else '00:55:00'  # 35 - 40 epochs
+        # single_walltime = '00:50:59' if not is_op else '01:05:00'  # 35 - 40 epochs
+        # single_walltime = '00:40:59' if not is_op else '00:55:00'  # 35 epochs, d = 256
+        # single_walltime = '00:10:59' if not is_op else '00:15:00'  # 25 epochs
+        # single_walltime = '00:11:29' if not is_op else '00:12:59'  # 30 epochs
+        # single_walltime = '00:13:29' if not is_op else '00:14:29'  # 35 epochs
+        single_walltime = '00:15:29' if not is_op else '00:17:29'  # 40 epochs
         walltime = time_to_str(str_to_time(single_walltime) * nstack)
         # ROOT = njoin(DROOT, 'exps_gscale3')
-        ROOT = njoin(DROOT, f'full_model-{scheduler}-lr9')
+        ROOT = njoin(DROOT, 
+                     f'full_model-{scheduler}-lr10-sharp', 
+                     f'l={num_layers}-h={num_heads}-d={d_model}-ep={num_epochs}'
+                     )
         job_path = njoin(ROOT, 'jobs_all')
 
         kwargss_all = []    
@@ -82,20 +133,30 @@ if __name__ == '__main__':
                 
             common_kwargs = {'seed':               seed, 
                             'is_op':               is_op,
-                            'lr':                  lr,
+                            'd_model':             d_model,
+                            'num_layers':          num_layers,
+                            'num_heads':           num_heads, 
+                            'num_epochs':          num_epochs, 
+                            'lr':                  lr, 
                             'scheduler':           scheduler
                             }       
 
             if scheduler == 'reduce_on_plateau':
                 common_kwargs['lr_reduction_factor'] = lr_reduction_factor
-                                                        
+                common_kwargs['patience'] = patience
+                common_kwargs['min_lr'] = min_lr
+            elif scheduler == 'warmup_cosine':
+                common_kwargs['min_lr'] = min_lr
+            elif scheduler == 'noam':
+                common_kwargs['noam_factor'] = noam_factor
+
             model_root = ROOT
             
             kwargss = []            
             # FNS
             for alpha, bandwidth, manifold in product(alphas, bandwidths, manifolds):
                 model_name = manifold + 'fns' +  MODEL_SUFFIX
-                model_name = 'op' + model_name if is_op else model_name
+                # model_name = 'op' + model_name if is_op else model_name
                 model_dir = njoin(model_root,
                 f'{model_name}-alpha={float(alpha)}-eps={float(bandwidth)}',
                 f'model={seed}')
@@ -105,13 +166,18 @@ if __name__ == '__main__':
             
             # Other models
             if is_train_others:
-                model_name = 'dp' + MODEL_SUFFIX
-                model_name = 'op' + model_name if is_op else model_name
-                model_dir = njoin(model_root,f'{model_name}',f'model={seed}')                
-                #if not isfile(njoin(model_dir, 'run_performance.csv')) or is_force_train:
-                kwargss.append({'model_name':'dp' + MODEL_SUFFIX})
-                # for n_it in [3]:
-                #     kwargss.append({'model_name':'sinkformer','n_it':n_it,'is_op': is_op})      
+                for model_name in model_names:
+                    # model_name = 'op' + model_name if is_op else model_name
+                    if model_name == 'dp' + MODEL_SUFFIX:
+                        model_name = 'dp' + MODEL_SUFFIX
+                        model_dir = njoin(model_root,f'{model_name}',f'model={seed}')                
+                        #if not isfile(njoin(model_dir, 'run_performance.csv')) or is_force_train:
+                        kwargss.append({'model_name':'dp' + MODEL_SUFFIX})
+                    # Only schedule the paper-standard Sinkformer in a non-OP sweep.
+                    # if not is_op:
+                    elif model_name == 'sink' + MODEL_SUFFIX:
+                        for n_it in [3]:
+                            kwargss.append({'model_name':'sinkformer', 'n_it':n_it, 'bandwidth':1})
 
 
             for idx in range(len(kwargss)):
@@ -151,4 +217,4 @@ if __name__ == '__main__':
             for i in range(len(commands)):
                 # use different source
                 kwargs_qsubs[i]['source'] = GADI_SOURCE
-                qsub(f'{commands[i]} {batch_script_names[i]}', pbs_array_trues[i], path=job_path, **kwargs_qsubs[i])                
+                qsub(f'{commands[i]} {batch_script_names[i]}', pbs_array_trues[i], path=job_path, **kwargs_qsubs[i])

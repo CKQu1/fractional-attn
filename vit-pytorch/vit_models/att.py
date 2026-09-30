@@ -3,7 +3,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 from torch.nn.utils.parametrizations import orthogonal
-
+from vit_models.sinkhorn import SinkhornDistance
 
 class MultiHeadAttention(nn.Module):
     """
@@ -84,6 +84,95 @@ class MultiHeadAttention(nn.Module):
             return (attention_output, attention_probs)
 
 
+class SINKMultiHeadAttention(nn.Module):
+    """
+    Attention from Sinkformer
+    """
+
+    def __init__(self, config):
+        super().__init__()
+        self.hidden_size = config["hidden_size"]
+        self.num_attention_heads = config["num_attention_heads"]
+        # The attention head size is the hidden size divided by the number of attention heads
+        self.attention_head_size = self.hidden_size // self.num_attention_heads
+        self.all_head_size = self.num_attention_heads * self.attention_head_size
+        # Whether or not to use bias in the query, key, and value projection layers
+        self.qkv_bias = config["qkv_bias"]
+        self.qk_share = config["qk_share"]
+        self.is_op = config["is_op"]
+
+        if self.is_op:
+            if not self.qk_share:
+                self.WK = orthogonal(nn.Linear(self.hidden_size, self.all_head_size, bias=self.qkv_bias))
+            if self.num_attention_heads > 1:
+                self.WQ = orthogonal(nn.Linear(self.hidden_size, self.all_head_size, bias=self.qkv_bias))
+        else:
+            self.WQ = nn.Linear(self.hidden_size, self.all_head_size, bias=self.qkv_bias)
+            if not self.qk_share:
+                self.WK = nn.Linear(self.hidden_size, self.all_head_size, bias=self.qkv_bias)
+
+        self.WV = nn.Linear(self.hidden_size, self.all_head_size, bias=self.qkv_bias)        
+        self.attn_dropout = nn.Dropout(config["attention_probs_dropout_prob"])
+        # Create a linear layer to project the attention output back to the hidden size
+        # In most cases, all_head_size and hidden_size are the same
+        self.output_projection = nn.Linear(self.all_head_size, self.hidden_size)
+        self.output_dropout = nn.Dropout(config["hidden_dropout_prob"])
+
+        # Sinkformer settings
+        self.n_it = config['n_it']   
+        self.bandwidth = config['bandwidth']
+        self.sink = SinkhornDistance(eps=self.bandwidth, max_iter=self.n_it) 
+
+
+    def forward(self, x, output_attentions=False):
+        num_attention_heads, attention_head_size = self.num_attention_heads, self.attention_head_size
+
+        if not self.is_op or self.num_attention_heads > 1:
+            query = self.WQ(x)
+        else:
+            query = x
+        # Resize the query, key, and value to (batch_size, num_attention_heads, sequence_length, attention_head_size)
+        batch_size, sequence_length, _ = query.size()    
+        query = query.view(batch_size, sequence_length, num_attention_heads, attention_head_size).transpose(1, 2)
+
+        if not self.qk_share:
+            key = self.WK(x)
+            key = key.view(batch_size, sequence_length, num_attention_heads, attention_head_size).transpose(1, 2)
+            # Calculate the attention scores
+            # softmax(Q*K.T/sqrt(head_size))*V
+            dots = torch.matmul(query, key.transpose(-1, -2))
+        else:
+            dots = torch.matmul(query, query.transpose(-1, -2))
+
+        dots = dots / math.sqrt(self.attention_head_size)
+        dots_former_shape = dots.shape
+        dots = dots.view(-1, dots_former_shape[2], dots_former_shape[3])
+
+        sink_attention_probs = self.sink(dots)[0]
+        sink_attention_probs = sink_attention_probs * sink_attention_probs.shape[-1]
+        sink_attention_probs = sink_attention_probs.view(dots_former_shape)
+
+        value = self.WV(x)
+        value = value.view(batch_size, sequence_length, num_attention_heads, attention_head_size).transpose(1, 2)
+
+        # Calculate the attention output
+        attention_output = torch.matmul(sink_attention_probs, value)
+        # Resize the attention output
+        # from (batch_size, num_attention_heads, sequence_length, attention_head_size)
+        # To (batch_size, sequence_length, all_head_size)
+        attention_output = attention_output.transpose(1, 2) \
+                                           .contiguous() \
+                                           .view(batch_size, sequence_length, self.all_head_size)
+        # Project the attention output back to the hidden size
+        attention_output = self.output_projection(attention_output)
+        attention_output = self.output_dropout(attention_output)
+        # Return the attention output and the attention probabilities (optional)
+        if not output_attentions:
+            return (attention_output, None)
+        else:
+            return (attention_output, attention_probs)
+
+
 class RDFNSMultiHeadAttention(nn.Module):
     """
     Multi-head attention module with some optimizations.
@@ -132,6 +221,7 @@ class RDFNSMultiHeadAttention(nn.Module):
         if self.is_rescale_dist:
             if self.alpha >= 2:
                 self.dist_scale = (self.attention_head_size)**0.5
+                # self.dist_scale = (self.attention_head_size)**((self.alpha-1)/(2*self.alpha))  # v9
             else:
                 #self.dist_scale = (self.attention_head_size)**(1/self.alpha)
                 #self.dist_scale = self.attention_head_size**0.5 / (self.attention_head_size**(1/self.attention_head_size) - 1)
@@ -139,7 +229,8 @@ class RDFNSMultiHeadAttention(nn.Module):
                 #self.dist_scale = self.attention_head_size**0.5 / (2**(1/self.attention_head_size) - 1)        
                 #self.dist_scale = self.attention_head_size**0.5 / (self.attention_head_size**(1/self.attention_head_size) - 1)
                 #self.dist_scale = 2 * self.attention_head_size**1.5
-                self.dist_scale = self.attention_head_size
+                # self.dist_scale = self.attention_head_size**1.5  # kappa_v6 
+                self.dist_scale = self.attention_head_size  # v5
 
     def forward(self, x, output_attentions=False):
         alpha, bandwidth = self.alpha, self.bandwidth

@@ -10,7 +10,8 @@ class EncoderLayer(Module):
 
         self.d_model, self.num_heads, self.dropout_rate = config['d_model'], config['num_heads'], config['dropout_rate']
 
-        self.self_attention = MultiHeadAttention(config)
+        attention_type = 'sinkformer' if config['model_name'] == 'sinkformer' else None
+        self.self_attention = MultiHeadAttention(config, attention_type=attention_type)
         self.dropout1 = nn.Dropout(p=self.dropout_rate)
         self.layer_norm1 = nn.LayerNorm(self.d_model)
 
@@ -18,10 +19,16 @@ class EncoderLayer(Module):
         self.dropout2 = nn.Dropout(p=self.dropout_rate)
         self.layer_norm2 = nn.LayerNorm(self.d_model)
 
-    def forward(self, x):
+    def forward(self, x, padding_mask=None):
         # Multi-headed attention and residual connection + layer norm
         # Dropout is applied to sub-layer output, before residual and norm
-        attention_out = self.self_attention(queries=x, keys=x, values=x)
+        attention_out = self.self_attention(
+            queries=x,
+            keys=x,
+            values=x,
+            query_padding_mask=padding_mask,
+            key_padding_mask=padding_mask
+        )
         x = self.layer_norm1(x + self.dropout1(attention_out))
 
         # Feed-forward network and another residual + layer norm

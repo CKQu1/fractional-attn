@@ -1,7 +1,8 @@
 import torch
 from torch import nn
 from vit_models.model_utils import NewGELUActivation, PatchEmbeddings, Embeddings, MLP
-from vit_models.att import MultiHeadAttention, RDFNSMultiHeadAttention, SPFNSMultiHeadAttention
+from vit_models.att import MultiHeadAttention, SINKMultiHeadAttention,\
+    RDFNSMultiHeadAttention, SPFNSMultiHeadAttention
 
 
 class Block(nn.Module):
@@ -14,6 +15,8 @@ class Block(nn.Module):
         # -------------------- DIFFERENT TYPES OF ATTN HERE --------------------
         if config['model_name'] == 'dpvit':
             self.attention = MultiHeadAttention(config)
+        elif config['model_name'] == 'sinkvit':
+            self.attention = SINKMultiHeadAttention(config)
         elif config['model_name'] == 'rdfnsvit':
             self.attention = RDFNSMultiHeadAttention(config)
         elif config['model_name'] == 'spfnsvit':

@@ -35,17 +35,25 @@ plt.rc('legend', fontsize=LEGEND_SIZE)    # legend fontsize
 plt.rc('figure', titlesize=BIGGER_SIZE)  # fontsize of the figure title
 
 # -------------------- FUNCTIONS --------------------
-# return median, 25/75 percentile
-def get_metric_curves(run_perf_all,lq=0.25,uq=0.75):
-    metric_m = run_perf_all.quantile(0.5,1)
-    metric_l = run_perf_all.quantile(lq,1)
-    metric_u = run_perf_all.quantile(uq,1)
-    return [metric_l, metric_m, metric_u]
+# return mean and mean +/- sample standard deviation
+def get_metric_curves(run_perf_all, type='median'):
+    if type == 'mean':
+        metric_mean = run_perf_all.mean(axis=1)
+        metric_std = run_perf_all.std(axis=1, ddof=1)
+        metric_l = metric_mean - metric_std
+        metric_u = metric_mean + metric_std
+    elif type == 'median':
+        metric_mean = run_perf_all.median(axis=1)
+        metric_l = run_perf_all.quantile(0.25, axis=1)
+        metric_u = run_perf_all.quantile(0.75, axis=1)
+
+    return [metric_l, metric_mean, metric_u]
 
 # aggregate all runs
-def load_seed_runs(model_dir, seeds, metric):
+def load_seed_runs(model_dir, seeds, metric, comparison_bleu_methods=None):
     assert metric in ['bleu', 'train_loss', 'val_loss', 'lr'], f'metric = {metric} does not exist!'
     runs = []
+    bleu_methods = set()
     for seed in seeds:
         seed_path = njoin(model_dir, f'model={seed}')
         dirname = njoin(seed_path, 'scalars')
@@ -55,14 +63,29 @@ def load_seed_runs(model_dir, seeds, metric):
             if not isfile(fpath):
                 continue
             run = pd.read_csv(fpath, header=None, index_col=False, names=['epoch', 'bleu'])
-            run.iloc[:,-1] = run.iloc[:,-1] * 100
+            # Legacy NLTK runs stored BLEU on 0-1; SacreBLEU uses 0-100.
+            train_config_path = njoin(seed_path, 'train_config.json')
+            bleu_metadata = {}
+            if isfile(train_config_path):
+                with open(train_config_path) as config_file:
+                    bleu_metadata = json.load(config_file)
+            bleu_scale = bleu_metadata.get('bleu_scale')
+            bleu_methods.add(
+                bleu_metadata.get('bleu_method', 'legacy_teacher_forced_sentence_bleu')
+            )
+            if (
+                bleu_scale != '0-100'
+                and not run['bleu'].dropna().empty
+                and run['bleu'].abs().max() <= 1
+            ):
+                run.loc[:, 'bleu'] = run['bleu'] * 100
         # train loss
         elif metric == 'train_loss':
             fpath = njoin(dirname, 'loss', 'train.csv')
             if not isfile(fpath):
                 continue
             run = pd.read_csv(fpath, header=None, index_col=False, names=['epoch', 'train_loss'])       
-        # test loss
+        # validation loss
         elif metric == 'val_loss':
             fpath = njoin(dirname, 'loss', 'validation.csv')
             if not isfile(fpath):
@@ -76,25 +99,42 @@ def load_seed_runs(model_dir, seeds, metric):
             run = pd.read_csv(fpath, header=None, index_col=False, names=['epoch', 'lr'])
         else:
             run = None
-        if run is not None:
-            runs.append(run.iloc[:,1])
-            epochs = run.iloc[:,0]
+        if run is not None and not run.empty:
+            if run['epoch'].duplicated().any():
+                raise ValueError(f'Duplicate epochs found in {fpath}')
+            metric_values = run.set_index('epoch').iloc[:,0]
+            metric_values.name = seed
+            runs.append(metric_values)
     if len(runs)==0:
         return (None, None)
+    elif metric == 'bleu' and len(bleu_methods) != 1:
+        raise ValueError(f'Cannot aggregate different BLEU methods: {sorted(bleu_methods)}')
     else:
-        return epochs, pd.concat(runs, axis=1)
+        if metric == 'bleu' and comparison_bleu_methods is not None:
+            comparison_bleu_methods.update(bleu_methods)
+            if len(comparison_bleu_methods) != 1:
+                raise ValueError(
+                    'Cannot compare different BLEU methods: '
+                    f'{sorted(comparison_bleu_methods)}'
+                )
+        run_perf_all = pd.concat(runs, axis=1).sort_index().dropna(how='all')
+        if run_perf_all.empty:
+            return (None, None)
+        epochs = pd.Series(run_perf_all.index.to_numpy(), name='epoch')
+        return epochs, run_perf_all
 
 # final epoch stats
 def final_epoch_stats(runs):
-    epoch_index = runs.index[-1]
-    metric_min = runs.loc[epoch_index,:].min()
-    metric_max = runs.loc[epoch_index,:].max()
+    final_values = runs.iloc[-1,:].dropna()
+    metric_min = final_values.min()
+    metric_max = final_values.max()
     metric_mid = (metric_min + metric_max) / 2
 
-    metric_median = runs.loc[epoch_index:epoch_index+1,:].median(1).item()
-    metric_mean = runs.loc[epoch_index:epoch_index+1,:].mean(1).item()
-    metric_std = runs.loc[epoch_index:epoch_index+1,:].std(1).item()    
-    return [metric_min, metric_max, metric_mid, metric_median, metric_mean, metric_std]
+    metric_median = final_values.median()
+    metric_mean = final_values.mean()
+    metric_std = final_values.std(ddof=1)
+    counter = final_values.count()
+    return [metric_min, metric_max, metric_mid, metric_median, metric_mean, metric_std, counter]
 # --------------------------------------------------
 def matrixify_axs(axs, nrows, ncols):
     if nrows == 1:
@@ -105,14 +145,17 @@ def matrixify_axs(axs, nrows, ncols):
         axs = np.expand_dims(axs, axis=1)   
     return axs
 
+
 def phase_ensembles(models_root, selected_dataset='en-de',
                     fns_manifold='rd', selected_alphas='1.2,2',
-                    metrics='lr',  # bleu,train_loss lr
+                    metrics='bleu,val_loss',  # bleu,train_loss lr
                     is_ops = [False,True],  # [False,True]
                     cbar_separate=False, display=False):
 
     global DCT_ALL, model_root_dirs, df_model, run_perf_all, matching_df
     global model_info, seeds, metric_curves, epochs, metric_std
+
+    start_epoch = 15
 
     assert fns_manifold in ['sp', 'rd', 'v2_rd'], f'{fns_manifold} does not exist!'
     cbar_separate, display = map(str2bool, (cbar_separate, display))
@@ -156,7 +199,7 @@ def phase_ensembles(models_root, selected_dataset='en-de',
 
     # ----- models to plot -----
     fns_model_type = fns_manifold + 'fns' + MODEL_SUFFIX    
-    other_model_types = ['dp' + MODEL_SUFFIX]  # 'sink' + MODEL_SUFFIX
+    other_model_types = ['dp' + MODEL_SUFFIX, 'sink' + MODEL_SUFFIX]  # 'sink' + MODEL_SUFFIX
     model_types_to_plot = [fns_model_type] + other_model_types
             
     print(f'model_types_to_plot: {model_types_to_plot}')
@@ -167,14 +210,20 @@ def phase_ensembles(models_root, selected_dataset='en-de',
         figsize = (5,4)
     elif len(metrics) == 1:
         figsize = (5, 2.3)
-    fig, axs = plt.subplots(nrows,ncols,figsize=figsize,sharex=True)
+    fig, axs = plt.subplots(nrows,ncols,figsize=figsize,
+                            sharex=True)  # sharey=False
     axs = matrixify_axs(axs, nrows, ncols)  # convert axs to 2D array
     # label_axs(fig, axs)  # alphabetically label subfigures             
 
     model_types_plotted = []
-    model_types_seeds = {}     
+    model_types_seeds = {}
+    comparison_bleu_methods_by_metric = {
+        metric: set() for metric in metrics
+    }
+    max_plot_epoch = 0
     for (row_idx, metric), (col_idx, is_op) in product(enumerate(metrics), enumerate(is_ops)):
         ax = axs[row_idx, col_idx] 
+        comparison_bleu_methods = comparison_bleu_methods_by_metric[metric]
         # summary statistics
         row_stats = []
 
@@ -204,8 +253,10 @@ def phase_ensembles(models_root, selected_dataset='en-de',
                 # color
                 if is_fns:
                     color = '#2E63A6' if alpha == 1.2 else '#A4292F'
-                else:
+                elif model_type[-8:] == 'dpformer':
                     color = '#636363'
+                elif model_type[-10:] == 'sinkformer':
+                    color = 'k'
                 # color = HYP_CMAP(HYP_CNORM(alpha)) if is_fns else OTHER_COLORS_DICT[model_type]  
                 # -------------------- SINK, DP -------------------- 
                 model_info = matching_df 
@@ -217,27 +268,43 @@ def phase_ensembles(models_root, selected_dataset='en-de',
                 # get aggregated training curves
                 if model_info.shape[0] > 0:
                     seeds = model_info['seeds'].item()                
-                    epochs, run_perf_all = load_seed_runs(model_info['model_dir'].item(), seeds, metric)                       
+                    epochs, run_perf_all = load_seed_runs(
+                        model_info['model_dir'].item(), seeds, metric,
+                        comparison_bleu_methods=comparison_bleu_methods
+                    )
                 else:
                     continue
 
                 #EPOCHS_PLOT = 49
                 if run_perf_all is not None:
-                    counter = run_perf_all.shape[1]
-                    metric_curves = get_metric_curves(run_perf_all)      
-                    exe_plot = ax.plot(epochs + 1, metric_curves[1], linestyle='-', c=color, alpha=1, clip_on=False, label='DP' if not is_fns else rf'$\alpha = {alpha}$')
+                    metric_curves = get_metric_curves(run_perf_all)
+                    plot_epochs = epochs.to_numpy() + 1
+                    max_plot_epoch = max(max_plot_epoch, plot_epochs[-1])
+                    if model_type[-8:] == 'dpformer':  
+                        model_label = 'DP' 
+                    elif model_type[-10:] == 'sinkformer':
+                        model_label = 'SINK'
+                    elif is_fns:
+                        model_label = rf'$\alpha = {alpha}$'
+                    exe_plot = ax.plot(plot_epochs[start_epoch-1:],
+                                       metric_curves[1][start_epoch-1:],
+                                       linestyle='-', linewidth=1,
+                                       c=color, alpha=1, clip_on=True, 
+                                       zorder=1, label=model_label)
                     if (row_idx,col_idx) == (0,0):
                         im = exe_plot                      
                     # Calculate std                       
-                    metric_std = np.nanstd(run_perf_all.to_numpy(), axis=1)
-                    ax.fill_between(epochs + 1, metric_curves[1]-metric_std, metric_curves[1]+metric_std, color=color, alpha=0.3, clip_on=False, edgecolor='none') 
+                    metric_std = metric_curves[2] - metric_curves[1]
+                    ax.fill_between(plot_epochs[start_epoch-1:],
+                                    metric_curves[0][start_epoch-1:],
+                                    metric_curves[2][start_epoch-1:],
+                                    color=color, alpha=0.3, clip_on=True, edgecolor='none') 
 
                     # results of the final epoch
                     row_stats.append([model_type, alpha] +\
-                                     final_epoch_stats(run_perf_all) + [counter])    
+                                     final_epoch_stats(run_perf_all))
                     ax.spines['top'].set_visible(False)
                     ax.spines['right'].set_visible(False)
-                    ax.set_xlim([0,epochs.iloc[-1].item() + 1])
                     #ax.set_xticks([0] + list(range(25,126,25)))
                 if not is_fns:
                     break  # only do once if model is not FNS type
@@ -250,17 +317,26 @@ def phase_ensembles(models_root, selected_dataset='en-de',
         print(summary_stats)
         print('\n')                    
 
+    if max_plot_epoch > 0:
+        # axs[0,0].set_xlim([0,max_plot_epoch])
+        axs[0,0].set_xlim([start_epoch,max_plot_epoch])
+
     for cidx in range(ncols):
         axs[0,cidx].margins(0)
         if len(metrics) == 2:
             axs[1,cidx].margins(0)
 
     # legend
-    axs[0,0].legend(loc='best', frameon=False)                     
+    axs[0,0].legend(loc='best', ncol=2, frameon=False)                     
 
     for row_idx in range(nrows):
         if metrics[row_idx] == 'bleu':
-            axs[row_idx,0].set_ylim(0,35)
+            # axs[row_idx,0].set_ylim(bottom=0)
+            # axs[row_idx,0].set_ylim([18, 37])
+            pass
+        elif metrics[row_idx][-4:] == 'loss':
+            # axs[row_idx,0].set_ylim([2.2, 2.8])
+            pass
         if metrics[row_idx] == 'lr':
             axs[row_idx,0].ticklabel_format(style='sci', axis='y', scilimits=(0,0))
             # axs[row_idx,0].ticklabel_format(useOffset=True, useMathText=True, axis='y')
@@ -270,13 +346,19 @@ def phase_ensembles(models_root, selected_dataset='en-de',
             if row_idx == 0:                
                 ax_title = r'$\mathbf{W}_{Q,K} \in O(d)$' if is_ops[col_idx] else r'$\mathbf{W}_{Q,K} \notin O(d)$'
                 ax.set_title(ax_title)          
-            axs[row_idx,col_idx].sharey(axs[row_idx, 0])
+            # axs[row_idx,col_idx].sharey(axs[row_idx, 0])
             axs[-1,col_idx].set_xlabel('Epochs')
     # axs[row_idx,0].set_ylabel(NAMES_DICT[metrics[row_idx]])
-    ylabel_dict = {'val_loss': 'Testing loss', 'train_loss': 'Training loss', 'bleu': 'Bleu score (%)',
+    ylabel_dict = {'val_loss': 'Test loss', 'train_loss': 'Training loss', 'bleu': 'Test Bleu score (%)',
                    'lr': 'Learning rate'}
     for row_idx, metric in enumerate(metrics):
         axs[row_idx,0].set_ylabel(ylabel_dict[metric])
+
+    # Subfigure labels
+    for ii, ax in enumerate(axs.flatten()):
+        ax.text(-0.1, 1.115, rf"$\mathbf{{{ascii_lowercase[ii]}}}$",
+            transform=ax.transAxes, ha='left',  va='top',
+            usetex=False)
 
     # Adjust layout
     plt.subplots_adjust(wspace=0.4, hspace=0.3)            

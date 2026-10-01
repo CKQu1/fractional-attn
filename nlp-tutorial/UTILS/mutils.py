@@ -171,7 +171,7 @@ def collect_model_dirs(models_root, **kwargs):
             metrics_dict[metric] = []        
         #cols_attn = ['fix_embed', 'qk_share', 'qkv_bias', 'dataset_name']
         cols_attn = ['qk_share', 'qkv_bias', 'is_op', 'dataset_name']
-        cols_config = ['n_heads', 'n_layers', 'hidden']
+        cols_config = ['n_heads', 'n_layers', 'hidden', 'seq_len']
         cols_train = ['steps_per_epoch']
         #cols_train = []
         cols_other = ['ensembles', 'seeds', 'model_dir']
@@ -286,8 +286,8 @@ def dist_to_score(g_dist, alpha, bandwidth, **kwargs):
     if alpha < 2:                    
         d_intrinsic = kwargs.get('d_intrinsic')
         #attn_score = (1 + g_dist / head_dim**0.5 / bandwidth**0.5)**(-d_intrinsic-alpha)        
-        # attn_score = (1 + g_dist / bandwidth**(1/alpha))**(-d_intrinsic-alpha)
-        attn_score = (1 + g_dist / bandwidth**0.5)**(-d_intrinsic-alpha)
+        attn_score = (1 + g_dist / bandwidth**(1/alpha))**(-d_intrinsic-alpha)
+        # attn_score = (1 + g_dist / bandwidth**0.5)**(-d_intrinsic-alpha)
     else:             
         #attn_score = torch.exp(-(g_dist / head_dim**0.5 / bandwidth**0.5)**(alpha/(alpha-1)))
         # attn_score = torch.exp(-(g_dist / bandwidth**(1/alpha))**(alpha/(alpha-1)))    

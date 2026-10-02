@@ -581,7 +581,7 @@ def fna_alpha_effects(models_root, selected_dataset='cifar10',
             final_values = seed_values_all[metric]
             counter = len(final_values)
             mean = final_values.mean()
-            std = final_values.std() if counter > 1 else 0
+            std = final_values.std(ddof=1) if counter > 1 else 0
             sem = std / math.sqrt(counter) if counter > 0 else np.nan
             median = final_values.median()
             min_val = final_values.min()

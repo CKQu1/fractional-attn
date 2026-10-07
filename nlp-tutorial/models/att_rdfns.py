@@ -17,17 +17,38 @@ class FNSSelfAttention(nn.Module):
         self.is_return_dist = is_return_dist
         self.device = config['device']
 
+        ########## New Version ##########
         if self.is_rescale_dist:
-            if self.alpha >= 2:
-                self.dist_scale = (self.head_dim)**0.5
-            else:
-                #self.dist_scale = (self.head_dim)**(1/self.alpha)
-                #self.dist_scale = self.head_dim**0.5 / (self.head_dim**(1/self.head_dim) - 1)
+            self.seq_len = config['seq_len']
 
-                self.dist_scale = self.head_dim**0.5 / (2**(1/self.head_dim) - 1)
-                #self.dist_scale = self.head_dim**0.5 / (self.head_dim**(1/self.head_dim) - 1)
-                #self.dist_scale = self.head_dim**1.5
-                #self.dist_scale = self.head_dim
+            if self.alpha >= 2:
+                self.dist_scale = (self.head_dim)**0.5  # this is just for alpha = 2
+                # to match Lipschitz constant paper
+                # self.dist_scale = (self.head_dim)**((self.alpha-1)/(2*self.alpha)) #v8 
+            else:
+                # self.dist_scale = self.seq_len**(-2/self.head_dim)  # 
+                # self.dist_scale = self.head_dim / np.sqrt(2 * np.log(self.seq_len))  # v2
+                # self.dist_scale = self.head_dim / np.sqrt(np.log(self.seq_len))  # v3
+                # self.dist_scale = self.head_dim**0.5  # v4
+                # self.dist_scale = self.head_dim**1.5  # v5
+                # self.dist_scale = self.head_dim  # v0   
+                # self.dist_scale = self.head_dim**1.5 / np.log(2)  # v6
+                self.dist_scale = self.head_dim**1.5  # v7
+        ##################################
+
+        ########## Old Version ##########
+        # if self.is_rescale_dist:
+        #     if self.alpha >= 2:
+        #         self.dist_scale = (self.head_dim)**0.5
+        #     else:
+        #         #self.dist_scale = (self.head_dim)**(1/self.alpha)
+        #         #self.dist_scale = self.head_dim**0.5 / (self.head_dim**(1/self.head_dim) - 1)
+
+        #         self.dist_scale = self.head_dim**0.5 / (2**(1/self.head_dim) - 1)
+        #         #self.dist_scale = self.head_dim**0.5 / (self.head_dim**(1/self.head_dim) - 1)
+        #         #self.dist_scale = self.head_dim**1.5
+        #         #self.dist_scale = self.head_dim
+        ##################################
 
         # dependence on d for non-local kernel (rd), otherwise v2_rd   
         if self.alpha < 2: 
@@ -66,6 +87,10 @@ class FNSSelfAttention(nn.Module):
         else:            
             g_dist = torch.cdist(q, k, p=2)
 
+        if self.qk_share:
+            diagonal = torch.eye(q_len, dtype=torch.bool, device=g_dist.device)
+            g_dist = g_dist.masked_fill(diagonal, 0.0)
+
         if isinstance(bandwidth, str):
             if bandwidth.lower() == 'median':
                 bandwidth_lb = 1e-3
@@ -85,13 +110,14 @@ class FNSSelfAttention(nn.Module):
         else:             
             attn_score = torch.exp(-(g_dist / bandwidth**(1/alpha))**(alpha/(alpha-1)))    
 
-        if self.qk_share:  # Q = K
-            attn_score = attn_score.masked_fill(torch.diag_embed(torch.ones(q_len, device=q.device))==1, 0)
+        # if self.qk_share:  # Q = K
+        #     attn_score = attn_score.masked_fill(torch.diag_embed(torch.ones(q_len, device=q.device))==1, 0)
 
         # distance based
         if self.dist_threshold is not None and not self.training:            
             #attn_mask = attn_mask | (g_dist > self.dist_threshold)        
-            attn_mask = attn_mask | (g_dist >= self.dist_threshold)
+            attn_mask = attn_mask | (g_dist >= self.dist_threshold)  # should let strengths weaken, i.e. remove large distances first
+            # attn_mask = attn_mask | (g_dist <= self.dist_threshold)
 
         # probability based
         if self.is_add_eval_mask and not self.training:
@@ -116,6 +142,9 @@ class FNSSelfAttention(nn.Module):
             attn_weights = F.normalize(attn_score,p=1,dim=3)  # can do this as the attn weights are always positive 
         # |attn_weights| : (batch_size, n_heads, q_len, k_len)
         
+        # v2 type mask
+        attn_weights = attn_weights.masked_fill(attn_mask, 0)
+
         output = torch.matmul(attn_weights, v)
         # |output| : (batch_size, n_heads, q_len, d_v)
         

@@ -105,11 +105,12 @@ def final_epoch_stats(run_perf_all):
 
 
 # Plots average of metrics over ensembles (assumption 1 and 2 possibilities for full-sized models)
-def phase_ensembles(models_root, selected_dataset='cifar10',
+def phase_ensembles(models_root, selected_dataset='cifar10', source_data_path='../.source_data/fig8',
                     fns_manifold='rd', qk_share=False, selected_alphas='1.2,2',
                     metrics='val_acc,val_loss',
                     is_ops = [False,True],  # [False,True]
                     cbar_separate=False, display=False):
+    """Save each panel's curves and shaded bounds to <source_data_path><panel>.csv."""
     global summary_stats, run_perf_all
 
     start_epoch, end_epoch = 25, 110
@@ -194,7 +195,10 @@ def phase_ensembles(models_root, selected_dataset='cifar10',
 
     model_types_plotted = []
     model_types_seeds = {}     
+    source_data_path = Path(source_data_path)
+    source_data_path.parent.mkdir(parents=True, exist_ok=True)
     for (row_idx, metric), (col_idx, is_op) in product(enumerate(metrics), enumerate(is_ops)):
+        source_data = {}
         ax = axs[row_idx, col_idx] 
         # summary statistics
         row_stats = []
@@ -300,6 +304,11 @@ def phase_ensembles(models_root, selected_dataset='cifar10',
                                     display_metric_u,
                                     color=color, alpha=0.3, clip_on=True, edgecolor='none')
 
+                    source_label = f'alpha={alpha:g}' if is_fns else label
+                    source_data[f'{source_label}_median'] = pd.Series(display_metric_m, index=display_epochs)
+                    source_data[f'{source_label}_band_lower'] = pd.Series(display_metric_l, index=display_epochs)
+                    source_data[f'{source_label}_band_upper'] = pd.Series(display_metric_u, index=display_epochs)
+
                     # These are the exact seed values underlying the final plotted point.
                     final_values = aligned_run_perf.iloc[-1].dropna()
                     counter = int(final_values.size)
@@ -331,6 +340,11 @@ def phase_ensembles(models_root, selected_dataset='cifar10',
         print(f'is_op = {is_op}, qk_share = {qk_share}')
         print(panel_summary_stats.round(3))
         print('\n')                    
+
+        panel = ascii_lowercase[row_idx * ncols + col_idx]
+        panel_path = f'{source_data_path}{panel}.csv'
+        pd.DataFrame(source_data).to_csv(panel_path, index_label='epoch')
+        print(f'Source data saved in {panel_path}')
 
     summary_stats = pd.DataFrame(data=summary_rows, columns=summary_colnames)
 

@@ -7,6 +7,39 @@ from os.path import isdir, isfile
 from constants import *
 from UTILS.mutils import njoin
 
+def _rebalance_array_chunks(pbs_array_data_chunks):
+    if len(pbs_array_data_chunks) > 1 and len(pbs_array_data_chunks[-1]) == 1:
+        pbs_array_data_chunks[-1].insert(0, pbs_array_data_chunks[-2].pop())
+    return pbs_array_data_chunks
+
+def _array_directive_and_args(pbs_array_data_chunk, max_subjobs, chunk_idx, scheduler):
+    if len(pbs_array_data_chunk) == 1:
+        if scheduler == 'PBS':
+            return (
+                '##PBS -J disabled for single job',
+                f"""args=($(python3 -c "print(' '.join(map(str, {pbs_array_data_chunk}[0])))"))"""
+            )
+        if scheduler == 'SLURM':
+            return (
+                '##SBATCH --array disabled for single job',
+                f"""args=($(python3 -c "print(' '.join(map(str, {pbs_array_data_chunk}[0])))"))"""
+            )
+        raise ValueError(f"Unknown scheduler: {scheduler}")
+
+    start = max_subjobs * chunk_idx
+    end = start + len(pbs_array_data_chunk) - 1
+    if scheduler == 'PBS':
+        return (
+            f"#PBS -J {start}-{end}",
+            f"""args=($(python3 -c "import sys;print(' '.join(map(str, {pbs_array_data_chunk}[int(sys.argv[1])-{start}])))" $PBS_ARRAY_INDEX))"""
+        )
+    if scheduler == 'SLURM':
+        return (
+            f"#SBATCH --array={start}-{end}",
+            f"""args=($(python3 -c "import sys;print(' '.join(map(str, {pbs_array_data_chunk}[int(sys.argv[1])-{start}])))" $SLURM_ARRAY_TASK_ID))"""
+        )
+    raise ValueError(f"Unknown scheduler: {scheduler}")
+
 def qsub(command, pbs_array_data, **kwargs):
     global pbs_array_data_chunks
 
@@ -107,9 +140,11 @@ END"""
         # PBS array jobs are limited to 1000 subjobs by default
         pbs_array_data_chunks = [pbs_array_data[x:x+MAX_SUBJOBS]
                                 for x in range(0, len(pbs_array_data), MAX_SUBJOBS)]
-        if len(pbs_array_data_chunks[-1]) == 1:  # array jobs must have length >1
-            pbs_array_data_chunks[-1].insert(0, pbs_array_data_chunks[-2].pop())
+        pbs_array_data_chunks = _rebalance_array_chunks(pbs_array_data_chunks)
         for i, pbs_array_data_chunk in enumerate(pbs_array_data_chunks):
+            array_directive, array_args = _array_directive_and_args(
+                pbs_array_data_chunk, MAX_SUBJOBS, i, 'PBS'
+            )
 
             # https://stackoverflow.com/questions/2500436/how-does-cat-eof-work-in-bash
             PBS_SCRIPT = f"""<<'END'
@@ -123,8 +158,8 @@ END"""
 #PBS -o {path}/{job_dir} -e {path}/{job_dir}
 #PBS -l select={kwargs.get('select',1)}:ncpus={kwargs.get('ncpus',1)}:mem={kwargs.get('mem','1GB')}{':ngpus='+str(kwargs['ngpus']) if 'ngpus' in kwargs else ''}
 #PBS -l walltime={kwargs.get('walltime','23:59:00')}                       
-#PBS -J {MAX_SUBJOBS*i}-{MAX_SUBJOBS*i + len(pbs_array_data_chunk)-1}
-args=($(python3 -c "import sys;print(' '.join(map(str, {pbs_array_data_chunk}[int(sys.argv[1])-{MAX_SUBJOBS*i}])))" $PBS_ARRAY_INDEX))
+{array_directive}
+{array_args}
 cd {kwargs.get('cd', '$PBS_O_WORKDIR')}
 echo "pbs_array_args = ${{args[*]}}"    
 #export CONDA_PKGS_DIRS=~/.conda/pkgs
@@ -145,9 +180,11 @@ END"""
         # PBS array jobs are limited to 1000 subjobs by default
         pbs_array_data_chunks = [pbs_array_data[x:x+MAX_SUBJOBS]
                                 for x in range(0, len(pbs_array_data), MAX_SUBJOBS)]
-        if len(pbs_array_data_chunks[-1]) == 1:  # array jobs must have length >1
-            pbs_array_data_chunks[-1].insert(0, pbs_array_data_chunks[-2].pop())
+        pbs_array_data_chunks = _rebalance_array_chunks(pbs_array_data_chunks)
         for i, pbs_array_data_chunk in enumerate(pbs_array_data_chunks):
+            array_directive, array_args = _array_directive_and_args(
+                pbs_array_data_chunk, MAX_SUBJOBS, i, 'SLURM'
+            )
 
             # https://stackoverflow.com/questions/2500436/how-does-cat-eof-work-in-bash
             SLURM_SCRIPT = f"""<<'END'
@@ -161,10 +198,10 @@ END"""
 #SBATCH --mem={kwargs.get('mem','1GB')}
 #SBATCH --gres={'gpu:'+str(kwargs['ngpus']) if 'ngpus' in kwargs else ''}
 #SBATCH -t {kwargs.get('walltime','23:59:00')}                       
-#SBATCH --array={MAX_SUBJOBS*i}-{MAX_SUBJOBS*i + len(pbs_array_data_chunk)-1}
+{array_directive}
 
 #SBATCH
-args=($(python3 -c "import sys;print(' '.join(map(str, {pbs_array_data_chunk}[int(sys.argv[1])-{MAX_SUBJOBS*i}])))" $SLURM_ARRAY_TASK_ID))
+{array_args}
 
 cd {kwargs.get('cd', '$SLURM_SUBMIT_DIR')}
 echo "pbs_array_args = ${{args[*]}}"
@@ -186,9 +223,11 @@ END"""
         # PBS array jobs are limited to 1000 subjobs by default
         pbs_array_data_chunks = [pbs_array_data[x:x+MAX_SUBJOBS]
                                 for x in range(0, len(pbs_array_data), MAX_SUBJOBS)]
-        if len(pbs_array_data_chunks[-1]) == 1:  # array jobs must have length >1
-            pbs_array_data_chunks[-1].insert(0, pbs_array_data_chunks[-2].pop())
+        pbs_array_data_chunks = _rebalance_array_chunks(pbs_array_data_chunks)
         for i, pbs_array_data_chunk in enumerate(pbs_array_data_chunks):
+            array_directive, array_args = _array_directive_and_args(
+                pbs_array_data_chunk, MAX_SUBJOBS, i, 'PBS'
+            )
 
             PBS_SCRIPT = f"""<<'END'
 #!/bin/bash
@@ -201,8 +240,8 @@ END"""
 #PBS -o {path}/{job_dir} -e {path}/{job_dir}
 #PBS -l select={kwargs.get('select',1)}:ncpus={kwargs.get('ncpus',1)}:mem={kwargs.get('mem','1GB')}{':ngpus='+str(kwargs['ngpus']) if 'ngpus' in kwargs else ''}
 #PBS -l walltime={kwargs.get('walltime','23:59:00')}
-#PBS -J {MAX_SUBJOBS*i}-{MAX_SUBJOBS*i + len(pbs_array_data_chunk)-1}
-args=($(python3 -c "import sys;print(' '.join(map(str, {pbs_array_data_chunk}[int(sys.argv[1])-{MAX_SUBJOBS*i}])))" $PBS_ARRAY_INDEX))
+{array_directive}
+{array_args}
 cd {kwargs.get('cd', '$PBS_O_WORKDIR')}
 echo "pbs_array_args = ${{args[*]}}"
 {source_activate}
@@ -368,7 +407,10 @@ def get_pbs_array_data(kwargss):
 # N is the total number of projects
 def job_divider(pbs_array: list, N: int):
     total_jobs = len(pbs_array)
-    assert total_jobs >= 2, 'total_jobs does not exceed 1'
+    assert total_jobs >= 1, 'total_jobs must be at least 1'
+    assert N >= 1, 'N must be at least 1'
+    if total_jobs == 1:
+        return list(np.random.choice(N, 1, replace=False)), [pbs_array]
     ncores = min(int(np.floor(total_jobs/2)), N)
     pbss = []
     delta = int(round(total_jobs/ncores))

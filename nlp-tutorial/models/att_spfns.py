@@ -75,7 +75,8 @@ class FNSSelfAttention(nn.Module):
         # distance based
         if self.dist_threshold is not None and not self.training:            
             #attn_mask = attn_mask | (g_dist > self.dist_threshold)        
-            attn_mask = attn_mask | (g_dist >= self.dist_threshold)
+            attn_mask = attn_mask | (g_dist >= self.dist_threshold)  # should let strengths weaken, i.e. remove large distances first
+            # attn_mask = attn_mask | (g_dist <= self.dist_threshold)
 
         # probability based
         if self.is_add_eval_mask and not self.training:

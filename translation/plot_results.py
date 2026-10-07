@@ -146,11 +146,12 @@ def matrixify_axs(axs, nrows, ncols):
     return axs
 
 
-def phase_ensembles(models_root, selected_dataset='en-de',
+def phase_ensembles(models_root, selected_dataset='en-de', source_data_path='../.source_data/edfig6',
                     fns_manifold='rd', selected_alphas='1.2,2',
                     metrics='bleu,val_loss',  # bleu,train_loss lr
                     is_ops = [False,True],  # [False,True]
                     cbar_separate=False, display=False):
+    """Save each panel's curves and shaded bounds to <source_data_path><panel>.csv."""
 
     global DCT_ALL, model_root_dirs, df_model, run_perf_all, matching_df
     global model_info, seeds, metric_curves, epochs, metric_std
@@ -221,7 +222,10 @@ def phase_ensembles(models_root, selected_dataset='en-de',
         metric: set() for metric in metrics
     }
     max_plot_epoch = 0
+    source_data_path = Path(source_data_path)
+    source_data_path.parent.mkdir(parents=True, exist_ok=True)
     for (row_idx, metric), (col_idx, is_op) in product(enumerate(metrics), enumerate(is_ops)):
+        source_data = {}
         ax = axs[row_idx, col_idx] 
         comparison_bleu_methods = comparison_bleu_methods_by_metric[metric]
         # summary statistics
@@ -300,6 +304,12 @@ def phase_ensembles(models_root, selected_dataset='en-de',
                                     metric_curves[2][start_epoch-1:],
                                     color=color, alpha=0.3, clip_on=True, edgecolor='none') 
 
+                    source_label = f'alpha={alpha:g}' if is_fns else model_label
+                    source_epochs = plot_epochs[start_epoch-1:]
+                    source_data[f'{source_label}_median'] = pd.Series(metric_curves[1][start_epoch-1:].to_numpy(), index=source_epochs)
+                    source_data[f'{source_label}_band_lower'] = pd.Series(metric_curves[0][start_epoch-1:].to_numpy(), index=source_epochs)
+                    source_data[f'{source_label}_band_upper'] = pd.Series(metric_curves[2][start_epoch-1:].to_numpy(), index=source_epochs)
+
                     # results of the final epoch
                     row_stats.append([model_type, alpha] +\
                                      final_epoch_stats(run_perf_all))
@@ -316,6 +326,11 @@ def phase_ensembles(models_root, selected_dataset='en-de',
         print(f'is_op = {is_op}')
         print(summary_stats)
         print('\n')                    
+
+        panel = ascii_lowercase[row_idx * ncols + col_idx]
+        panel_path = f'{source_data_path}{panel}.csv'
+        pd.DataFrame(source_data).to_csv(panel_path, index_label='epoch')
+        print(f'Source data saved in {panel_path}')
 
     if max_plot_epoch > 0:
         # axs[0,0].set_xlim([0,max_plot_epoch])

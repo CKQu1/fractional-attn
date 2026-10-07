@@ -82,16 +82,27 @@ if __name__ == '__main__':
     parser.add_argument('--vocab_file',          default='wiki.vocab',     type=str, help='vocabulary path')
     parser.add_argument('--tokenizer_name', default='sentencepiece', type=str)  
     parser.add_argument('--pretrained_model',    default='wiki.model',     type=str, help='pretrained sentencepiece model path. used only when tokenizer=\'sentencepiece\'')
+    parser.add_argument('--hf_tokenizer_name', default='bert-base-uncased', type=str,
+                        help='Hugging Face tokenizer for datasets loaded through datasets, e.g. ag_news')
 
     # Dataset settings
     parser.add_argument('--dataset_name', default='imdb', type=str)
-    parser.add_argument('--cache_dir', default=njoin(DROOT, 'cache_dir'), type=str)  
+    parser.add_argument('--trainset_pct', default=None, type=float,
+                        help='fraction of the combined train/test dataset to use for training')
+    parser.add_argument('--cache_dir', default=njoin(DROOT, 'hf_cache_dir'), type=str,
+                        help='cache directory for Hugging Face datasets')  
+    parser.add_argument('--tokenizer_cache_dir', default=njoin(DROOT, 'hf_cache_dir'), type=str,
+                        help='cache directory for Hugging Face tokenizers/models')
+    parser.add_argument('--local_files_only', type=str2bool, nargs='?', const=True, default=True,
+                        help='load Hugging Face datasets/tokenizers from local cache only')
+    parser.add_argument('--prepare_data_only', type=str2bool, nargs='?', const=True, default=False,
+                        help='download/cache the dataset and tokenizer, then exit before training')
 
     # Model settings
-    parser.add_argument('--model_name', default='spfnsvit', type=str)  
+    parser.add_argument('--model_name', default='fnsformer', type=str)  
     parser.add_argument('--is_resnet_scale', type=str2bool, nargs='?', default=False)
     # fns type
-    parser.add_argument('--manifold', default='sphere', type=str)
+    parser.add_argument('--manifold', default='rd', type=str)
     parser.add_argument('--alpha', default=1, type=float)
     parser.add_argument('--bandwidth', default=1, type=float)  
     parser.add_argument('--a', default=0, type=float)
@@ -134,7 +145,11 @@ if __name__ == '__main__':
     always_save_checkpoint = args.always_save_checkpoint # if True, always save a checkpoint after each eval
     # data
     dataset_name = args.dataset_name
-    batch_size = args.train_bs # if gradient_accumulation_steps > 1, this is the micro-batch size     
+    batch_size = args.train_bs # if gradient_accumulation_steps > 1, this is the micro-batch size
+    if args.trainset_pct is not None:
+        trainset_pct = float(args.trainset_pct)
+    else:
+        trainset_pct = None
     # adamw optimizer
     learning_rate = args.max_lr  # max learning rate
     max_iters = args.max_iters # total number of training iterations
@@ -162,8 +177,17 @@ if __name__ == '__main__':
     #args.bandwidth = float(args.bandwidth) if args.bandwidth.replace('.','').isnumeric() else args.bandwidth
     # ---------------------------------------- poor man's data loader ----------------------------------------
     tokenizer, train_loader, test_loader, train_size, eval_size, steps_per_epoch, num_classes =\
-        load_dataset_and_tokenizer(args, batch_size)
+        load_dataset_and_tokenizer(args, batch_size, trainset_pct=trainset_pct)
     # --------------------------------------------------------------------------------------------------------
+
+    if args.prepare_data_only:
+        print(
+            f"Prepared {args.dataset_name} with tokenizer "
+            f"{args.hf_tokenizer_name if args.dataset_name != 'imdb' else args.tokenizer_name}: "
+            f"train_size={train_size}, eval_size={eval_size}, "
+            f"trainset_pct={trainset_pct}, num_classes={num_classes}"
+        )
+        raise SystemExit(0)
 
     epochs = args.epochs
     if epochs is not None:  
@@ -186,6 +210,7 @@ if __name__ == '__main__':
         pad_token_id = 0  
     else: 
         pad_token_id = tokenizer.pad_token_id
+    tokenizer_setup_name = args.hf_tokenizer_name if args.dataset_name != 'imdb' else args.tokenizer_name
 
     # These are not hard constraints, but are used to prevent misconfigurations
     assert args.hidden % args.n_attn_heads == 0    
@@ -206,8 +231,16 @@ if __name__ == '__main__':
         "fix_embed": args.fix_embed,
         "is_resnet_scale": args.is_resnet_scale,
         "type_vocab_size": None,
-        "num_classes": num_classes        
+        "num_classes": num_classes,
+        "dataset_name": args.dataset_name,
+        "trainset_pct": trainset_pct,
+        "tokenizer_name": tokenizer_setup_name,
+        "cache_dir": args.cache_dir,
+        "tokenizer_cache_dir": args.tokenizer_cache_dir,
+        "local_files_only": args.local_files_only,
     }
+    if args.dataset_name != 'imdb':
+        config["hf_tokenizer_name"] = args.hf_tokenizer_name
     config['device'] = device
 
     config['train_mask_type'] = train_mask_type = args.train_mask_type
@@ -221,7 +254,8 @@ if __name__ == '__main__':
     attn_setup = {'seed': args.seed,
                   'qk_share': args.qk_share, 'qkv_bias': args.qkv_bias, 
                   'is_op': args.is_op, 'fix_embed': args.fix_embed, 
-                  'dataset_name': args.dataset_name}        
+                  'dataset_name': args.dataset_name,
+                  'tokenizer_name': tokenizer_setup_name}
 
     if args.fix_embed:
         from models.model_utils import load_pretrained_model, load_embeddings
@@ -390,11 +424,11 @@ if __name__ == '__main__':
         json.dump(attn_setup, ofile)   
 
     # save train settings
-    col_names = ["max_lr", "min_lr", "batch_size", "beta1", "beta2", "train_size", "eval_size", 
-                 "steps_per_epoch", "max_iters", "weight_decay", "grad_clip", "decay_lr",
+    col_names = ["max_lr", "min_lr", "batch_size", "beta1", "beta2", "train_size", "eval_size",
+                 "trainset_pct", "steps_per_epoch", "max_iters", "weight_decay", "grad_clip", "decay_lr",
                  "lr_scheduler_type"]
-    row_data = [args.max_lr, args.min_lr, args.train_bs, args.beta1, args.beta2, train_size, eval_size, 
-                steps_per_epoch, max_iters, args.weight_decay, args.grad_clip, args.decay_lr,
+    row_data = [args.max_lr, args.min_lr, args.train_bs, args.beta1, args.beta2, train_size, eval_size,
+                trainset_pct, steps_per_epoch, max_iters, args.weight_decay, args.grad_clip, args.decay_lr,
                 args.lr_scheduler_type]
     if args.lr_scheduler_type == 'binary':  # only case to add binary_ratio
         col_names.append("binary_ratio")
@@ -455,8 +489,8 @@ if __name__ == '__main__':
         decay_ratio = (it - warmup_iters) / (lr_decay_iters - warmup_iters)
         assert 0 <= decay_ratio <= 1
         coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio)) # coeff ranges 0..1
-        return min_lr + coeff * (learning_rate - min_lr)    
-    
+        return min_lr + coeff * (learning_rate - min_lr)
+
     # training loop
     #X, Y = get_batch('train') # fetch the very first batch
     #X, Y, IX = get_batch('train')
@@ -467,7 +501,7 @@ if __name__ == '__main__':
     raw_model = model
     running_mfu = -1.0
 
-    metrics_ls = []    
+    metrics_ls = []
 
     t0 = time.time()
     dt = None
@@ -475,31 +509,31 @@ if __name__ == '__main__':
     best_val_loss = 1e9
 
     metric_cols = ['iter', 'lr', 'train_loss', 'val_loss', 'train_acc', 'val_acc','secs_per_eval']
-    train_n_batches, train_n_samples = len(train_loader), len(train_loader.dataset)    
+    train_n_batches, train_n_samples = len(train_loader), len(train_loader.dataset)
 
     prev_lr = None
 
     model.train()
-    #for epoch in range(epochs):    
+    #for epoch in range(epochs):
     for epoch in tqdm(range(epochs)):
         #print('epoch: ', epoch)
         epoch_loss = 0
         epoch_accuracy = 0
-        
+
         #for batch in tqdm(train_loader):
         for batch in train_loader:
 
             inputs, labels = batch
-            
+
             inputs = inputs.to(device)
-            labels = labels.to(device)            
+            labels = labels.to(device)
 
             outputs, attention_weights = model(inputs)
-            
+
             loss = loss_fn(outputs, labels)
             epoch_loss += loss.item()
             acc = (outputs.argmax(dim=-1) == labels).sum()
-            epoch_accuracy += acc.item()            
+            epoch_accuracy += acc.item()
 
             # determine and set the learning rate for this iteration
             if args.lr_scheduler_type == 'cosine':
@@ -509,7 +543,7 @@ if __name__ == '__main__':
                 # if iter_num < max_iters * 4/5:
                 #     lr = learning_rate
                 # else:
-                #     lr = min_lr        
+                #     lr = min_lr
                 #if epoch + 1 < 15:
                 if epoch + 1 < epochs * args.binary_ratio:
                     lr = learning_rate
@@ -519,12 +553,12 @@ if __name__ == '__main__':
                 lr = learning_rate
             if lr != prev_lr:
                 for param_group in optimizer.param_groups:
-                    param_group['lr'] = lr      
+                    param_group['lr'] = lr
 
             optimizer.zero_grad()
             loss.backward()
             # clip the gradient
-            if grad_clip != 0.0:                
+            if grad_clip != 0.0:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
             optimizer.step()
 
@@ -539,11 +573,11 @@ if __name__ == '__main__':
 
         epoch_val_accuracy, epoch_val_loss = fb_estimate_val()
 
-        # evaluate the loss on train/val sets and write checkpoints            
+        # evaluate the loss on train/val sets and write checkpoints
         metrics_ls.append([iter_num, lr, epoch_loss, epoch_val_loss, epoch_accuracy, epoch_val_accuracy, dt])
 
         df = pd.DataFrame(metrics_ls, columns=metric_cols)
-        df.to_csv(njoin(out_dir, '_run_performance.csv'))               
+        df.to_csv(njoin(out_dir, '_run_performance.csv'))
 
         #if epoch_val_loss < best_val_loss or always_save_checkpoint:
         if always_save_checkpoint:
@@ -563,7 +597,7 @@ if __name__ == '__main__':
 
         print(
             f"Epoch : {epoch+1} - loss : {epoch_loss:.4f} - acc: {epoch_accuracy:.4f} - val_loss : {epoch_val_loss:.4f} - val_acc: {epoch_val_accuracy:.4f}\n"
-        )        
+        )
 
         # timing and logging
         t1 = time.time()
@@ -575,15 +609,15 @@ if __name__ == '__main__':
     df = pd.DataFrame(metrics_ls, columns=metric_cols)
     df.to_csv(njoin(out_dir, 'run_performance.csv'))
 
-    print(f'All data saved under {out_dir}')       
+    print(f'All data saved under {out_dir}')
     # delete
     if args.fix_embed:
         if args.pretrained_model_name in ['distilbert-base-uncased', 'albert-base-v2', 'gpt2']:
             is_match_word = torch.equal(model.embedding.weight, pretrained_word_embeddings.to(device))
             is_match_position = torch.equal(model.pos_embedding.weight, pretrained_position_embeddings.to(device))
             message = 'Embeddings params DO NOT match!' if not (is_match_word and is_match_position) else 'Embeddings params match!'
-            print(message)    
+            print(message)
         elif args.pretrained_model_name == 'glove':
             is_match = torch.equal(model.embedding.weight, pretrained_word_embeddings.to(device))
             message = 'Embeddings params DO NOT match!' if not is_match else 'Embeddings params match!'
-            print(message)            
+            print(message)

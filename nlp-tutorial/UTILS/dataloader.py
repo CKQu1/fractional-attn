@@ -129,12 +129,13 @@ def load_dataset_and_tokenizer(args, batch_size, trainset_pct=None):
                 "Check the local '.data/aclImdb' contents or the fallback archive."
             )
 
-        train_dataset, test_dataset = split_train_test_datasets(
-            train_dataset,
-            test_dataset,
-            trainset_pct,
-            seed=getattr(args, 'seed', 0),
-        )
+        if trainset_pct is not None or trainset_pct != 0.5:
+            train_dataset, test_dataset = split_train_test_datasets(
+                train_dataset,
+                test_dataset,
+                trainset_pct,
+                seed=getattr(args, 'seed', 0),
+            )
         print('train dataset of size %d' % len(train_dataset))
         print('test dataset of size %d' % len(test_dataset))
 

@@ -31,7 +31,7 @@ def eval_model(model):
         inputs = inputs.to(device)
         labels = labels.to(device)            
 
-        if is_dp: # opdpformer
+        if is_dp or is_sink: # opdpformer or opsinkformer
             outputs, _ = model(inputs[None])
         elif is_fns:
             outputs, _, _ = model(inputs[None])
@@ -52,8 +52,12 @@ def eval_model(model):
 
 if __name__ == '__main__':
 
+    """
+    This is for analyzing the shortest paths.
+    """
+
     # Configs
-    parser = argparse.ArgumentParser(description='nlp-tutorial/fdm.py arguments')    
+    parser = argparse.ArgumentParser(description='nlp-tutorial/attn_graph_v2.py arguments')    
     # parser.add_argument('--train_with_ddp', default=False, type=bool, help='to use DDP or not')
     # parser.add_argument('--models_root', default='', help='Pretrained models root')
     # parser.add_argument('--fns_type', default='rdfnsformer')  # 'spopfns'+MODEL_SUFFIX
@@ -79,7 +83,8 @@ if __name__ == '__main__':
     # ----- load pretrained_model -----    
     attn_setup, config, run_performance, train_setting = load_model_files(model_dir)
     is_fns = attn_setup['model_name'][-9:] == 'fns' + MODEL_SUFFIX
-    is_dp = attn_setup['model_name'][-9:] == 'dp' + MODEL_SUFFIX
+    is_dp = attn_setup['model_name'][-8:] == 'dp' + MODEL_SUFFIX
+    is_sink = attn_setup['model_name'][-10:] == 'sink' + MODEL_SUFFIX
 
     seed = attn_setup ['seed']
     fix_embed = attn_setup['fix_embed']
@@ -136,10 +141,7 @@ if __name__ == '__main__':
         ii = sample_idxs[iidx]
         X, Y = train_loader.dataset[ii]
         X_len = config['max_len'] - count_trailing_zeros(X)
-        if is_dp: # opdpformer
-            _, attention_weights = model(X[None])  
-        else:
-            _, attention_weights, g_dists = model(X[None])  
+        _, attention_weights, g_dists = model(X[None])
         for lidx, g_dist in enumerate(attention_weights):
             # Attention weights
             if args.use_same_token:

@@ -107,11 +107,12 @@ def final_epoch_stats(run_perf_all):
 python -i plot_results.py phase_ensembles .droot/L-d-grid/1L-hidden=8-max_len=512-rescaled/
 python -i plot_results.py phase_ensembles frac_attn/fractional-attn/nlp-tutorial/droot/6L-hidden=256-max_len=None-rescaled (Figure 2)
 """
-def phase_ensembles(models_root, selected_dataset='imdb', 
+def phase_ensembles(models_root, selected_dataset='imdb', source_data_path='../.source_data/fig7',
                     qk_share=False, is_ops='False,True',
                     fns_manifold='rd', selected_alphas='1.2,2',
                     metrics='val_acc,val_loss',   #metric_type='mean',  # 'median'
                     cbar_separate=False, display=False):
+    """Save each panel's curves and shaded bounds to <source_data_path><panel>.csv."""
     pd.set_option('display.max_rows', None)
     pd.set_option('display.max_columns', None)
 
@@ -176,8 +177,12 @@ def phase_ensembles(models_root, selected_dataset='imdb',
     # label_axs(fig, axs)  # alphabetically label subfigures             
 
     model_types_plotted = []
-    model_types_seeds = {}     
+    model_types_seeds = {}
+    source_data_path = Path(source_data_path)
+    source_data_path.parent.mkdir(parents=True, exist_ok=True)
     for (row_idx, metric), (col_idx, is_op) in product(enumerate(metrics), enumerate(is_ops)):
+        source_data = {}
+        panel = ascii_lowercase[row_idx * ncols + col_idx]
         ax = axs[row_idx, col_idx] 
         # summary statistics
         row_stats = []
@@ -244,7 +249,12 @@ def phase_ensembles(models_root, selected_dataset='imdb',
                     # if metric_type == 'mean':
                     # # Calculate std                       
                     # metric_std = np.nanstd(run_perf_all.to_numpy(), axis=1)
-                    ax.fill_between(epochs, metric_curves[1], metric_curves[2], color=color, alpha=0.3, clip_on=False, edgecolor='none')                    
+                    ax.fill_between(epochs, metric_curves[0], metric_curves[2], color=color, alpha=0.3, clip_on=False, edgecolor='none')                    
+
+                    label = f'alpha={alpha:g}' if is_fns else plot_label
+                    source_data[f'{label}_median'] = pd.Series(metric_curves[1].to_numpy(), index=epochs)
+                    source_data[f'{label}_band_lower'] = pd.Series(metric_curves[0].to_numpy(), index=epochs)
+                    source_data[f'{label}_band_upper'] = pd.Series(metric_curves[2].to_numpy(), index=epochs)
 
                     # results of the final epoch
                     row_stats.append([model_type, alpha] +\
@@ -271,6 +281,10 @@ def phase_ensembles(models_root, selected_dataset='imdb',
         print(f'is_op = {is_op}, qk_share = {qk_share}')
         print(summary_stats)
         print('\n')                    
+
+        panel_path = f'{source_data_path}{panel}.csv'
+        pd.DataFrame(source_data).to_csv(panel_path, index_label='epoch')
+        print(f'Source data saved in {panel_path}')
 
     # # labels
     # model_labels = []
@@ -369,7 +383,8 @@ def phase_ensembles(models_root, selected_dataset='imdb',
 
 
 # python plot_results.py trainset_pct_effects_v2 .droot
-def trainset_pct_effects_v2(models_root, trainset_pcts='0.5,0.4,0.3,0.2,0.1',
+def trainset_pct_effects_v2(models_root, source_data_path='../.source/edfig3',
+                            trainset_pcts='0.5,0.4,0.3,0.2,0.1',
                             fns_manifold='rd', is_rescale_dist=True,
                             qk_shares=[False, True], selected_alphas='1.2,2',
                             metric='val_acc', selected_dataset='imdb', depths=[1],
@@ -383,6 +398,7 @@ def trainset_pct_effects_v2(models_root, trainset_pcts='0.5,0.4,0.3,0.2,0.1',
     Rows correspond to the Q/K-sharing settings, columns correspond to fixed
     hidden dimensions, and the x-axis follows the order supplied in
     ``trainset_pcts``.
+    Save each panel to <source_data_path><panel>.csv, including plotted errors.
     """
     global trainset_pct_summary_stats
 
@@ -843,8 +859,11 @@ def trainset_pct_effects_v2(models_root, trainset_pcts='0.5,0.4,0.3,0.2,0.1',
     else:
         metric_label = NAMES_DICT.get(metric, metric)
 
+    source_data_path = Path(source_data_path)
+    source_data_path.parent.mkdir(parents=True, exist_ok=True)
     for qk_idx, qk_share in enumerate(qk_shares):
         for hidden_idx, hidden in enumerate(emb_ds):
+            source_data = {'x': x, 'trainset_pct': trainset_pcts}
             ax = axs[qk_idx, hidden_idx]
             has_curve = False
 
@@ -896,7 +915,16 @@ def trainset_pct_effects_v2(models_root, trainset_pcts='0.5,0.4,0.3,0.2,0.1',
                         clip_on=False,
                         zorder=1
                     )
+                    source_label = label.replace('$', '').replace(r'\alpha', 'alpha').replace(' ', '')
+                    source_data[f'{source_label}_mean'] = means
+                    source_data[f'{source_label}_std'] = stds
                     has_curve = True
+
+            panel_idx = qk_idx * ncols + hidden_idx
+            panel = ascii_lowercase[panel_idx] if panel_idx < 26 else str(panel_idx + 1)
+            panel_path = f'{source_data_path}{panel}.csv'
+            pd.DataFrame(source_data).to_csv(panel_path, index=False)
+            print(f'Source data saved in {panel_path}')
 
             if not has_curve:
                 ax.text(
@@ -1023,12 +1051,13 @@ def trainset_pct_effects_v2(models_root, trainset_pcts='0.5,0.4,0.3,0.2,0.1',
 """
 python plot_results.py window_effects .droot/full_models-v1mask-v7scale/
 """
-def window_effects(models_root, seq_lens=[128, 256, 512, 1024],
-                    selected_dataset='imdb', qk_share=False,
-                    is_ops='False,True', fns_manifold='rd',
-                    selected_alphas='1.2,2', metrics='val_acc,val_loss',
-                    display=False):
-    """Plot final test metrics over training context-window lengths."""
+def window_effects(models_root, source_data_path='../.source_data/edfig4',
+                   seq_lens=[128, 256, 512, 1024],
+                   selected_dataset='imdb', qk_share=False,
+                   is_ops='False,True', fns_manifold='rd',
+                   selected_alphas='1.2,2', metrics='val_acc,val_loss',
+                   display=False):
+    """Plot context-window effects; save each panel to <source_data_path><panel>.csv."""
     pd.set_option('display.max_rows', None)
     pd.set_option('display.max_columns', None)
 
@@ -1109,8 +1138,11 @@ def window_effects(models_root, seq_lens=[128, 256, 512, 1024],
 
     summary_rows = []
     model_types_plotted = []
+    source_data_path = Path(source_data_path)
+    source_data_path.parent.mkdir(parents=True, exist_ok=True)
     for (row_idx, metric), (col_idx, is_op) in product(enumerate(metrics), enumerate(is_ops)):
         ax = axs[row_idx, col_idx]
+        source_data = {'seq_len': pd.Series(seq_lens, index=np.arange(1, len(seq_lens) + 1))}
         row_stats = []
 
         for model_type in model_types_to_plot:
@@ -1186,6 +1218,11 @@ def window_effects(models_root, seq_lens=[128, 256, 512, 1024],
                                     color=color, alpha=0.3, clip_on=False,
                                     edgecolor='none')
 
+                    source_label = f'alpha={alpha:g}' if is_fns else plot_label
+                    source_data[f'{source_label}_mean'] = pd.Series(means, index=xs_plot)
+                    source_data[f'{source_label}_band_lower'] = pd.Series(means - stds, index=xs_plot)
+                    source_data[f'{source_label}_band_upper'] = pd.Series(means + stds, index=xs_plot)
+
                     ax.set_xticks(xs_plot)
                     ax.set_xticklabels(seq_lens)
 
@@ -1213,6 +1250,11 @@ def window_effects(models_root, seq_lens=[128, 256, 512, 1024],
         print(f'is_op = {is_op}, qk_share = {qk_share}')
         print(summary_stats_cur)
         print('\n')
+
+        panel = ascii_lowercase[row_idx * ncols + col_idx]
+        panel_path = f'{source_data_path}{panel}.csv'
+        pd.DataFrame(source_data).to_csv(panel_path, index_label='x')
+        print(f'Source data saved in {panel_path}')
 
     if axs[0, 0].get_legend_handles_labels()[0]:
         axs[0, 0].legend(loc='best', frameon=False, ncols=2)
@@ -1272,12 +1314,13 @@ def window_effects(models_root, seq_lens=[128, 256, 512, 1024],
 
 # for investigatnig the effects of embedding dim and model depth
 """
-python -i plot_results.py hyperparam_effects .droot/L-d-grid-v1mask-v7scaling-v2/
+python plot_results.py hyperparam_effects .droot/L-d-grid-v1mask-v7scaling-v2/
 """
 def hyperparam_effects(models_root, fns_manifold='rd', is_rescale_dist=True,
                        qk_shares=[False, True], selected_alphas='1.2,2',
                        metric='val_acc', selected_dataset='imdb', depths=[1],
-                       is_op=True):
+                       is_op=True, source_data_path='../.source_data/fig3'):
+    """Save each panel's means and plotted standard deviations to prefix + panel + .csv."""
 
     # PROCESSING
     global metric_matrix, counter_matrix, nan_counter_matrix, average_metric_matrix, run_perf_all
@@ -1436,6 +1479,12 @@ def hyperparam_effects(models_root, fns_manifold='rd', is_rescale_dist=True,
     # PLOTTING (Just the two I think are most relevant)
     fig, axs = plt.subplots(1,2,figsize=(5, 2),sharex=True)  # ,sharey=True
     
+    source_data_path = Path(source_data_path)
+    source_data_path.parent.mkdir(parents=True, exist_ok=True)
+    source_data = [
+        {'x': np.arange(1, len(emb_ds) + 1), 'hidden_size': emb_ds}
+        for _ in axs
+    ]
     ax = axs[0]
     ax.set_title(r'$\mathbf{Q} \neq \mathbf{K}$')
 
@@ -1484,6 +1533,9 @@ def hyperparam_effects(models_root, fns_manifold='rd', is_rescale_dist=True,
                         fmt='.', linestyle=linestyle, 
                         label=legend_label, 
                         c=color, alpha=transparency, clip_on=False)
+            source_label = legend_label.replace('$', '').replace(r'\alpha', 'alpha').replace(' ', '')
+            source_data[0][f'{source_label}_mean'] = average_metrics
+            source_data[0][f'{source_label}_std'] = std_metrics
 
     ax = axs[1]
     ax.set_title(r'$\mathbf{Q} = \mathbf{K}$')
@@ -1523,6 +1575,15 @@ def hyperparam_effects(models_root, fns_manifold='rd', is_rescale_dist=True,
             ax.errorbar(X, average_metrics, yerr=std_metrics, 
                         fmt='.', linestyle=linestyle, label=legend_label, 
                         c=color, alpha=transparency, clip_on=False)
+
+            source_label = legend_label.replace('$', '').replace(r'\alpha', 'alpha').replace(' ', '')
+            source_data[1][f'{source_label}_mean'] = average_metrics
+            source_data[1][f'{source_label}_std'] = std_metrics
+
+    for panel_idx, panel_data in enumerate(source_data):
+        panel_path = f'{source_data_path}{ascii_lowercase[panel_idx]}.csv'
+        pd.DataFrame(panel_data).to_csv(panel_path, index=False)
+        print(f'Source data saved in {panel_path}')
 
     for i, ax in enumerate(axs):
         # ax.set_xticks(X)
@@ -1654,6 +1715,7 @@ def dynamic_inference(models_root, n_layer=1,
                 alpha_idx = len(selected_alphas)
             elif is_sink:
                 alpha_idx = len(selected_alphas) + 1
+            print(model_dir)  # delete
             inference = pd.read_csv(njoin(model_dir, fname))
             metrics_dynamic[alpha_idx, 0, list(emb_ds).index(hidden), :, seed] =\
                 inference.loc[:,metric]
@@ -1766,13 +1828,16 @@ def dynamic_inference(models_root, n_layer=1,
 """
 python plot_results.py dynamic_inference_v2 .droot/L-d-grid-v1mask-v7scaling-v2/
 """
-def dynamic_inference_v2(models_root, n_layer=1,
+def dynamic_inference_v2(models_root, is_dist_based=False,
+                         source_data_path='../.source_data/fig4', n_layer=1,
                          fns_type='fns', manifold='rd', is_rescale_dist=True, selected_alphas=[1.2, 2.0],
                          is_op=True, qk_shares=[True,False], metric='test_acc',
-                         batch_size=64, is_dist_based=False):
+                         batch_size=64):
+    """Save each panel's curves and shaded bounds to <source_data_path><panel>.csv."""
 
     global model_dirs, layers, emb_ds, all_model_dirs, other_types, model_dir, fname
-    global metrics_dynamic, layer, emb_d, layer_dirs_dict, layer_dir
+    global metrics_dynamic, layer, emb_d, layer_dirs_dict, layer_dir, N_control_var, inference
+    global controlled_vars
 
     # general setting
     batch_size = int(batch_size)
@@ -1784,6 +1849,8 @@ def dynamic_inference_v2(models_root, n_layer=1,
     fig, axs = plt.subplots(nrows, ncols, figsize=(6,height))
                             #sharex=True,sharey=True
 
+    source_data_path = Path(source_data_path)
+    source_data_path.parent.mkdir(parents=True, exist_ok=True)
     for row, qk_share in enumerate(qk_shares):
 
         print(f'qk_share = {qk_share}')
@@ -1854,6 +1921,7 @@ def dynamic_inference_v2(models_root, n_layer=1,
 
         # number of controlled variables
         inference = pd.read_csv(njoin(model_dirs[0], fname))
+        inference = inference.dropna()
         controlled_vars = inference.loc[:,'controlled_variable']  # either distance based or probability based
         N_control_var = len(controlled_vars)
         ensembles = 5  # figure out how to extract this
@@ -1878,7 +1946,9 @@ def dynamic_inference_v2(models_root, n_layer=1,
                     alpha_idx = len(selected_alphas)
                 elif is_sink:
                     alpha_idx = len(selected_alphas) + 1
+                # print(model_dir)  # DELETE
                 inference = pd.read_csv(njoin(model_dir, fname))
+                inference = inference.dropna()
                 metrics_dynamic[alpha_idx, 0, list(emb_ds).index(hidden), :, seed] =\
                     inference.loc[:,metric]
 
@@ -1886,6 +1956,8 @@ def dynamic_inference_v2(models_root, n_layer=1,
             metrics_dynamic *= 100
 
         
+        source_x = 'distance_threshold' if is_dist_based else 'removal_probability'
+        source_data = [{source_x: controlled_vars.to_numpy()} for _ in range(ncols)]
         for didx, alpha_idx in\
             product(range(len(emb_ds)), range(len(selected_alphas)+len(other_types))):
             is_fns = alpha_idx < len(selected_alphas)
@@ -1908,21 +1980,34 @@ def dynamic_inference_v2(models_root, n_layer=1,
                 
             ax = axs[row,didx]
 
+            if is_dist_based:
+                controlled_var_thresh = 1e-5
+            else:
+                controlled_var_thresh = 0
             if didx == 0 and row == 0:
                 model_label = rf'$\alpha$ = {alpha}' if is_fns else 'DP' if is_dp else 'SINK'
-                ax.plot(controlled_vars, metric_mean,
+                plot_idxs = controlled_vars[controlled_vars >= controlled_var_thresh].index
+                ax.plot(controlled_vars[plot_idxs], metric_mean[plot_idxs],
                                     markersize=MARKERSIZE, label=model_label,
                                     c=color, linestyle=LINESTYLE_DICT[fns_type])  
             else:
-                ax.plot(controlled_vars, metric_mean,
+                plot_idxs = controlled_vars[controlled_vars >= controlled_var_thresh].index
+                ax.plot(controlled_vars[plot_idxs], metric_mean[plot_idxs],
                                     markersize=MARKERSIZE, 
                                     c=color, linestyle=LINESTYLE_DICT[fns_type])  
             # ax.errorbar(controlled_vars, metric_mean, yerr=metric_std, fmt='.',
             #                     c=color, linestyle=LINESTYLE_DICT[fns_type])  
 
             # # error bars
-            ax.fill_between(controlled_vars,  metric_mean - metric_std, metric_mean + metric_std,
-                                        color=color, alpha=0.2, edgecolor='none')                           
+            ax.fill_between(controlled_vars[plot_idxs],  
+                            metric_mean[plot_idxs] - metric_std[plot_idxs], 
+                            metric_mean[plot_idxs] + metric_std[plot_idxs],
+                            color=color, alpha=0.2, edgecolor='none')                           
+
+            source_label = f'alpha={alpha:g}' if is_fns else 'DP' if is_dp else 'SINK'
+            source_data[didx][f'{source_label}_mean'] = metric_mean
+            source_data[didx][f'{source_label}_band_lower'] = metric_mean - metric_std
+            source_data[didx][f'{source_label}_band_upper'] = metric_mean + metric_std
 
             ax.spines['top'].set_visible(False)
             ax.spines['right'].set_visible(False)
@@ -1944,6 +2029,12 @@ def dynamic_inference_v2(models_root, n_layer=1,
                 ax.set_xscale('log')
                 if row == nrows - 1:
                     ax.set_xlabel('Distance')
+
+        for didx, panel_data in enumerate(source_data):
+            panel = ascii_lowercase[row * ncols + didx]
+            panel_path = f'{source_data_path}{panel}.csv'
+            pd.DataFrame(panel_data).to_csv(panel_path, index=False)
+            print(f'Source data saved in {panel_path}')
 
         axs[row,0].set_ylabel('Testing accuracy (%)')
 
@@ -2182,10 +2273,12 @@ def len_inference(models_root, n_layer=6, max_len_adj=1024,
 """
 python plot_results.py fna_alpha_effects .droot/full_models-v1mask-v7scale/
 """
-def fna_alpha_effects(models_root, selected_dataset='imdb',
+def fna_alpha_effects(models_root, selected_dataset='imdb', 
+                      source_data_path='../.source_data/edfig5',
                       fns_manifold='rd', qk_share=False, selected_alphas='none',
                       bandwidth=1, metric='val_acc', is_ops=[False, True],
                       display=False):
+    """Save each panel's means and plotted standard deviations to prefix + panel + .csv."""
     global summary_stats
 
     pd.set_option('display.max_rows', None)
@@ -2283,6 +2376,9 @@ def fna_alpha_effects(models_root, selected_dataset='imdb',
     window_markers = {128: 'o', 256: 's', 512: 'D', 1024: '^'}
     legend_handles = {}
 
+    source_data_path = Path(source_data_path)
+    source_data_path.parent.mkdir(parents=True, exist_ok=True)
+    source_data = [{} for _ in range(ncols)]
     for col_idx, is_op in enumerate(is_ops):
         ax = axs[col_idx]
         model_type = ('op' if is_op else '') + fns_model_type
@@ -2351,6 +2447,9 @@ def fna_alpha_effects(models_root, selected_dataset='imdb',
                         elinewidth=0.8, capsize=2, alpha=0.6, zorder=1)
             scatter = ax.scatter(x, y, marker=marker_shape, c=marker_color,
                                  s=36, edgecolor='white', linewidth=0.5, zorder=2)
+            source_label = f'n={context_window}'
+            source_data[col_idx][f'{source_label}_mean'] = pd.Series(y, index=x)
+            source_data[col_idx][f'{source_label}_std'] = pd.Series(yerr, index=x)
             if context_window not in legend_handles:
                 legend_handles[context_window] = scatter
 
@@ -2363,6 +2462,11 @@ def fna_alpha_effects(models_root, selected_dataset='imdb',
         ax.tick_params(axis='y', labelleft=True)
 
         ax.set_yticks([78,82,86])
+
+    for col_idx, panel_data in enumerate(source_data):
+        panel_path = f'{source_data_path}{ascii_lowercase[col_idx]}.csv'
+        pd.DataFrame(panel_data).to_csv(panel_path, index_label='alpha')
+        print(f'Source data saved in {panel_path}')
 
     # Subfigure labels
     for ii, ax in enumerate(axs.flatten()):

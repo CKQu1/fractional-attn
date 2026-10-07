@@ -37,6 +37,10 @@ def count_trailing_zeros(tensor):
 
 if __name__ == '__main__':
 
+    """
+    This for diffusion maps embeddings for fns type models.
+    """
+
     # Training options
     parser = argparse.ArgumentParser(description='nlp-tutorial/attn_graph_final.py arguments')    
     # parser.add_argument('--train_with_ddp', default=False, type=bool, help='to use DDP or not')
@@ -286,6 +290,7 @@ if __name__ == '__main__':
             np.savez(njoin(model_dir, f'attn_graph_results.npz'), 
                         bdwth=bdwth,
                         X_len=X_len,
+                        g_dist=g_dist.cpu().detach().numpy(),
                         eigvals=eigvals,
                         diffusion_map=eigvecs, 
                         close_xy_idxs=close_xy_idxs,
@@ -299,9 +304,9 @@ if __name__ == '__main__':
                     f.write(f"{word}\n")                
         
     # ----- RESULTS FOR DPFORMER -----
-    elif config['model_name'][-8:] == 'dpformer':
+    elif config['model_name'][-8:] == 'dpformer' or config['model_name'][-10:] == 'sinkformer':
 
-        print('Running dpformer. \n')
+        print('Running' + config['model_name'] + '. \n')
 
         attn_setup, config, run_performance, train_setting =\
             load_model_files(model_dir)

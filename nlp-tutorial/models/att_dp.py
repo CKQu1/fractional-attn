@@ -40,7 +40,8 @@ class ScaledDotProductAttention(nn.Module):
         if self.dist_threshold is not None and not self.training:    
             g_dist = torch.cdist(q, k, p=2)        
             #attn_mask = attn_mask | (g_dist > self.dist_threshold)        
-            attn_mask = attn_mask | (g_dist >= self.dist_threshold)
+            attn_mask = attn_mask | (g_dist >= self.dist_threshold)  # should let strengths weaken, i.e. remove large distances first
+            # attn_mask = attn_mask | (g_dist <= self.dist_threshold)
 
         # probability based
         if self.is_add_eval_mask and not self.training:

@@ -54,7 +54,7 @@ class Experiment:
 
         # Re-group path b/c name might be a nested path
         folder, file_name = os.path.split(os.path.join(self.path, 'scalars', f'{name}.csv'))
-        folder = folder.lower()
+        # folder = folder.lower()
         if not os.path.isdir(folder):
             os.makedirs(folder)
 

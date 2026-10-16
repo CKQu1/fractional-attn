@@ -11,22 +11,46 @@ I used `Python 3.11.13` throughout. For `nlp-tutorial` and `vit-pytorch`, the re
 
 ## nlp-tutorial
 
-The script `batch_exps.py` contains all the experiments ran in the manuscript, i.e. including `exps1`, `exps2`, `exps3`. These experiemtns can be submitted to the cluster through `batch_submit_main.py`. Otherwise, the single jobs could be ran through `main.py`.
+The script `batch_exps.py` contains all the experiments ran in the manuscript, i.e. including `exps1`, `exps2`, `exps3`. These experiments can be submitted to the cluster through `batch_submit_main.py`. Otherwise, the single jobs could be ran through `main.py`.
 
 ### Experiments
 
-1. Training models of 6 layers and 8 attention heads (Euclidean FNA):
+1. Training models of 6 layers and 8 attention heads with Euclidean FNA (main text Fig. 7):
     - `python batch_submit_main.py --exp=exp1`
-2. Training models of single-layers and various embedding dimension:
+    - `python plot_results.py phase_ensembles .droot/full_models-v1mask-v7scale/6L-hidden\=256-max_len\=512-rescaled/`
+2. Training models of single-layers and various embedding dimension (main text Fig. 3):
     - `python batch_submit_main.py --exp=exp2`
-3. Dynamic inference for single-layer models:
-    - `python batch_submit_main.py --exp=exp3`
-4. Spectral gap analysis for single-layer models:
+    - `python plot_results.py hyperparam_effects .droot/L-d-grid-v1mask-v7scaling-v2/`
+3. Dynamic inference for single-layer models (main text Fig. 4):
+    - `python batch_submit_main.py --exp=exp3` 
+    - `python plot_results.py dynamic_inference_v2 .droot/L-d-grid-v1mask-v7scaling-v2/ False`
+4. Spectral gap analysis for single-layer models (main text Fig. 5):
     - `python batch_submit_main.py --exp=exp5`
-5. Attention graph analysis for single-layer models:
+    - `python plot_mechanisms.py` (generates all subfigures of Fig. 5)
+5. Attention graph analysis for single-layer models (main text Fig. 5):
     - `python batch_submit_main.py --exp=exp6`
-6. Training models of 6 layers and 8 attention heads (spherical FNA):
+    - `python plot_mechanisms.py` (generates all subfigures of Fig. 5, same as point 4 above)
+6. Training models of 6 layers and 8 attention heads with spherical FNA (SI Fig. 2):
     - `python batch_submit_main.py --exp=exp7`
+7. FNA token interactions (main text Fig. 2):
+    - `python schematic/schematic_manifolds.py`
+8. Diffusion maps of FNA (main text Fig. 6):
+    - `python plot_dm.py`
+9. Data-dependent locality (Extended Data Fig. 1):
+    - `python plot_results.py dynamic_inference_v2 .droot/L-d-grid-v1mask-v7scaling-v2/ True ../.source_data/edfig1`
+10. Training models of 6 layers and 8 attention heads on AG News (Extended Data Fig. 2):
+    - `python batch_submit_main.py --exp=exp1` (with settings for AG News)
+    - `python plot_results.py phase_ensembles .droot/full_models-v1mask-v7scale/6L-hidden\=256-max_len\=256-rescaled/ ag_news ../.source_data/edfig2`
+11. Effect of train dataset size (Extended Data Fig. 3):
+    - `python batch_submit_main.py --exp=exp3` 
+    - `python plot_results.py trainset_pct_effects_v2 .droot`
+12. Training models of 6 layers and 8 attention heads with different context windows (Extended Data Fig. 4):
+    - `python batch_submit_main.py --exp=exp1` (trained on IMDb, with different context window sizes)
+    - `python plot_results.py window_effects .droot/full_models-v1mask-v7scale/`
+13. Trainin FNA models with different alpha values (Extended Data Fig. 5):
+    - `python batch_submit_main.py --exp=exp1` (trained on IMDb, with different values of alpha and context windows)
+    - `python plot_results.py window_effects .droot/full_models-v1mask-v7scale/`
+
 
 ## vit-pytorch
 
@@ -35,8 +59,9 @@ A single instance of training can be realized through:
 
 ### Experiments
 
-Training models in the paper:
-`python batch_submit_main.py`
+1. Training on CIFAR10 (main text Fig. 8):
+    - `python batch_submit_vit.py --is_qsub`
+    - `plot_results.py phase_ensembles .droot/full_models-final/4L-ps=4-preln/`
 
 ## translation
 
@@ -57,7 +82,9 @@ Double-check `modules/attention.py`
 
 ### Experiments
 
-Run `python batch_submit_main.py`
+1. Training on EN-DE Translational Task (Extended Data Fig. 6): 
+    - `python batch_submit_main.py --is_qsub`
+    - `python plot_results.py phase_ensembles .droot/full_model-warmup_cosine-lr9-sharp/l=4-h=8-d=64-ep=40/`
 
 ## Code References
 

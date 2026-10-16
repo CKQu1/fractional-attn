@@ -25,11 +25,16 @@ class Dataset:
                  eos_token='<eos>',
                  unk_token='<unk>',
                  pad_token='<pad>',
-                 columns=('source', 'target'),
+                 columns=('source', 'target', 'target_text'),
                  batch_size=64):
         self.src_lang, self.trg_lang = language_pair
         assert self.src_lang in Dataset.pipelines, 'Unrecognized source language'
         assert self.trg_lang in Dataset.pipelines, 'Unrecognized target language'
+
+        # Keep callers that used the original two-column interface working while
+        # retaining the raw reference required for corpus-level BLEU.
+        if tuple(columns) == ('source', 'target'):
+            columns = ('source', 'target', 'target_text')
 
         self.sos_token = sos_token
         self.eos_token = eos_token
@@ -80,19 +85,20 @@ class Dataset:
         src, trg = pair
         src_tokens = [self.sos_token] + [x.text.lower() for x in Dataset.pipelines[self.src_lang].tokenizer(src)] + [self.eos_token]
         trg_tokens = [self.sos_token] + [y.text.lower() for y in Dataset.pipelines[self.trg_lang].tokenizer(trg)] + [self.eos_token]
-        return src_tokens, trg_tokens
+        return src_tokens, trg_tokens, trg.strip()
 
     def encode(self, pair):
         """Replaces tokens with their corresponding vocabulary indices"""
 
-        src, trg = pair
-        return self.src_vocab.lookup_indices(src), self.trg_vocab.lookup_indices(trg)
+        src, trg, target_text = pair
+        return (
+            self.src_vocab.lookup_indices(src),
+            self.trg_vocab.lookup_indices(trg),
+            target_text
+        )
 
     def pad(self, batch):
-        """
-        Pads all sequences in the batch to have same length. Pads using the EOS token because if <eos> is reached, model
-        should insist sequence has finished and output <eos> even if prompted further.
-        """
+        """Pad source and target ID sequences to the longest item in the batch."""
 
         # Separate source and target sequences again
         batch['source'] = to_tensor(batch['source'], padding_value=self.src_vocab[self.pad_token])

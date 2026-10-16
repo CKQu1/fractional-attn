@@ -32,22 +32,20 @@ The script `batch_exps.py` contains all the experiments ran in the manuscript, i
     - `python plot_mechanisms.py` (generates all subfigures of Fig. 5, same as point 4 above)
 6. Training models of 6 layers and 8 attention heads with spherical FNA (SI Fig. 2):
     - `python batch_submit_main.py --exp=exp7`
-7. FNA token interactions (main text Fig. 2):
-    - `python schematic/schematic_manifolds.py`
-8. Diffusion maps of FNA (main text Fig. 6):
+7. Diffusion maps of FNA (main text Fig. 6):
     - `python plot_dm.py`
-9. Data-dependent locality (Extended Data Fig. 1):
+8. Data-dependent locality (Extended Data Fig. 1):
     - `python plot_results.py dynamic_inference_v2 .droot/L-d-grid-v1mask-v7scaling-v2/ True ../.source_data/edfig1`
-10. Training models of 6 layers and 8 attention heads on AG News (Extended Data Fig. 2):
+9. Training models of 6 layers and 8 attention heads on AG News (Extended Data Fig. 2):
     - `python batch_submit_main.py --exp=exp1` (with settings for AG News)
     - `python plot_results.py phase_ensembles .droot/full_models-v1mask-v7scale/6L-hidden\=256-max_len\=256-rescaled/ ag_news ../.source_data/edfig2`
-11. Effect of train dataset size (Extended Data Fig. 3):
+10. Effect of train dataset size (Extended Data Fig. 3):
     - `python batch_submit_main.py --exp=exp3` 
     - `python plot_results.py trainset_pct_effects_v2 .droot`
-12. Training models of 6 layers and 8 attention heads with different context windows (Extended Data Fig. 4):
+11. Training models of 6 layers and 8 attention heads with different context windows (Extended Data Fig. 4):
     - `python batch_submit_main.py --exp=exp1` (trained on IMDb, with different context window sizes)
     - `python plot_results.py window_effects .droot/full_models-v1mask-v7scale/`
-13. Trainin FNA models with different alpha values (Extended Data Fig. 5):
+12. Trainin FNA models with different alpha values (Extended Data Fig. 5):
     - `python batch_submit_main.py --exp=exp1` (trained on IMDb, with different values of alpha and context windows)
     - `python plot_results.py window_effects .droot/full_models-v1mask-v7scale/`
 
@@ -85,6 +83,15 @@ Double-check `modules/attention.py`
 1. Training on EN-DE Translational Task (Extended Data Fig. 6): 
     - `python batch_submit_main.py --is_qsub`
     - `python plot_results.py phase_ensembles .droot/full_model-warmup_cosine-lr9-sharp/l=4-h=8-d=64-ep=40/`
+
+## schematics
+
+1. From fractional diffusion to attention (parts of main text Fig. 1)
+    - `juypter notebook _schematics/schematic_diffusion.ipynb`
+2. FNA token interactions (main text Fig. 2):
+    - `python _schematics/schematic_manifolds.py` 
+3. PCA of token embeddings (SI Fig. 1):
+    - `juypter notebook _schematics/schematic_models.ipynb`
 
 ## Code References
 
